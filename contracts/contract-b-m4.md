@@ -158,6 +158,17 @@ URL path, or routing input changes.** §4's test answers neither major nor minor
 stays at **`contract-b/4.1`**. Contract A takes no set. Affected body text carries an
 `(amended — §28, B43)` marker, and **§28 wins over the body and over §14 to §27 wherever
 they disagree.**
+**Amended:** 2026-08-23, amendment set **B44** (**§29**), from the live Species-tab genealogy
+defect. The archive used one mutable parent edge for each normalized species name. The game can
+reuse a name, so later evidence can replace an earlier edge and create a cycle in the derived
+tree. The archive now keeps bounded, immutable lineage instances. One normalized name can occur
+in separate recorded parent paths. The raw record, the live census, and species resolution in the
+importing mod do not change. Roll-up format 3 persists the new fold and requires one ordered raw
+rebuild from format 2. **No Contract B message, wire field, enum, code, close code, schema, URL
+path, routing input, or custody rule changes.** §4's test answers neither major nor minor. The identifier stays
+at **`contract-b/4.1`**. Contract A takes no set. Affected body text carries an
+`(amended — §29, B44)` marker, and **§29 wins over the body and over §14 to §28 wherever they
+disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -3019,6 +3030,7 @@ name is used for anything.
 |---|---|
 | Recorded verbatim | Both names, and the parent pair when present, stored byte for byte as they arrived. The archive **MUST NOT** trim, case-fold, normalize or re-case a name; the destination mod's match is a byte comparison (`contract-a.md` §5.7), and a ledger that tidied its copy would stop describing what actually happened. |
 | A ledger fact, not a resolution | The block says what the **origin world** called this migrant at the moment it left. It is not a claim about the destination, and the archive **MUST NOT** resolve a name against any world's registry, merge two records because their names match, or rewrite an earlier record when a later envelope disagrees. Species resolution happens in exactly one place in this system, and it is the importing mod. |
+| A name is not a permanent lineage identity (amended — §29, B44) | The raw rule above stands. For the **derived genealogy only**, the archive groups ordered evidence into immutable lineage instances. One instance is one normalized name on one recorded parent path. Reusing a name on an incompatible path creates a second instance. It **MUST NOT** replace the earlier edge. This grouping does not merge, rewrite, or resolve either raw record. |
 | Absent is absent | A migration with no block records **no species** — never `"unknown"` as a value, never an empty string standing in for one. That is §10.1's unknown rule applied to a new field. |
 | Dedup unchanged | A `MIGRATION_PAYLOAD` still deduplicates on `migrationId` alone (§5.1). The block is part of the record that key names, never part of the key. |
 | The win | Before this the ledger could name only hashes, so "which species crossed, and when" was a question the archive held the data to answer and not the labels. It now travels on every hop that carries a block. |
@@ -3083,6 +3095,7 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | Unknown is a value | A field absent from `stats`, a slot with no `stats` at all, a `statsAsOfMs` older than `statsStaleMs` (30 000) — every one of them renders as **unknown**, never as zero and never as the last value seen without its age. A slot that reports nothing is unknown, not empty. **An honest gap beats a confident zero.** |
 | The census is a stat, and every rule above applies to it (added — §16, B12) | `stats.species` (§6.3.1) is what the page's species view is built from. Absent renders as **unknown species** — never as "no species", never as an empty list, never as zero. A present `[]` is the different, stronger fact and the page may say so: a reporting world with nothing alive in it. A `truncated: true` census names the 32 most abundant species and the page **MUST** say the rest is unreported rather than presenting it as the whole list. And it ages like everything else in the block: past `statsStaleMs` it is history, not state. |
 | Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
+| The genealogy keeps name reuse visible (amended — §29, B44) | The census remains the only abundance source. The genealogy can bind one census row to a recorded lineage instance with the ordered world evidence in §29. If worlds bind the same live name to different instances, the page **MUST** show separate rows with the same display name. It **MUST** label the split. If the record cannot select one instance, the page **MUST** label the identity unresolved. It **MUST NOT** call that state "no recorded ancestry". |
 | A world's speed and its pacing are settings, and unknown beats the default (added — §18, B17) | The page may show each world's `timeScale` and the `inboundRatePerSimMinute` / `pacedDepth` pair (§6.3.1), because a depth is only readable against the cap it is queued behind and a simulated-minute cap is only readable against the speed that spends it. Every rule above binds them, and **the unknown rule binds them hardest**: a peer that publishes no cap renders as **unknown**, never as the shipped default. `timeScale: 0` is the opposite case and the page **MUST** keep the two apart — a world standing still is a reading, and a world that has not said is a gap. |
 | A world's settings are what it was told to do, they are read-only, and unknown beats the default (added — §19, B19) | The page may show each world's `modVersion`, `contractAVersion`, `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` (§6.3.1). They are the **cause** behind numbers the page already shows, and each has a reading the page **MUST NOT** flatten into a gap: `saveMinutes: 0` is a save timer that is **off** and is the explanation for an absent `lastSave`; a present `migrationExclude: []` is a policy that is **off**, and a populated one is why a world can be full of a species that never appears on a lane (§17, B14 names that shape); `worldWrapping: false` is a world not containing its own organisms. **Absent is unknown in every case, and the page MUST NOT substitute a shipped default** — the one it would reach for, `saveMinutes: 10`, would claim a world is being saved when its timer may be off, which is the most expensive wrong number this page could print. They are also **read-only**: the page renders them and offers no way to change one (`contract-a.md` §19, A43). |
 | **Every string on this page is attacker-chosen, and escaping it is a testable obligation** (added — §22, B30) | The page and `ringstat` **MUST** escape every peer-supplied string for the surface they render it into — HTML, an HTML attribute, a URL, JSON embedded in a script, and a terminal's escape sequences — and **MUST NOT** render one as markup under any circumstance. The strings are named so nobody has to infer the list: `species[].genericName` and `.specificName` (up to 64 UTF-8 bytes each, `speciesCensusMax` of them per peer), `migrationExclude[]`, `modVersion`, `contractAVersion`, `lastRefusal`, `lastSave.name`, and the two the contract never counted because they predate the concern — **`peerId`**, and the world name a player chose. **A rule written in a contract is not code**, so this one ships with a **test in CI and not an inspection by eye**: a peer reports a species named with markup, and the rendered page and `ringstat`'s terminal output are both asserted against it. That test is WP7's, and it is the only form in which this row is true of a running system. |
@@ -5628,7 +5641,7 @@ of the run is measured in tens of minutes rather than in the `90 s` it costs tod
 
 | Rule | Statement |
 |---|---|
-| **The record is the aggregate, and it is durable** | An implementation that windows its ledger **MUST** persist, and **MUST** keep forever, every fold its surfaces and its evidence read: per-species crossing counts with first and last sighting, distinct-genome counts, parent-species edges and the earliest record that ever carried one, per-lane cumulative counts, per-source-peer record counts, the total record count and the count of lines a replay could not parse, the brain-coverage denominator for each bucket, and the eviction and gap counters. **A fold that is not on this list is not kept**, which is why the list is normative and not illustrative: an aggregate nobody wrote down before a segment left the host cannot be computed for that period afterwards. |
+| **The record is the aggregate, and it is durable** | An implementation that windows its ledger **MUST** persist every fold that its surfaces and evidence read. It **MUST** keep these folds forever. The species folds include crossing counts, sighting times, distinct-genome counts, lineage instances, and the earliest parent record. The other folds include lane counts, peer counts, record totals, unreadable-line totals, brain coverage, eviction counters, and gap counters. This list is normative. If a fold is absent before segment retirement, the archive cannot compute that answer for the period. The lineage-instance meaning is amended by §29, B44. |
 | **A missing or unreadable roll-up is a loss and says so** | It **MUST NOT** be treated as a run of zeroes. The archive rebuilds what it can from the segments it still holds, publishes the earliest point its knowledge now begins at, and says out loud what it lost — the same shape the brain sidecar's loss rule and the genealogy's ancestry floor already use (§10.1, *unknown is a value*). **A zero would be a claim about the world made out of a failure of the record.** |
 | **The roll-up is written incrementally** | A full rewrite on a timer costs the size of the whole state every time it runs. The file **MUST** append what changed and **MUST** be rewritten only when it exceeds a fixed multiple of its live content. This is the rule the brain sidecar already states, and it is here for the same reason: one persistence discipline in the package, not two. |
 | **The aggregates never contradict the segments they still hold** | Loading the roll-up and replaying the records behind its cut **MUST** produce the same state as replaying every record it covers. This is a testable property, it is the one a validation phase exists to prove, and it is the only defence against a fold site that stopped marking itself changed. |
@@ -5810,3 +5823,50 @@ immediate causal replies.
 
 Every reviewer rejects a source-handler wait, an asynchronous decoded migration, or a later
 queue reroute. Each is a different design.
+
+## 29. Species names are portable labels, not lineage identities (`contract-b/4.1`, 2026-08-23)
+
+The live Species tab exposed a derived-record defect. Its genealogy used the A34-normalized
+species name as a permanent node identifier. That assumption is false. The game can reuse a name
+for a later species. The archive then replaced the earlier parent edge with the later claim.
+
+Read-only analysis of the current fold found 99 names with more than one parent claim. It found
+cycles of 4 and 50 names. In one living sample, 24 of 26 ancestry walks reached a cycle. The view
+guard cut those walks. Related living species then appeared as separate roots.
+
+**B44** changes only the archive's derived genealogy and its durable fold. It does not change the
+raw record or any wire.
+
+### B44 — The genealogy uses bounded, immutable lineage instances (§5.1, §10, §10.1, §26 B39)
+
+| Rule | Statement |
+|---|---|
+| **The portable name is not the node identity** | A lineage instance is one A34-normalized species name on one recorded parent path. The first instance can use the normalized name as its stable key. A later instance has a deterministic derived key. |
+| **Ordered world evidence selects an instance** | A crossing binds its species instance to its source and destination slots at `recordedAt`. A child claim first uses the parent instance bound to the source slot. If none exists, it can use the only recorded instance of that parent name. Equal timestamps use the immutable instance key as a deterministic second ordering key. |
+| **Compatible evidence reuses an instance** | A crossing reuses an instance only when the normalized name and the parent instance agree. An incompatible parent path creates another instance. It **MUST NOT** change the earlier instance. |
+| **Parent-only evidence stays explicit** | A child can create a parent placeholder when no crossing of that parent exists. A later crossing can establish the placeholder's parent path. If the promotion closes a cycle, the archive creates a separate later instance. It does not attach the unsafe edge. |
+| **Unknown is still a value** | A self-parent, an unusable parent name, a capacity refusal, or evidence that cannot select one live instance stays unresolved. The surface **MUST** label it. It **MUST NOT** report that state as no parent evidence. |
+| **The state is bounded** | The archive keeps at most `131,072` lineage instances. It publishes `lineageOverflow` when it refuses another. It also publishes `lineageInstances`, `splitNames`, `unresolved`, `cycleGuard`, `walkCapped`, and `nodesCapped`. Zero overflow and zero guard hits are deployment gates. `splitNames` is diagnostic and is not a failure by itself. |
+| **The two species aggregates remain separate** | `/api/species` keeps its normalized-name totals and newest parent annotation. The genealogy uses lineage instances. The live census remains the only source for abundance, population, eggs, and worlds. A split lineage row **MUST NOT** claim a name-level genome count or population trend as its own. |
+| **Suppression uses the portable name** | A deny-list decision uses the normalized `nameKey`. Suppression also replaces that field on the served node. A derived instance key cannot bypass the deny list or expose the suppressed name. |
+| **Roll-up format 3 is required** | Format 3 persists every lineage instance and its per-world binding times. Format 2 has only the mutable name aggregate. A format-3 archive **MUST** refuse to start while a format-2 sidecar remains in place. The recorded rebuild operation **MUST** prove that the raw record is complete. It then **MUST** preserve and move the old sidecar before the full replay. An ordinary tail replay cannot reconstruct retired order. |
+
+**What this costs.** One displayed name can now have more than one living row. That is the record's
+answer when separate worlds carry separate occurrences. A parent-only placeholder can also remain
+unresolved until later evidence establishes its path. Both costs are visible and are safer than a
+false connection.
+
+**What this does not do.** It does not resolve a name against a game registry. It does not infer a
+parent from a genome. It does not rewrite, deduplicate, or merge raw migration records. Species
+resolution remains inside the importing mod. The flat species totals remain grouped by normalized
+name, and the census remains the only abundance source.
+
+**Version.** No Contract B message, wire field, enum, code, close code, schema, URL path, routing
+input, or custody rule changes. A peer cannot observe the fold. §4 answers neither major nor minor.
+The identifier stays at **`contract-b/4.1`**, and `/contract-b/v4` does not move. Contract A takes
+no set and no version change.
+
+**Enforced by the archive:** ordered binding, immutable edges, cycle refusal, bounds, durability,
+and honest fields.
+
+**Enforced by the operator:** the format-3 rebuild and the zero-overflow, zero-guard result.

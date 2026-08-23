@@ -132,19 +132,15 @@ type speciesAgg struct {
 	// under the A34 comparison key. THE RAW FORM IS THE LABEL AND THE KEY IS THE
 	// EDGE, which is rule 2 applied to one more field.
 	//
-	// Two readers use these and they use them differently. The flat index
-	// SHOWS parent and resolves nothing (contract-a.md §16, A31: the registry a
-	// name resolves against is inside a game process). The genealogy of tree.go
-	// treats parentKey as ONE EDGE OF A GRAPH — still no resolution, because an
-	// edge between two names this archive was told about is not a claim about
-	// any world's registry; it is a claim about what the record says, which is
-	// the only thing this archive ever claims.
+	// The flat index shows this value and resolves nothing (contract-a.md §16,
+	// A31: the registry a name resolves against is inside a game process). The
+	// genealogy does not use this mutable field. speciesLineageLedger keeps its
+	// separate name-and-parent-path instances.
 	//
 	// LATEST WRITER WINS, on the archive's own clock. A species has one parent
 	// species in the game's model (Species.parentSpecies is a single reference),
-	// so a second answer is a correction and not a second edge — and taking the
-	// newest is what lets a world that re-derived its own tree be believed
-	// instead of argued with.
+	// so the flat annotation keeps the newest answer. This rule does not merge or
+	// rewrite the immutable edges in the genealogy.
 	parent     string
 	parentKey  string
 	parentAtMs int64
@@ -168,6 +164,9 @@ type speciesAgg struct {
 // speciesLedger is the whole aggregate.
 type speciesLedger struct {
 	byKey map[string]*speciesAgg
+	// lineage is the instance graph behind the family view. byKey remains the
+	// normalized-name aggregate for the flat index and its all-time totals.
+	lineage *speciesLineageLedger
 	// max is speciesAggMax in every archive. It lives on the ledger so a unit
 	// test can exercise saturation with a small private aggregate instead of
 	// allocating and persisting 65,536 entries. It is not configuration and is
@@ -202,7 +201,8 @@ type speciesLedger struct {
 }
 
 func newSpeciesLedger() *speciesLedger {
-	return &speciesLedger{byKey: map[string]*speciesAgg{}, max: speciesAggMax}
+	return &speciesLedger{byKey: map[string]*speciesAgg{}, max: speciesAggMax,
+		lineage: newSpeciesLineageLedger()}
 }
 
 // observeSpeciesLocked folds one recorded migration into the aggregate. The
@@ -315,6 +315,15 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 		// Keep the NEWEST: a panel showing what a species has been doing lately
 		// is worthless if the entries it drops are the recent ones.
 		e.recent = append(e.recent[:0], e.recent[n-speciesRecentMax:]...)
+	}
+	lineageOverflow := a.species.lineage.overflow
+	for _, inst := range a.species.lineage.observe(rec, key) {
+		if inst != nil {
+			a.rollupDirty.lineages[inst.id] = true
+		}
+	}
+	if a.species.lineage.overflow != lineageOverflow {
+		a.rollupDirty.ledger = true
 	}
 }
 

@@ -63,6 +63,25 @@ the cloud-sidecar transaction. The relay correction remains live while the inves
 Hosted cloud worlds remain on their prior runtime. The current participant release does not include
 the sidecar change.
 
+### Species genealogy repair
+
+The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
+`25,400,734` records in `406.39 s` and restored the later species observations. The rebuild
+reduced the living rows with no parent evidence from 14 to one excluded seed species.
+
+A second defect remained in the genealogy view. The archive used the normalized species name as
+the identity of a family-tree node. The game can reuse a name for a later species. A later parent
+claim then replaced the earlier edge for that name. Read-only analysis found 99 names with more
+than one parent claim. It also found name cycles of 4 and 50 nodes. In a current sample, 24 of 26
+living ancestry walks reached one of those cycles. The tree guard cut those walks, so related
+living species appeared as separate roots.
+
+The source repair keeps an immutable lineage instance for each recorded name and parent path. A
+reused name creates another instance instead of replacing an earlier edge. The API and page show
+reused names, unresolved identities, and capacity or cycle guard hits separately. Roll-up format
+3 persists this graph. An archive with format 2 must rebuild the fold from the ordered raw record.
+The production rollout and its live verification are pending.
+
 ## Hosted service
 
 This section states the terms the hosted map operates under. It is not a health report.
@@ -105,7 +124,7 @@ request.
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release, and names which release that is. Neither the links nor the number carry a compiled-in version — the links address `/releases/latest` and the number is resolved from GitHub hourly in the background — so a release reaches the homepage with no deployment, and the page drops the number rather than guess if that lookup fails. A three-step Windows walkthrough sits under those links, with one line for Linux |
-| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The current source makes the Species tab expand vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. |
+| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The current source makes the Species tab expand vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The pending genealogy repair separates reused names into immutable lineage instances and labels unresolved evidence. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 

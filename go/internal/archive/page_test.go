@@ -1291,15 +1291,23 @@ func TestTheSpeciesViewStatesItsOwnLimit(t *testing.T) {
 			t.Fatalf("the page never states the derivation's limit: %q missing", want)
 		}
 	}
-	// THE TWO REASONS A LEAF STANDS ALONE ARE NEVER GIVEN THE SAME LABEL.
-	for _, want := range []string{`"NO LIVING RELATIVE"`, `"NO RECORDED ANCESTRY"`} {
+	// THE THREE REASONS A LEAF STANDS ALONE ARE NEVER GIVEN THE SAME LABEL.
+	for _, want := range []string{`"NO LIVING RELATIVE"`, `"NO RECORDED ANCESTRY"`,
+		`"ANCESTRY UNRESOLVED"`} {
 		if !strings.Contains(region, want) {
-			t.Fatalf("the tree conflates the two reasons a species stands alone: %q missing",
+			t.Fatalf("the tree conflates the reasons a species stands alone: %q missing",
 				want)
 		}
 	}
 	if !strings.Contains(region, "with no ancestry recorded, ") {
-		t.Fatal("the counts line does not split the two reasons apart")
+		t.Fatal("the counts line does not split the isolation reasons apart")
+	}
+	for _, want := range []string{"unresolved lineage identity",
+		"REUSED NAME · LINEAGE SEPARATED", "lineage instance insertion(s) over capacity",
+		"LFTREND[n.nameKey || n.key]", "cannot divide those aggregates"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the repaired lineage view does not explain %q", want)
+		}
 	}
 	// An ancestor is never drawn as a resident, which is §10.1's rule on the node
 	// type most likely to be misread as one.
