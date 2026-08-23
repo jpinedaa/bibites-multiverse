@@ -110,6 +110,20 @@ type Config struct {
 	// thread is already drowning and the stall never ends. It changes WHEN a
 	// delivery happens, never WHETHER (§7.5).
 	HeartbeatDeliveryGrace time.Duration
+	// Population admission is evaluated before inbound custody. fixed enforces
+	// InboundPopulationLimit; adaptive learns a limit for the target achieved
+	// speed; adaptive-shadow learns and reports the same value without refusing;
+	// off disables this gate. The paced journal ceiling remains independent.
+	InboundAdmissionMode        string
+	InboundPopulationLimit      int
+	InboundTargetTimeScale      float64
+	InboundPopulationMin        int
+	InboundPopulationMax        int
+	InboundPopulationHysteresis int
+	AdmissionSafetyMargin       float64
+	AdmissionMinSamples         int
+	AdmissionSampleInterval     time.Duration
+	AdmissionSampleWindow       time.Duration
 
 	// Contract B tunables (contract-b-m4.md §12).
 	RelayBackoffMin time.Duration
@@ -166,32 +180,41 @@ const (
 // DefaultConfig returns the contract defaults.
 func DefaultConfig() Config {
 	return Config{
-		Listen:                  fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort),
-		RelayURL:                fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath),
-		DataDir:                 "multiverse-data",
-		Clock:                   time.Now,
-		HeartbeatTimeout:        contracta.HeartbeatTimeout,
-		WSPingInterval:          contracta.WSPingInterval,
-		WSPongTimeout:           contracta.WSPongTimeout,
-		MigrateInAckTimeout:     contracta.MigrateInAckTimeout,
-		ExportRetention:         contracta.ExportRetention,
-		InboundQueueMax:         contracta.InboundQueueMax,
-		InboundRatePerSimMinute: contracta.InboundRatePerSimMinute,
-		InboundRateBurst:        contracta.InboundRateBurst,
-		PacingIdleGrace:         contracta.PacingIdleGrace,
-		HeartbeatDeliveryGrace:  defaultHeartbeatDeliveryGrace,
-		RelayBackoffMin:         contractb.RelayBackoffMin,
-		RelayBackoffMax:         contractb.RelayBackoffMax,
-		ForwardRetry:            contractb.ForwardRetry,
-		BounceTimeout:           contractb.BounceTimeout,
-		ForwardTimeout:          contractb.ForwardTimeout,
-		MaxReroutes:             contractb.MaxReroutes,
-		StatsInterval:           contractb.StatsInterval,
-		GenomeRequestsPerMinute: contractb.GenomeRequestsPerMinute,
-		GenomeCacheRetention:    contractb.GenomeCacheRetention,
-		GenomeCacheMaxBytes:     contractb.GenomeCacheMaxBytes,
-		TickInterval:            250 * time.Millisecond,
-		JournalCompactInterval:  15 * time.Minute,
+		Listen:                      fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort),
+		RelayURL:                    fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath),
+		DataDir:                     "multiverse-data",
+		Clock:                       time.Now,
+		HeartbeatTimeout:            contracta.HeartbeatTimeout,
+		WSPingInterval:              contracta.WSPingInterval,
+		WSPongTimeout:               contracta.WSPongTimeout,
+		MigrateInAckTimeout:         contracta.MigrateInAckTimeout,
+		ExportRetention:             contracta.ExportRetention,
+		InboundQueueMax:             contracta.InboundQueueMax,
+		InboundRatePerSimMinute:     contracta.InboundRatePerSimMinute,
+		InboundRateBurst:            contracta.InboundRateBurst,
+		PacingIdleGrace:             contracta.PacingIdleGrace,
+		HeartbeatDeliveryGrace:      defaultHeartbeatDeliveryGrace,
+		InboundAdmissionMode:        AdmissionAdaptiveShadow,
+		InboundTargetTimeScale:      defaultAdmissionTarget,
+		InboundPopulationMin:        defaultAdmissionMin,
+		InboundPopulationMax:        defaultAdmissionMax,
+		InboundPopulationHysteresis: defaultAdmissionHysteresis,
+		AdmissionSafetyMargin:       defaultAdmissionSafetyMargin,
+		AdmissionMinSamples:         defaultAdmissionMinSamples,
+		AdmissionSampleInterval:     defaultAdmissionSampleEvery,
+		AdmissionSampleWindow:       defaultAdmissionWindow,
+		RelayBackoffMin:             contractb.RelayBackoffMin,
+		RelayBackoffMax:             contractb.RelayBackoffMax,
+		ForwardRetry:                contractb.ForwardRetry,
+		BounceTimeout:               contractb.BounceTimeout,
+		ForwardTimeout:              contractb.ForwardTimeout,
+		MaxReroutes:                 contractb.MaxReroutes,
+		StatsInterval:               contractb.StatsInterval,
+		GenomeRequestsPerMinute:     contractb.GenomeRequestsPerMinute,
+		GenomeCacheRetention:        contractb.GenomeCacheRetention,
+		GenomeCacheMaxBytes:         contractb.GenomeCacheMaxBytes,
+		TickInterval:                250 * time.Millisecond,
+		JournalCompactInterval:      15 * time.Minute,
 	}
 }
 
@@ -253,6 +276,33 @@ func (c *Config) applyDefaults() {
 	}
 	if c.HeartbeatDeliveryGrace <= 0 {
 		c.HeartbeatDeliveryGrace = d.HeartbeatDeliveryGrace
+	}
+	if c.InboundAdmissionMode == "" {
+		c.InboundAdmissionMode = d.InboundAdmissionMode
+	}
+	if c.InboundTargetTimeScale <= 0 {
+		c.InboundTargetTimeScale = d.InboundTargetTimeScale
+	}
+	if c.InboundPopulationMin <= 0 {
+		c.InboundPopulationMin = d.InboundPopulationMin
+	}
+	if c.InboundPopulationMax <= 0 {
+		c.InboundPopulationMax = d.InboundPopulationMax
+	}
+	if c.InboundPopulationHysteresis <= 0 {
+		c.InboundPopulationHysteresis = d.InboundPopulationHysteresis
+	}
+	if c.AdmissionSafetyMargin <= 0 {
+		c.AdmissionSafetyMargin = d.AdmissionSafetyMargin
+	}
+	if c.AdmissionMinSamples <= 0 {
+		c.AdmissionMinSamples = d.AdmissionMinSamples
+	}
+	if c.AdmissionSampleInterval <= 0 {
+		c.AdmissionSampleInterval = d.AdmissionSampleInterval
+	}
+	if c.AdmissionSampleWindow <= 0 {
+		c.AdmissionSampleWindow = d.AdmissionSampleWindow
 	}
 	if c.RelayBackoffMin <= 0 {
 		c.RelayBackoffMin = d.RelayBackoffMin

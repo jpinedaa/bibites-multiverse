@@ -534,6 +534,19 @@ type PeerStats struct {
 	// default, which has moved three times.
 	InboundRatePerSimMinute *float64 `json:"inboundRatePerSimMinute,omitempty"`
 	InboundRateBurst        *float64 `json:"inboundRateBurst,omitempty"`
+	// Population admission is the receiver's pre-custody gate. Shadow mode
+	// publishes the learned limit and the decision it would make while
+	// AdmissionEnforcing remains false.
+	AdmissionMode            string   `json:"admissionMode,omitempty"`
+	AdmissionTargetTimeScale *float64 `json:"admissionTargetTimeScale,omitempty"`
+	AdmissionPopulationLimit *int     `json:"admissionPopulationLimit,omitempty"`
+	AdmissionEstimatedLimit  *int     `json:"admissionEstimatedLimit,omitempty"`
+	AdmissionCommitted       *int     `json:"admissionCommitted,omitempty"`
+	AdmissionClosed          *bool    `json:"admissionClosed,omitempty"`
+	AdmissionEnforcing       *bool    `json:"admissionEnforcing,omitempty"`
+	AdmissionSampleCount     *int     `json:"admissionSampleCount,omitempty"`
+	AdmissionRejectedTotal   *int     `json:"admissionRejectedTotal,omitempty"`
+	TargetTimeScale          *float64 `json:"targetTimeScale,omitempty"`
 	// Species is the world's active species census, copied out of the last
 	// HEARTBEAT the sidecar received and NEVER AUTHORED HERE (§16, B11). A
 	// sidecar MUST NOT synthesize one, re-sort one, merge two entries, fill a
@@ -619,6 +632,10 @@ var knownStatKeys = []string{
 	"population", "eggCount", "custodyDepth", "pacedDepth",
 	"lostForwardTotal", "simulatedTime", "timeScale",
 	"inboundRatePerSimMinute", "inboundRateBurst",
+	"admissionMode", "admissionTargetTimeScale", "admissionPopulationLimit",
+	"admissionEstimatedLimit", "admissionCommitted", "admissionClosed",
+	"admissionEnforcing", "admissionSampleCount", "admissionRejectedTotal",
+	"targetTimeScale",
 	"lastSave", "species", "truncated",
 	// §19, B18.
 	"modVersion", "contractAVersion", "migrationExclude",

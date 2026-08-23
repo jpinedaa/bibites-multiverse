@@ -2034,6 +2034,14 @@ function cellTitle(v){
              : "; the delivered rate is not measured yet")
       + "\narrivals: " + paceDepthText(v) + " queued, cap " + paceRateText(v)
       + " per simulated minute";
+    if (v.admissionMode){
+      s += "\npopulation admission: " + v.admissionMode
+        + (v.admissionPopulationLimit == null ? ", learning"
+          : ", limit " + v.admissionPopulationLimit + ", committed "
+            + (v.admissionCommitted == null ? "unknown" : v.admissionCommitted))
+        + (v.admissionEnforcing ? (v.admissionClosed ? ", CLOSED" : ", enforcing open")
+          : (v.admissionClosed ? ", shadow would close" : ", shadow open"));
+    }
     s += "\ncustody "+(v.custodyDepth==null?"unknown":v.custodyDepth)
       +", lost "+(v.lostForwardTotal==null?"unknown":v.lostForwardTotal);
     if (v.lastSave) s += "\nlast save "+ms(v.lastSaveAgeMs)+" ago";
@@ -2991,7 +2999,7 @@ function lfStats(x, hid, seed){
     // record knows less than it does.
     s.appendChild(document.createTextNode(" (" + x.unrecorded +
       " with no ancestry recorded, " + (x.isolated - x.unrecorded) +
-      " whose recorded family is gone)"));
+      " with family evidence or an unresolved identity)"));
     host.appendChild(s);
   }
   // THE ONE SET OF ROWS THIS VIEW LEAVES OUT ON PURPOSE, counted out loud and
@@ -3021,15 +3029,23 @@ function lfStats(x, hid, seed){
   }
   stat("branchpoint", "branch points drawn", x.ancestors);
   if (x.collapsed > 0) stat("collapsed", "generations collapsed", x.collapsed);
+  if (x.splitNames > 0){
+    stat(null, "reused names separated into lineage instances", x.splitNames);
+  }
+  if (x.unresolved > 0){
+    stat(null, "living species with an unresolved lineage identity", x.unresolved);
+  }
   stat(null, "the record's deepest line", x.maxDepth, " generation(s)");
   // The reach of the whole record behind the reduced tree, so the tab is honest
   // about being a small view of a big thing.
   var r = el("span", "muted");
   r.appendChild(document.createTextNode("the crossing record holds "));
   r.appendChild(el("b", null, x.ledgerSpecies));
-  r.appendChild(document.createTextNode(" species, "));
+  r.appendChild(document.createTextNode(" species names and "));
+  r.appendChild(el("b", null, x.lineageInstances || x.ledgerSpecies));
+  r.appendChild(document.createTextNode(" lineage instances, "));
   r.appendChild(el("b", null, x.ledgerEdges));
-  r.appendChild(document.createTextNode(" of them with a parent named — almost all extinct, " +
+  r.appendChild(document.createTextNode(" instances with a recorded parent — almost all extinct, " +
     "which is why only what is alive is drawn"));
   host.appendChild(r);
   // THE RECORD'S OWN FLOOR, which is the answer to the question every root
@@ -3045,10 +3061,11 @@ function lfStats(x, hid, seed){
       " UTC — the oldest crossing this archive ever recorded that names a parent"));
     host.appendChild(f);
   }
-  if (x.cycleGuard > 0 || x.walkCapped > 0 || x.nodesCapped){
+  if (x.cycleGuard > 0 || x.walkCapped > 0 || x.nodesCapped || x.lineageOverflow > 0){
     var g = el("span");
     g.appendChild(unkEl("the record holds " +
       (x.cycleGuard > 0 ? x.cycleGuard + " ancestry loop(s) " : "") +
+      (x.lineageOverflow > 0 ? x.lineageOverflow + " lineage instance insertion(s) over capacity " : "") +
       (x.walkCapped > 0 ? x.walkCapped + " over-long line(s) " : "") +
       (x.nodesCapped ? "more nodes than this view draws " : "") +
       "— guarded, and drawn as far as it was safe to"));
@@ -3061,6 +3078,15 @@ function lfStats(x, hid, seed){
    the map's species runs use, filled by showTip with textContent. */
 function lfTip(n){
   var lines = [];
+  if (n.identitySplit){
+    lines.push("This name occurs in " + n.nameInstances + " separate recorded lineage " +
+      "instances. The archive keeps their parent edges separate.");
+    lines.push("Name-level genome counts and population trends are omitted because the archive " +
+      "cannot divide those aggregates between the separate instances.");
+  }
+  if (n.ancestryUnresolved){
+    lines.push("The record names this species, but it cannot select one parent lineage instance.");
+  }
   if (n.alive){
     var where = [];
     var worlds = n.worlds || [];
@@ -3070,6 +3096,8 @@ function lfTip(n){
     }
     lines.push(n.population + " alive right now" + (n.eggs ? ", " + n.eggs + " egg(s)" : "") +
       " in " + worlds.length + " world(s) — " + where.join(", "));
+  } else if (n.ancestryUnresolved) {
+    lines.push("The record cannot resolve this lineage instance to one parent.");
   } else {
     // §10.1's rule, on the one node type that could most easily be misread as a
     // resident: it is NOT alive, and the sentence says so before anything else.
@@ -3156,7 +3184,9 @@ function lfTip(n){
       "where it came from.");
   }
   if (n.isolated){
-    lines.push(n.ancestryKnown
+    lines.push(n.ancestryUnresolved
+      ? "It stands on its own because the record cannot resolve one parent lineage instance."
+      : n.ancestryKnown
       ? "Nothing else alive on this map descends from any of those ancestors, so it stands on " +
         "its own here — its family is recorded and its family is extinct."
       : "It stands on its own here. Ancestry on this map is a by-product of travel, and a " +
@@ -3316,8 +3346,11 @@ function lfMini(g, x, n, top, cols){
    day, from the ONE answer that carries every living species (/api/species/trends).
    It is a SHAPE and carries no numbers, so it carries no name either. */
 function lfSpark(g, n, top, cols){
-  if (!n.alive || !LFTREND) return;
-  var tr = LFTREND[n.key];
+  if (!n.alive || !LFTREND || n.identitySplit) return;
+  // Trends stay grouped by the portable species name. A reused name can have
+  // several lineage-instance keys, and none of those keys exists in the flat
+  // census history endpoint.
+  var tr = LFTREND[n.nameKey || n.key];
   if (!tr || !tr.points || !tr.points.length) return;
   var pts = tr.points, max = Math.max(1, tr.max), n2 = pts.length;
   var base = top + LF_ROWH - 7, h = 13, d = "", open = false;
@@ -3523,11 +3556,19 @@ function lfBadges(n, joined){
     if (n.everywhere) out.push({t: "EVERYWHERE", c: "tbadge live", term: "everywhere"});
     if (n.endemic) out.push({t: "ENDEMIC", c: "tbadge lane", term: "endemic"});
   }
+  if (n.identitySplit){
+    out.push({t: "REUSED NAME · LINEAGE SEPARATED", c: "tbadge rec"});
+  }
+  if (n.ancestryUnresolved){
+    out.push({t: "ANCESTRY UNRESOLVED", c: "tbadge warn", term: "noancestry"});
+  }
   if (n.isolated){
     // The two reasons, never conflated — and the label a reader sees is the one
     // that is true of THIS species.
-    out.push({t: n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY",
-              c: "tbadge warn", term: n.ancestryKnown ? "genealogy" : "noancestry"});
+    if (!n.ancestryUnresolved){
+      out.push({t: n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY",
+                c: "tbadge warn", term: n.ancestryKnown ? "genealogy" : "noancestry"});
+    }
   } else if (n.alive && n.leaves > 1){
     out.push({t: "ALSO AN ANCESTOR", c: "tbadge lane"});
   }
@@ -4622,6 +4663,22 @@ function settingsCard(v){
   setKV(card, "population", "population", (v.statsKnown && v.population != null)
     ? txt(v.population) : unkEl());
   setKV(card, "egg", "eggs", (v.statsKnown && v.eggCount != null) ? txt(v.eggCount) : unkEl());
+  var admission = el("span");
+  if (!v.statsKnown || !v.admissionMode){
+    admission.appendChild(unkEl());
+  } else if (v.admissionMode === "off"){
+    admission.appendChild(txt("off"));
+  } else {
+    var admissionLimit = v.admissionPopulationLimit == null
+      ? "learning (" + (v.admissionSampleCount || 0) + " samples)"
+      : "limit " + v.admissionPopulationLimit + " for ×" + fmtScale(v.admissionTargetTimeScale);
+    admission.appendChild(txt(admissionLimit + ", committed " +
+      (v.admissionCommitted == null ? "?" : v.admissionCommitted) + ", "));
+    admission.appendChild(v.admissionEnforcing
+      ? el("span", v.admissionClosed ? "bad" : "ok", v.admissionClosed ? "CLOSED" : "enforcing open")
+      : el("span", "muted", v.admissionClosed ? "shadow would close" : "shadow open"));
+  }
+  setKV(card, null, "population admission", admission);
 
   card.appendChild(el("div", "cardsub", "if the machine stops"));
   var save = el("span");

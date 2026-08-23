@@ -37,7 +37,7 @@ of anybody's organisms: custody lives in the journal, not in the world file.
 | Coming back | You reclaim the same slot at the same position. Your neighbours re-pair to you as an ordinary liveness event — nothing is re-inserted and no lane moves |
 | Your neighbours, meanwhile | They route around you. A lane whose next world is dark walks on to the next live one along the same axis, so the map keeps working with a hole in it |
 | Organisms that were still at home when you went dark | **They go around you.** Their sender can prove nobody took custody of them, so it sends them to the next live world along the same axis instead, or brings them home to the world they left. Nothing is lost |
-| Organisms already handed over to you | **Handed over once, and never again.** The ones your sidecar took are in your journal on your disk and arrive when you come back. The rare one caught mid-handover, where nobody can say whether it landed, is **lost** after a day — recorded and counted by the world that sent it, and never re-sent, never returned |
+| Organisms already handed over to you | **Handed over once, and never again.** The ones your sidecar took are in your journal on your disk and arrive when you come back. The rare one caught mid-handover, where nobody can say whether it landed, is **lost** at its five-minute forward deadline. The world that sent it records and counts the loss. It never sends or returns the organism again |
 | Your own organisms in flight | In your journal, on your disk. They are still yours, and they re-route or release when you come back |
 | Your world | On your disk. Your saves are your saves |
 
@@ -58,7 +58,7 @@ computer runs several, name the ones you are leaving with.
 |---|---|
 | Your position | Becomes an ordinary **hole** in the map — the next newcomer fills it before any axis grows |
 | Your slot number | **Retired forever.** Slot numbers are never reused, and that is what makes the next line safe |
-| Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so nothing addressed to it can ever land. One the relay can prove it never handed anywhere crosses to another world along the same axis, or goes home at once. One that had already been handed over is **lost** a day later: there is nobody left to answer for it, and this map would rather lose an organism than risk a second copy of one |
+| Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so nothing addressed to it can ever land. One the relay can prove it never handed anywhere crosses to another world along the same axis, or goes home at once. If the relay already handed over an organism, the sender records it **lost** at its five-minute forward deadline. There is nobody left to answer for it. This map accepts that loss because it does not permit a second copy |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
 | Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal **and your world's identity** — `peer-secret.txt`, and `data/peer-id` beside the journal — unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds. That is why installing again over the same data root comes back as the **same** world on the **same** slot, and why removing the software is not leaving the map |
 | Removing one world of several | `multiverse-launcher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal, logs and credential unless you pass `--remove-world-data`, which ends that world on the map: the relay keeps a verifier and cannot mint the secret again. That switch removes **this world's own entries** under its data folder — the journal, the logs, the credential and the launcher's pid and lock files — and leaves everything else there, naming what it left: a complete-edition data folder also holds the game itself under `runtimes\`, and the installer's record, and sometimes another deployment's folders. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
@@ -105,11 +105,10 @@ you chose, and it says so. The exact wording is in
 [`../error-taxonomy.md`](../error-taxonomy.md) §2.4.
 
 **If you simply stop and never say anything**, nothing breaks — but the map keeps a place for
-you indefinitely. Your neighbours route around you forever, your position is never filled by
-anybody else, and the occasional organism caught mid-handover to your slot sits unresolved for a
-full day before it is written off. Releasing a slot is the operator's answer for a position that
-will never be filled again, and one message from you is what tells them it is that kind of
-absence.
+you indefinitely. Your neighbours route around you forever. Nobody else fills your position. If
+nobody can confirm a handover to your slot, the organism remains unresolved until its five-minute
+forward deadline. A slot release tells the operator that nobody will fill this position. One
+message from you identifies that absence.
 
 ## 3. Handing your world's place to somebody else
 

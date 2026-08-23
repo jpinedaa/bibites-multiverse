@@ -184,12 +184,15 @@ func TestStatusViewPublishesTheAchievedScale(t *testing.T) {
 	}
 	a := newViewFixture(t, status, time.Second)
 
-	// Slot 1 gets a minute of pairs ending now; slot 2 gets none, which is what
-	// a slot looks like while the archive is still filling its window.
+	// Slot 1 gets 55 seconds of pairs ending now; slot 2 gets none, which is
+	// what a slot looks like while the archive is still filling its window. Keep
+	// the first pair five seconds inside the one-minute trim boundary: StatusView
+	// reads the real clock, so putting it exactly on that boundary would make the
+	// expected span depend on whether this goroutine crosses a millisecond tick.
 	now := time.Now().UnixMilli()
 	a.mu.Lock()
 	r := &achievedRate{}
-	feed(r, "peer", now-60_000, 5*time.Second, 13, 12.5)
+	feed(r, "peer", now-55_000, 5*time.Second, 12, 12.5)
 	a.simRates[1] = r
 	a.mu.Unlock()
 
@@ -208,8 +211,8 @@ func TestStatusViewPublishesTheAchievedScale(t *testing.T) {
 	if *one.AchievedTimeScale < 12.4 || *one.AchievedTimeScale > 12.6 {
 		t.Errorf("slot 1 achievedTimeScale = %v, want ~12.5", *one.AchievedTimeScale)
 	}
-	if one.AchievedSpanMs != 60_000 {
-		t.Errorf("slot 1 achievedSpanMs = %d, want 60000", one.AchievedSpanMs)
+	if one.AchievedSpanMs != 55_000 {
+		t.Errorf("slot 1 achievedSpanMs = %d, want 55000", one.AchievedSpanMs)
 	}
 	if two.AchievedTimeScale != nil || two.AchievedSpanMs != 0 {
 		t.Errorf("slot 2 reported a measurement it never made: %v over %d ms",

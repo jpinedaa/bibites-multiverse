@@ -113,13 +113,14 @@ type OwnSlot struct {
 	ContractAAuthFailures int    `json:"contractAAuthFailures"`
 	CredentialConfigured  bool   `json:"credentialConfigured"`
 
-	Relay   RelayState   `json:"relay"`
-	Slot    SlotState    `json:"slot"`
-	Mod     ModState     `json:"mod"`
-	Custody CustodyState `json:"custody"`
-	Edges   []EdgeState  `json:"edges"`
-	Peers   []PeerState  `json:"peers"`
-	Wire    WireState    `json:"wire"`
+	Relay     RelayState     `json:"relay"`
+	Slot      SlotState      `json:"slot"`
+	Mod       ModState       `json:"mod"`
+	Custody   CustodyState   `json:"custody"`
+	Admission AdmissionState `json:"admission"`
+	Edges     []EdgeState    `json:"edges"`
+	Peers     []PeerState    `json:"peers"`
+	Wire      WireState      `json:"wire"`
 }
 
 // RelayState is this sidecar's Contract B link as it stands.
@@ -173,6 +174,7 @@ type ModState struct {
 	// computed. AchievedTimeScale is what the world actually produced per wall
 	// second, measured here. The gap between them is the reading.
 	TimeScale         *float64               `json:"timeScale,omitempty"`
+	TargetTimeScale   *float64               `json:"targetTimeScale,omitempty"`
 	AchievedTimeScale *float64               `json:"achievedTimeScale,omitempty"`
 	AchievedSpanMs    int64                  `json:"achievedSpanMs,omitempty"`
 	SimulatedTime     *float64               `json:"simulatedTime,omitempty"`
@@ -209,6 +211,11 @@ type CustodyState struct {
 	// THIS PROCESS'S START. Zero on every healthy start.
 	JournalDiscardedBytes int64 `json:"journalDiscardedBytes"`
 }
+
+// AdmissionState is the local pre-custody population gate and its adaptive
+// estimator. In shadow mode Enforcing is false even when EffectiveLimit is
+// known and Closed shows what the enforcing decision would be.
+type AdmissionState = admissionSnapshot
 
 // EdgeState is one declared export edge as this sidecar last computed it
 // (contract-b-m4.md §8).
@@ -336,6 +343,10 @@ func (s *Sidecar) OwnSlot() OwnSlot {
 
 	v.Mod = s.modStateLocked(now)
 	v.Custody = s.custodyStateLocked(now)
+	committed, known := s.committedPopulationLocked()
+	admission := s.admission
+	admission.refresh(committed, known)
+	v.Admission = admission.snapshot()
 	v.Edges = s.edgeStatesLocked()
 	v.Peers = s.peerStatesLocked()
 	v.Wire = s.wireStateLocked(now)
@@ -365,6 +376,10 @@ func (s *Sidecar) modStateLocked(now time.Time) ModState {
 	if sess.haveTimeScale {
 		ts := sess.timeScale
 		m.TimeScale = &ts
+	}
+	if sess.haveTargetTimeScale {
+		target := sess.targetTimeScale
+		m.TargetTimeScale = &target
 	}
 	if sess.havePopulation {
 		p := sess.population
@@ -771,6 +786,25 @@ func RenderOwnSlot(w io.Writer, v OwnSlot) {
 	fmt.Fprintf(w, "  in custody   %d\n", v.Custody.CustodyDepth)
 	fmt.Fprintf(w, "  paced        %d waiting on your own delivery rate of %.1f per simulated minute%s\n",
 		v.Custody.PacedDepth, v.Custody.InboundRatePerSimMinute, ageSuffix(v.Custody.OldestPacedAgeMs))
+	limit := "learning"
+	if v.Admission.EffectiveLimit > 0 {
+		limit = strconv.Itoa(v.Admission.EffectiveLimit)
+	}
+	policy := "shadow open"
+	if v.Admission.Enforcing {
+		if v.Admission.Closed {
+			policy = "CLOSED"
+		} else {
+			policy = "enforcing open"
+		}
+	} else if v.Admission.Closed {
+		policy = "shadow would close"
+	} else if v.Admission.Mode == AdmissionOff {
+		policy = "off"
+	}
+	fmt.Fprintf(w, "  admission    %s, limit %s for x%.1f, committed %d, %s (%d samples)\n",
+		v.Admission.Mode, limit, v.Admission.TargetTimeScale, v.Admission.Committed,
+		policy, v.Admission.SampleCount)
 	fmt.Fprintf(w, "  pending ACK  %d delivered to your game, waiting to release sender custody%s\n",
 		v.Custody.PendingAckDepth, ageSuffix(v.Custody.OldestPendingAckAgeMs))
 	fmt.Fprintf(w, "  unresolved   %d forwarded once, waiting for an answer%s\n",

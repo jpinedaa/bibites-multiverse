@@ -100,6 +100,7 @@ jobs:
     timeout-minutes: 45
     env:
       REPO_SLUG: jpinedaa/bibites-multiverse
+      RELEASE_REPO_SLUG: jpinedaa/bibites-multiverse
       REPO_OWNER: jpinedaa
       # Never interpolated into a shell script: the dispatch input is
       # attacker-shaped text until the next step has validated its shape.
@@ -309,6 +310,9 @@ jobs:
       - name: This tree is the build that was tested
         run: release/check-drift.sh
 
+      - name: Release-page repository contract
+        run: release/test-release-repo-slug.sh
+
       # E8: a release tag has been force-moved on this repository before. A
       # moved tag re-fires this workflow, and `gh release create` then fails
       # after a twenty-minute build. Fail in one second instead, and say what
@@ -413,18 +417,16 @@ jobs:
           }
           echo "    the tree is still clean"
 
-      # REHEARSAL-BUILD.md §4: a wrong origin produces a release page whose
-      # download links all 404, and nothing else notices.
-      - name: The origin resolves to this repository
+      # The publisher and the page builder use separate variables. Keep their
+      # explicit destinations equal before the expensive build starts.
+      - name: The release page targets this repository
         run: |
           set -euo pipefail
-          git remote set-url origin "https://github.com/$REPO_SLUG.git"
-          origin="$(git config --get remote.origin.url)"
-          # The same derivation make-release.sh performs for REPO_SLUG.
-          slug="$(printf '%s' "$origin" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
-          [ "$slug" = "$REPO_SLUG" ] \
-            || { echo "!! origin $origin derives the slug '$slug', want '$REPO_SLUG'" >&2; exit 1; }
-          echo "    origin $origin  ->  $slug"
+          [ "$RELEASE_REPO_SLUG" = "$REPO_SLUG" ] || {
+            echo "!! the page targets $RELEASE_REPO_SLUG, but publication targets $REPO_SLUG" >&2
+            exit 1
+          }
+          echo "    page and publication target $REPO_SLUG"
 
       # ----------------------------------------------------------------- build
 

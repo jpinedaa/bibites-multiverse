@@ -725,6 +725,51 @@ func TestRerouteNeedsAProofAndSilenceIsNeverOne(t *testing.T) {
 	})
 }
 
+// TestLivePopulationRefusalSpillsToNextUntriedWorld is the regression for the
+// blue-portal failure: OVERLOADED is a statement from a LIVE receiver, so the
+// old scheduler immediately offered the organism back to that same live slot.
+// A three-world row proves the intended behavior end to end — slot 2 refuses
+// before custody at its population limit, and the identical migrationId is
+// delivered exactly once to slot 3 on the same east axis.
+func TestLivePopulationRefusalSpillsToNextUntriedWorld(t *testing.T) {
+	g := newGrid(t, 3, gridOptions{
+		layout:    layoutRow(3),
+		heartbeat: 100 * time.Millisecond,
+		tune: func(i int, c *Config) {
+			if i == 1 {
+				c.InboundAdmissionMode = AdmissionFixed
+				c.InboundPopulationLimit = 1
+			}
+		},
+	})
+	a, b, c := g.node(0), g.node(1), g.node(2)
+	b.world.put(-88001)
+	waitFor(t, 5*time.Second, "slot 2 to report its fixed-limit population", func() bool {
+		st := b.side.Stats()
+		return st.Population != nil && *st.Population == 1
+	})
+
+	migrationID := a.mod.migrateOut(-88002, contracta.EdgeE, 0.5)
+	waitFor(t, 15*time.Second, "the overloaded live slot to be skipped", func() bool {
+		return c.world.spawnCount(migrationID) == 1
+	})
+	if got := b.world.spawnCount(migrationID); got != 0 {
+		t.Fatalf("population-limited slot 2 spawned the refused migration %d times", got)
+	}
+	st := journalEntry(t, a.side, migrationID)
+	if st.Entry.DestSlot != 3 || st.RerouteCount != 1 ||
+		st.RerouteProof != contractb.ProofPeerRefused {
+		t.Fatalf("spillover journal = dest %d, count %d, proof %q; want 3, 1, peer_refused",
+			st.Entry.DestSlot, st.RerouteCount, st.RerouteProof)
+	}
+	if len(st.RefusedSlots) != 1 || st.RefusedSlots[0] != 2 {
+		t.Fatalf("durable refused slots = %v, want [2]", st.RefusedSlots)
+	}
+	if got := c.world.spawnCount(migrationID); got != 1 {
+		t.Fatalf("slot 3 spawned migration %d times, want exactly 1", got)
+	}
+}
+
 func runRerouteProof(t *testing.T, pending bool) {
 	rl := startRelay(t)
 	ids := []string{"peer-a", "peer-b", "peer-c"}

@@ -48,8 +48,10 @@ type modSession struct {
 	// is what the stats block wants, and it is a different question: until a
 	// HEARTBEAT arrives the world's speed is UNKNOWN, and 1 would be a confident
 	// guess about a world that may well be at 5 or at 0.
-	timeScale     float64
-	haveTimeScale bool
+	timeScale           float64
+	haveTimeScale       bool
+	targetTimeScale     float64
+	haveTargetTimeScale bool
 
 	// The HEARTBEAT-derived half of the peer stats block (contract-b-m4.md
 	// §6.3.1). "have" flags keep absence a value: a stat the mod has not
@@ -523,6 +525,7 @@ func lowerUUID(s string) string {
 }
 
 func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
+	admissionChanged := false
 	var hb contracta.Heartbeat
 	if err := contracta.DecodeData(env.Data, &hb); err != nil {
 		sess.conn.Close(contracta.CloseMalformedFrame, "malformed HEARTBEAT")
@@ -544,6 +547,10 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 	sess.paused = *hb.Paused
 	sess.timeScale = *hb.TimeScale
 	sess.haveTimeScale = true
+	sess.haveTargetTimeScale = hb.TargetTimeScale != nil
+	if hb.TargetTimeScale != nil {
+		sess.targetTimeScale = *hb.TargetTimeScale
+	}
 	resized := !sameSize(sess.simSize, *hb.SimulationSize)
 	sess.simSize = *hb.SimulationSize
 	// The stats block of contract-b-m4.md §6.3.1 comes from here, and so does
@@ -554,13 +561,23 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 	}
 	sess.haveSimTime, sess.simulatedTime = true, *hb.SimulatedTime
 	if sess == s.mod {
+		// This heartbeat is the reconciliation point for ACKed arrivals: the
+		// reported population now includes everything the game spawned before it.
+		s.admittedSinceHeartbeat = 0
 		// The ACHIEVED time scale (observe.go). The applied scale two lines above
 		// is what the game's governor allowed; this is what the world actually
 		// produced, and the two come apart precisely when the machine cannot keep
 		// up. THE CLOCK IS THE WALL CLOCK: cfg.Clock exists so §9.3's bounded
 		// hold can be tested over simulated hours, and a rate measured against a
 		// clock that jumps a day is not a rate.
-		s.achieved.observe(sess.sessionID, time.Now(), *hb.SimulatedTime)
+		wallNow := time.Now()
+		s.achieved.observe(sess.sessionID, wallNow, *hb.SimulatedTime)
+		if achieved, _, ok := s.achieved.rate(wallNow); ok && sess.haveTargetTimeScale {
+			admissionChanged = s.admission.observe(wallNow, sess.population, achieved,
+				sess.targetTimeScale, sess.paused)
+		}
+		committed, known := s.committedPopulationLocked()
+		s.admission.refresh(committed, known)
 	}
 	if hb.LastSave != nil {
 		save := *hb.LastSave
@@ -587,6 +604,9 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		s.publishEdgesLocked(false)
 	}
 	s.mu.Unlock()
+	if admissionChanged {
+		s.saveAdmissionState()
+	}
 	for _, why := range stripped {
 		// One line per rule that fired, and then nothing else happens: the
 		// heartbeat was processed normally, and the world whose census had to be
@@ -896,6 +916,11 @@ func (s *Sidecar) onMigrateInAck(sess *modSession, env wire.Envelope) bool {
 		return true
 	}
 	delete(s.sched, ack.MigrationID)
+	if sess == s.mod && !dup {
+		s.admittedSinceHeartbeat++
+	}
+	committed, known := s.committedPopulationLocked()
+	s.admission.refresh(committed, known)
 	// contract-a.md §5.8: the sidecar clears its entry and sends MIGRATION_ACK
 	// upstream, which lets the origin peer clear its own journal.
 	if !done.BounceBack && done.Entry.SourcePeer != "" {

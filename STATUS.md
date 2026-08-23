@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-23 UTC.
 
-Bibites Multiverse `0.3.3` is public. The first announced service period runs from
+Bibites Multiverse `0.3.6` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -58,25 +58,94 @@ The relay refuses a migration before it creates a forwarding record when the bou
 queue is full. It keeps that destination connected.
 
 On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
-healthy during the mandatory relay-only canary. Each exact five-minute interval recorded no
-capacity-triggered relay shed, and aggregate migration stayed above zero.
+healthy, but the mandatory relay-only canary did not meet every gate. Later review assigned the
+failed signals to participant-owned sidecar state, not relay transport. Isolated tests reproduced
+the visible pattern with a saturated journal. They also confirmed that the current sidecar recovers
+it. The service did not inspect any external participant's executable, timeout, clock, or journal
+state. Thus, the exact participant-local cause remains open. Release `0.3.4` completes the
+correction on the participant side. It paces journal-backed payloads and acknowledgements, drains
+older acknowledgements first, and keeps ordinary control traffic responsive. The existing journals
+remain the custody record and must not be cleared.
 
-The mandatory canary still failed. One or more live, populated sources repeatedly showed `0/min`
-on every open outbound lane. Participant sidecars returned overload refusals. In each exact
-interval, the aggregate custody and paced-depth totals had a disallowed three-sample rise.
+Release `0.3.4` was published and then deployed on 2026-08-23. Five Windows worlds on the release
+machine retained their identities and journals through the upgrade; all five rejoined their
+reserved slots with the new sidecar binary. The guarded cloud runtime transaction then activated
+the same source on all six hosted worlds and verified the installed binary against the candidate
+hash. All eleven worlds were live, game-connected and relay-connected after their respective
+health windows. Every one reported zero relay capacity sheds and zero discarded journal bytes.
+One Windows world's 50-entry durable acknowledgement backlog drained to zero after restart, while
+the pacing deferral counters advanced. The public health and status routes returned HTTP `200`,
+and the status route reported a connected relay.
 
-The displayed routes from two long-running affected sources last recorded a unique migration
-before the new relay started. A third source met the repeated-zero rule only in the final two
-samples, after a disconnect and reconnect, and had migrated after relay activation. The evidence
-does not establish one relay regression as their common cause. Suspected participant-journal
-saturation and old sidecar versions are the leading hypothesis for the long-running pair.
-Participant diagnostics must test it and bound the late third source.
+The release-machine sample also records why a paced delivery queue can remain nonzero without a
+new relay fault. Five concurrent games requested 10× speed, but some were achieving only about
+1.2× to 5.1×. Delivery pacing is deliberately measured in the receiving world's simulated time,
+so those CPU-limited worlds drain more slowly in wall-clock time. The new relay pacing prevents
+aggregate fan-in from becoming a burst or a capacity disconnect; it does not make an overloaded
+simulation advance faster and it does not erase its durable queue.
 
-The relay half of the correction is live. The source tree also gives durable destination
-acknowledgements priority in the sidecar's existing send pace. The complete Go test suite passes
-with that change. Operators withheld the cloud-sidecar transaction after the failed relay canary.
-Hosted cloud worlds remain on their prior runtime, and the current participant release does not
-include this sidecar change.
+Two exact five-minute cloud closeout intervals kept aggregate migration positive. All six hosted
+sources stayed live and mod-connected. None had every open outbound lane at zero.
+
+### Population-aware portal routing rollout
+
+Release `0.3.6` changes the pre-custody overload path. A live destination that explicitly refuses
+a migration no longer receives the next offer merely because it remains live. The source records
+that refusal durably and continues in the same direction to the next compatible world it has not
+tried. Queue overload and the new population policy both use this custody-safe path; relay queue
+pressure remains a retry to the same destination and is not misclassified as a world refusal.
+
+The population controller ships in `adaptive-shadow`. It measures a per-world capacity estimate
+for ×10 and publishes the limit and open/closed decision, but `enforcing` is false and population
+therefore refuses no organism in this rollout. Fixed and enforcing adaptive modes are available
+for explicit later use. Promotion requires at least 24 hours of stable shadow evidence and the
+other gates in [`docs/population-admission.md`](docs/population-admission.md).
+
+On 2026-08-23, candidate `94a71b2` passed the full uncached Go suite and vet, a release plugin
+build, Windows and Linux cross-build checks, and the three-live-world spillover regression. Five
+Windows worlds and six hosted Linux worlds then activated mod `0.6.8` and the candidate sidecar.
+All eleven retained their reserved slots with mod and relay connected, exposed requested speed and
+non-enforcing shadow state, and reported zero capacity sheds and zero discarded journal bytes.
+The guarded cloud runtime transaction and host verification completed successfully. The race suite
+was not rerun because this WSL image has no CGO compiler; enforcing adaptive mode, forced rollback,
+disk failure, crash replay, and private-map behavior were not exercised in production.
+
+The service host then activated the archive and relay binaries built from `c321aad`. The guarded
+archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
+The archive subscribed before any placement claim, so the receipt reports a complete record. At
+the 60-second closeout, the map had the same 15 live and four dark slots and a connected relay.
+All four public routes checked returned HTTP `200`. The public status reported 11 mod `0.6.8`
+worlds in `adaptive-shadow`, zero enforcing population gates, and the live page carried the new
+population-admission explanation. The announcements page published the planned window and its
+actual return time.
+
+### Species genealogy repair
+
+The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
+`25,400,734` records in `406.39 s` and restored the later species observations. The rebuild
+reduced the living rows with no parent evidence from 14 to one excluded seed species.
+
+A second defect remained in the genealogy view. The archive used the normalized species name as
+the identity of a family-tree node. The game can reuse a name for a later species. A later parent
+claim then replaced the earlier edge for that name. Read-only analysis found 99 names with more
+than one parent claim. It also found name cycles of 4 and 50 nodes. In a current sample, 24 of 26
+living ancestry walks reached one of those cycles. The tree guard cut those walks, so related
+living species appeared as separate roots.
+
+The source repair keeps an immutable lineage instance for each recorded name and parent path. A
+reused name creates another instance instead of replacing an earlier edge. The API and page show
+reused names, unresolved identities, and capacity or cycle guard hits separately. Roll-up format
+3 persists this graph. An archive with format 2 must rebuild the fold from the ordered raw record.
+
+Public commit `60dac3a` went live on 2026-08-23. The archive rebuilt all `29,846,555` raw records
+into roll-up format 3 in `598.792 s`. The guarded participant outage was 10 minutes 24 seconds,
+which was 24 seconds longer than the maintenance notice estimated. The archive and relay returned
+on the new source with no record gap.
+
+The first live check reported 19,700 lineage instances, 5,269 reused names, and two unresolved
+identity links. Ledger and lineage overflow were zero. Cycle, walk, and node-cap guards were also
+zero. Remaining roots now distinguish seed stock, missing raw ancestry, recorded family roots,
+and genuinely ambiguous evidence. They are not derived cycle cuts.
 
 ## Hosted service
 
@@ -110,9 +179,9 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.3`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.3) |
+| Release | [`v0.3.6`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.6) |
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.7` |
+| Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.1` — what this release speaks, and what the hosted service speaks; see [Hosted service](#hosted-service). A world on `contract-b/4.0` still joins |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
@@ -120,7 +189,7 @@ request.
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release, and names which release that is. Neither the links nor the number carry a compiled-in version — the links address `/releases/latest` and the number is resolved from GitHub hourly in the background — so a release reaches the homepage with no deployment, and the page drops the number rather than guess if that lookup fails. A three-step Windows walkthrough sits under those links, with one line for Linux |
-| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The current source makes the Species tab expand vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. |
+| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The Species tab expands vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The genealogy view separates reused names into immutable lineage instances and labels unresolved evidence. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 
@@ -172,6 +241,21 @@ nothing waits on, which is silent when it fails, and which `MULTIVERSE_NO_UPDATE
 Release `0.3.3` opens the installed graphical launcher after the default Windows setup starts the
 connected game. If Windows cannot open it, the installation stays complete and the world stays
 running. Setup shows the launcher's path for another try.
+Release `0.3.4` fixes migration queues that could appear to block blue portals after a restart or
+traffic burst. The relay paces aggregate migration fan-in per destination, and the participant
+sidecar drains durable acknowledgements and payloads under the published frame budget without
+repeated capacity disconnects. Existing identities, saves, journals, and queued organisms are
+preserved during the update.
+Release `0.3.5` fixes Linux complete-edition upgrades and removals. The Linux `0.3.4` installer or
+uninstaller sometimes stopped when it read a large install record. Release `0.3.5` changes no game,
+plugin, sidecar, or protocol version.
+Release `0.3.6` makes a live world's pre-custody overload refusal send the organism onward to the
+next compatible world it has not tried, rather than repeatedly offering it back to the same full
+destination. It also adds fixed and adaptive living-population admission, with adaptive estimation
+deployed in non-enforcing shadow mode while production evidence accumulates, and publishes the
+decision in local and live status views. Mod `0.6.8` reports requested speed separately from
+achieved speed so the estimator does not mistake a deliberately slower world for an overloaded
+machine.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**

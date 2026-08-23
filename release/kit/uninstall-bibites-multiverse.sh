@@ -206,7 +206,11 @@ json_flatten() {
 }
 
 flat_get() {
-  printf '%s\n' "$1" | awk -v k="$2" 'index($0, k "\t") == 1 { print substr($0, length(k) + 2); exit }'
+  # Consume all input. An early awk exit makes printf fail with SIGPIPE under
+  # pipefail when a large install record has more data after the selected path.
+  printf '%s\n' "$1" | awk -v k="$2" '
+    !found && index($0, k "\t") == 1 { print substr($0, length(k) + 2); found = 1 }
+  '
 }
 
 REMOVED=''

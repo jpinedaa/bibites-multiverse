@@ -712,7 +712,17 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 			code = contractb.NackModAbsent
 			message = "no mod is connected and inboundQueueMax is reached"
 		}
-		s.nackUpstream(payload.MigrationID, payload.SourcePeer, code, message)
+		s.nackUpstreamAfter(payload.MigrationID, payload.SourcePeer, code, message, 15*time.Second)
+		return true
+	}
+	committed, populationKnown := s.committedPopulationLocked()
+	if !s.admission.admit(committed, populationKnown) {
+		state := s.admission.snapshot()
+		s.mu.Unlock()
+		s.saveAdmissionState()
+		s.nackUpstreamAfter(payload.MigrationID, payload.SourcePeer, contractb.NackOverloaded,
+			fmt.Sprintf("inbound population admission is closed: committed=%d limit=%d target=x%g mode=%s",
+				state.Committed, state.EffectiveLimit, state.TargetTimeScale, state.Mode), 15*time.Second)
 		return true
 	}
 	// 3. Check S against our own, by the relative test of contract-a.md §13 A10.
@@ -1125,12 +1135,28 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 }
 
 func (s *Sidecar) markRefusedLocked(st *journal.State, proof, note string) {
+	refused := append([]int(nil), st.RefusedSlots...)
+	if proof == contractb.ProofPeerRefused {
+		seen := false
+		for _, slot := range refused {
+			if slot == st.Entry.DestSlot {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			refused = append(refused, st.Entry.DestSlot)
+		}
+	}
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
-		Handoff: journal.HandoffRefused, Note: note}); err != nil {
+		Handoff: journal.HandoffRefused, RerouteProof: &proof,
+		RefusedSlots: refused, Note: note}); err != nil {
 		s.log.Error("contract B: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
 		return
 	}
 	st.Handoff = journal.HandoffRefused
+	st.RerouteProof = proof
+	st.RefusedSlots = refused
 }
 
 // onGenomeRequest answers exactly one GENOME_RESPONSE from the genome cache
@@ -1235,6 +1261,10 @@ func (s *Sidecar) sendRelayClassLocked(typ string, data any, deferred bool) bool
 }
 
 func (s *Sidecar) nackUpstream(migrationID, destPeer, code, message string) {
+	s.nackUpstreamAfter(migrationID, destPeer, code, message, 0)
+}
+
+func (s *Sidecar) nackUpstreamAfter(migrationID, destPeer, code, message string, retry time.Duration) {
 	if destPeer == "" {
 		s.log.Warn("contract B: cannot NACK, no sourcePeer", "migrationId", migrationID, "code", code)
 		return
@@ -1242,12 +1272,13 @@ func (s *Sidecar) nackUpstream(migrationID, destPeer, code, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sendRelayReplyLocked(contractb.TypeMigrationNack, contractb.MigrationNack{
-		MigrationID: migrationID,
-		SourcePeer:  s.cfg.PeerID,
-		DestPeer:    destPeer,
-		Code:        code,
-		Class:       contractb.ClassOf(code),
-		Message:     message,
+		MigrationID:  migrationID,
+		SourcePeer:   s.cfg.PeerID,
+		DestPeer:     destPeer,
+		Code:         code,
+		Class:        contractb.ClassOf(code),
+		Message:      message,
+		RetryAfterMs: int(retry / time.Millisecond),
 	})
 }
 

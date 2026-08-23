@@ -356,7 +356,7 @@ func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
 	rename := map[string]string{}
 	denied := false
 	for i := range t.Nodes {
-		generic, specific, _ := strings.Cut(t.Nodes[i].Key, " ")
+		generic, specific, _ := strings.Cut(t.Nodes[i].NameKey, " ")
 		if d.DeniesSpecies(generic, specific) {
 			rename[t.Nodes[i].Key] = Suppressed + "#" +
 				strconv.FormatUint(fingerprint(t.Nodes[i].Key), 16)
@@ -387,6 +387,7 @@ func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
 		n := &nodes[i]
 		if to, ok := rename[n.Key]; ok {
 			n.Key = to
+			n.NameKey = Suppressed
 			n.Name = Suppressed
 			// The provenance goes with the name. Saying a suppressed label came
 			// from a census would be a statement about a name nobody can read.

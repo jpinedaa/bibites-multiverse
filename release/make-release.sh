@@ -66,7 +66,7 @@ THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 # another filesystem. Use a clean checkout of this exact commit in that case.
 SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.3.3
+RELEASE=0.3.6
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -84,6 +84,9 @@ STAGE_NAME="bibites-multiverse-${RELEASE}"
 # that file and with .github/workflows/release.yml.
 STABLE_SETUP_NAME="bibites-multiverse-windows-x64-setup.exe"
 STABLE_LINUX_COMPLETE_NAME="bibites-multiverse-linux-x64-complete.zip"
+# Release-page links are a publication contract. They must not depend on the
+# clone's origin, which can still name an old fork or a local repository.
+CANONICAL_RELEASE_REPO_SLUG='jpinedaa/bibites-multiverse'
 # The installed application's entry point. The shortcuts open this file, so the
 # name is what a player sees in Task Manager and in a SmartScreen prompt. It is
 # the WINDOW (go/cmd/multiverse-launcher-gui), and it keeps the name the console
@@ -163,6 +166,23 @@ fi
 note() { printf '    %s\n' "$*"; }
 step() { printf '\n=== %s\n' "$*"; }
 die()  { printf '\n!! %s\n' "$*" >&2; exit 1; }
+
+release_repo_slug() {
+  local slug="${RELEASE_REPO_SLUG:-$CANONICAL_RELEASE_REPO_SLUG}"
+  if [[ ! "$slug" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}$ ]]; then
+    printf "!! RELEASE_REPO_SLUG '%s' is not a valid GitHub OWNER/REPOSITORY value.\n" "$slug" >&2
+    return 2
+  fi
+  case "${slug#*/}" in
+    .|..)
+      printf "!! RELEASE_REPO_SLUG '%s' is not a valid GitHub OWNER/REPOSITORY value.\n" "$slug" >&2
+      return 2
+      ;;
+  esac
+  printf '%s\n' "$slug"
+}
+
+RELEASE_REPO_SLUG="$(release_repo_slug)"
 
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 SHA_UPPER() { sha "$1" | tr 'a-f' 'A-F'; }
@@ -925,9 +945,7 @@ step "the release page text"
 COMMIT="$(git -C "$REPO" rev-parse --short HEAD)"
 if [ -n "$(git -C "$REPO" status --porcelain)" ]; then COMMIT="$COMMIT (working tree not clean)"; fi
 BUILT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-ORIGIN="$(git -C "$REPO" config --get remote.origin.url || true)"
-REPO_SLUG="$(printf '%s' "$ORIGIN" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
-[ -n "$REPO_SLUG" ] || REPO_SLUG="OWNER/REPO"
+note "repository $RELEASE_REPO_SLUG"
 
 inner_table() { # $1 a staging directory, $2 the file to write
   {
@@ -943,13 +961,13 @@ COMPLETE_ROWS="$BUILD/complete-rows.md"
 : > "$COMPLETE_ROWS"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
   printf '| **Windows setup (recommended)** | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
-    "$WINDOWS_SETUP_NAME" "$REPO_SLUG" "$TAG" "$WINDOWS_SETUP_NAME" "$WINDOWS_SETUP_SHA" >> "$COMPLETE_ROWS"
+    "$WINDOWS_SETUP_NAME" "$RELEASE_REPO_SLUG" "$TAG" "$WINDOWS_SETUP_NAME" "$WINDOWS_SETUP_SHA" >> "$COMPLETE_ROWS"
   printf '| Windows complete ZIP (advanced) | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
-    "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
+    "$COMPLETE_ZIP_NAME" "$RELEASE_REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
   printf '| Linux complete | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
-    "$LINUX_COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$LINUX_COMPLETE_ZIP_NAME" "$LINUX_COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
+    "$LINUX_COMPLETE_ZIP_NAME" "$RELEASE_REPO_SLUG" "$TAG" "$LINUX_COMPLETE_ZIP_NAME" "$LINUX_COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 
 # One sentence about the stable names, and only for the files that exist in this
@@ -963,7 +981,7 @@ if [ "${#STABLE_NAMES[@]}" -gt 0 ]; then
     printf 'addresses always give the newest release:\n\n'
     for name in "${STABLE_NAMES[@]}"; do
       printf -- '- [`%s`](https://github.com/%s/releases/latest/download/%s)\n' \
-        "$name" "$REPO_SLUG" "$name"
+        "$name" "$RELEASE_REPO_SLUG" "$name"
     done
     printf '\n`SHA256SUMS` lists both the versioned and the stable name of each file, so the\n'
     printf 'checksum check works for whichever name you downloaded.\n\n'
@@ -984,7 +1002,7 @@ text = open(src, encoding='utf-8').read()
 fields = {
     '@@RELEASE@@':    '$RELEASE',
     '@@TAG@@':        '$TAG',
-    '@@REPO@@':       '$REPO_SLUG',
+    '@@REPO@@':       '$RELEASE_REPO_SLUG',
     '@@ZIP_NAME@@':   '$ZIP_NAME',
     '@@ZIP_SHA256@@': '$ZIP_SHA',
     '@@ZIP_SIZE@@':   '$ZIP_SIZE',

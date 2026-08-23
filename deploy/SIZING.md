@@ -247,7 +247,7 @@ Every term is bounded and none of them follows the ledger's length.
 
 | Term | What bounds it |
 |---|---|
-| Bounded aggregates | The approved retained state: 65,536 species, 8,192 genome fingerprints for each species, brain-coverage buckets, lanes, ancestry edges. "Species aggregate capacity" below explains the corrected species bound. |
+| Bounded aggregates | The approved retained state: 65,536 species names, 131,072 lineage instances, 8,192 genome fingerprints for each species, brain-coverage buckets, and lanes. The next two sections explain the species and lineage bounds. |
 | Duplicate keys | The duplicate window, times the crossing rate. Two generations of the table. |
 | Genome-gap queue | The genome horizon. A gap is only ever queued for a crossing inside it, and a restart drains what aged out while the process was down. |
 
@@ -272,6 +272,31 @@ The command preserves the old sidecar and rebuilds the fold from the raw record.
 The command scans the durable segment receipts for an absent raw segment.
 If a raw segment is absent, restore its confirmed cold copy before the rebuild.
 An ordinary restart cannot recover observations that the old process did not write to the sidecar.
+
+The production rebuild on 2026-08-22 folded `25,400,734` raw records in `406.39 s`.
+The operator allowed `424 s` for the participant outage. The rebuilt aggregate held `4,379`
+species names and `4,377` name-level parent claims, with `ledgerOverflow: 0`. It reduced the
+living rows with no parent evidence from 14 to one excluded seed species. The old sidecar stayed
+on the host as the rollback source.
+
+#### Lineage-instance capacity
+
+A normalized species name is a portable label. It is not a permanent family identity. The game
+can reuse a name for a later species. The genealogy therefore keeps one immutable instance for
+each recorded name and parent path. It binds each world to the newest instance that crossed into
+or out of that world.
+
+The archive holds at most `131,072` lineage instances. This is twice the species-name bound. It
+covers ordinary name reuse and keeps hostile path churn bounded. The tree endpoint publishes
+`lineageInstances`, `splitNames`, `unresolved`, and `lineageOverflow`. This overflow counts
+refused instance insertions. A non-zero `lineageOverflow` is a capacity defect. `splitNames` can be non-zero on a
+healthy record. `unresolved` means the ordered record cannot select one parent instance.
+
+Roll-up format 3 persists the lineage instances and their per-world binding times. Format 2 kept
+only one mutable parent for each normalized name. Do not use a format-2 sidecar for this view.
+The format-3 archive refuses to start while that sidecar remains in place.
+Run `restart-archive.sh --rebuild-rollup` during the upgrade. The command verifies that the raw
+source is complete and preserves the old sidecar before it starts the full replay.
 
 Measured, on two pinned cores, replaying one copy of the production ledger of
 `2026-08-16` — `5,408,123` records — with the roll-up build:
@@ -309,7 +334,11 @@ size against.
 | Appends at `60 s` | `69 MiB` each day |
 | Appends at `300 s` | `20 MiB` each day |
 | For each genome gap still open when a save runs | `239 B` |
+| Compaction estimate for each lineage instance | `512 B` |
 | On-disk size at steady state | at most `3` times the live state, then it compacts |
+
+The `6.5 MB` measurement predates roll-up format 3. For format-3 sizing, add the lineage-instance
+term. After the first rebuild, measure the actual term on the target.
 
 It is append-and-compact, in the shape `brains.jsonl` already used: a save
 appends the keys that moved, and the file is rewritten whole when it grows past
@@ -1153,8 +1182,9 @@ Run this procedure during provisioning and after a capacity alert:
 5. Calculate daily durable growth.
 6. Read actual free space and recent daily growth.
 7. Count ledger records.
-8. Read `ledgerSpecies` and `ledgerOverflow` from `/api/species/tree`. A non-zero overflow is a
-   capacity defect and requires a fold rebuild while the raw source still exists.
+8. Read `ledgerSpecies`, `lineageInstances`, `ledgerOverflow`, and `lineageOverflow` from
+   `/api/species/tree`. Either overflow is a capacity defect. After you raise a compiled limit,
+   rebuild the fold while the raw source still exists.
 9. Calculate the archive resident set, which is also the replay peak.
 10. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
 11. Measure or select a conservative replay rate.

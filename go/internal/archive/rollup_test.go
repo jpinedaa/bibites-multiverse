@@ -2,6 +2,7 @@ package archive
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -156,8 +157,9 @@ func rollupDump(a *Archive) string {
 	for _, k := range sortedKeys(a.tally.byPeer) {
 		fmt.Fprintf(&b, "peer %s=%d\n", k, a.tally.byPeer[k])
 	}
-	fmt.Fprintf(&b, "speciesLedger overflow=%d edges=%d edgeFirst=%d\n",
-		a.species.overflow, a.species.edges, a.species.edgeFirstMs)
+	fmt.Fprintf(&b, "speciesLedger overflow=%d lineageOverflow=%d edges=%d edgeFirst=%d\n",
+		a.species.overflow, a.species.lineage.overflow, a.species.edges,
+		a.species.edgeFirstMs)
 	keys := make([]string, 0, len(a.species.byKey))
 	for k := range a.species.byKey {
 		keys = append(keys, k)
@@ -174,6 +176,28 @@ func rollupDump(a *Archive) string {
 			"hash=%q hat=%d genomes=%v recent=%v\n",
 			k, e.crossings, e.firstMs, e.lastMs, e.genomesTruncated,
 			e.parent, e.parentKey, e.parentAtMs, e.genomeHash, e.genomeAtMs, fps, e.recent)
+	}
+	lineageIDs := make([]string, 0, len(a.species.lineage.byID))
+	for id := range a.species.lineage.byID {
+		lineageIDs = append(lineageIDs, id)
+	}
+	sort.Strings(lineageIDs)
+	for _, id := range lineageIDs {
+		inst := a.species.lineage.byID[id]
+		slots := make([]int, 0, len(inst.seenAt))
+		for slot := range inst.seenAt {
+			slots = append(slots, slot)
+		}
+		sort.Ints(slots)
+		fmt.Fprintf(&b, "lineage %q nameKey=%q name=%q known=%v parent=%q pkey=%q pid=%q "+
+			"placeholder=%v conflict=%v c=%d first=%d last=%d hash=%q hat=%d recent=%v seen=",
+			id, inst.nameKey, inst.name, inst.parentKnown, inst.parent, inst.parentKey,
+			inst.parentID, inst.placeholder, inst.conflict, inst.crossings, inst.firstMs,
+			inst.lastMs, inst.genomeHash, inst.genomeAtMs, inst.recent)
+		for _, slot := range slots {
+			fmt.Fprintf(&b, "%d:%d,", slot, inst.seenAt[slot])
+		}
+		b.WriteByte('\n')
 	}
 	lanes := make([]lanePair, 0, len(a.lanes))
 	for k := range a.lanes {
@@ -433,6 +457,8 @@ func TestEveryPersistedWriteSiteMarksItsKeyDirty(t *testing.T) {
 	a.observeSpeciesLocked(rec)
 	sp := a.rollupDirty.species["Izus copedylanus"]
 	gen := len(a.rollupDirty.genomes["Izus copedylanus"])
+	lineage := a.rollupDirty.lineages["Izus copedylanus"]
+	parentLineage := a.rollupDirty.lineages["Cyanea prima"]
 	led := a.rollupDirty.ledger
 	a.mu.Unlock()
 	if !sp {
@@ -440,6 +466,9 @@ func TestEveryPersistedWriteSiteMarksItsKeyDirty(t *testing.T) {
 	}
 	if gen != 1 {
 		t.Errorf("observeSpeciesLocked recorded %d new genome fingerprints, want 1", gen)
+	}
+	if !lineage || !parentLineage {
+		t.Error("observeSpeciesLocked did not mark the child and parent lineage instances dirty")
 	}
 	if !led {
 		t.Error("observeSpeciesLocked did not mark the species ledger globals dirty")
@@ -669,6 +698,49 @@ func TestAVersionItDoesNotKnowIsRefusedWhole(t *testing.T) {
 	}
 	if usable || st != nil {
 		t.Fatal("a sidecar from another format version was accepted")
+	}
+}
+
+// Version 2 holds only the mutable name aggregate. Accepting it would restore
+// the ancestry bug this format change repairs, so it must force an ordered raw
+// replay even though all of its other line kinds are readable by this build.
+func TestVersionTwoRequiresAnOrderedRawReplay(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, rollupSidecarName)
+	head := fmt.Sprintf(`{"r":"h","v":2,"bucketMs":%d}`+"\n"+
+		`{"r":"f","covLines":10,"covRecords":10}`+"\n", BrainBucketMs)
+	if err := os.WriteFile(path, []byte(head), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	st, usable, err := loadRollupState(path)
+	if !errors.Is(err, errLineageRollupRebuild) {
+		t.Fatalf("load error = %v, want the recorded lineage rebuild instruction", err)
+	}
+	if usable || st != nil {
+		t.Fatal("version 2 returned usable state with the rebuild error")
+	}
+}
+
+func TestVersionTwoCannotStartWithoutTheRecordedRebuild(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, rollupSidecarName)
+	head := fmt.Sprintf(`{"r":"h","v":2,"bucketMs":%d}`+"\n", BrainBucketMs)
+	if err := os.WriteFile(path, []byte(head), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a, err := New(Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"})
+	if a != nil {
+		_ = a.Close()
+		t.Fatal("archive started from a format-2 lineage fold")
+	}
+	if !errors.Is(err, errLineageRollupRebuild) {
+		t.Fatalf("New error = %v, want the recorded lineage rebuild instruction", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("format-2 sidecar was not preserved in place: %v", err)
+	}
+	if _, err := os.Stat(path + ".unreadable"); !os.IsNotExist(err) {
+		t.Fatalf("format-2 sidecar was mislabeled unreadable: %v", err)
 	}
 }
 

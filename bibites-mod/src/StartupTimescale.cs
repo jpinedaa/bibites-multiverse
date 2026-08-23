@@ -153,7 +153,7 @@ namespace BibitesMultiverse
                 "a machine that cannot draw fast enough, which costs simulation speed and not smoothness.");
         }
 
-        private static float CurrentTarget()
+        internal static float CurrentTarget()
         {
             try
             {

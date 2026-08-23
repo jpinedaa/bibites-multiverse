@@ -551,6 +551,15 @@ cp -a "$KIT_DIR/." "$H_KIT/"
 rm -f "$H_KIT/start-multiverse.sh" "$H_KIT/stop-multiverse.sh"
 mkdir -p "$H_KIT/game"
 new_sandbox_game "$H_KIT/game"
+# Keep this record larger than 64 KiB. An early field must not cause the pipe
+# writer to fail while the installer or uninstaller reads the remaining fields.
+mkdir -p "$H_KIT/game/The Bibites_Data/StreamingAssets/pipe-status-regression"
+H_PIPE_ENTRY=0
+while [ "$H_PIPE_ENTRY" -lt 128 ]; do
+  H_PIPE_ENTRY=$((H_PIPE_ENTRY + 1))
+  printf 'pipe status regression fixture\n' \
+    > "$H_KIT/game/The Bibites_Data/StreamingAssets/pipe-status-regression/entry-$H_PIPE_ENTRY.txt"
+done
 H_SHA="$(sha256sum "$GAME_ASSEMBLY" | cut -d' ' -f1 | tr 'a-f' 'A-F')"
 printf 'test redistribution permission\n' > "$H_KIT/GAME-REDISTRIBUTION-NOTICE.txt"
 printf '{\n  "format": "bibites-multiverse/game-payload/1",\n  "platform": "Linux",\n  "gameVersion": "test",\n  "assemblySha256": "%s",\n  "redistributionNoticeFile": "GAME-REDISTRIBUTION-NOTICE.txt"\n}\n' \
@@ -578,6 +587,8 @@ check "the record identifies a bundled managed runtime" \
   "$(b bash -c 'grep -q '"'"'"mode": "bundled"'"'"' "$1" && grep -q '"'"'"managedByThisInstaller": true'"'"' "$1"' _ "$H_DATA/install-record.json")"
 check "the generated start script points at the managed runtime" \
   "$(b bash -c 'grep -qF "$2" "$1"' _ "$H_KIT/start-multiverse.sh" "$H_RUNTIME")"
+check "the install record is larger than 64 KiB" \
+  "$(b test "$(stat -c %s "$H_DATA/install-record.json")" -gt 65536)"
 
 # THE CYCLE THAT COULD NOT RUN, end to end. Install, run a world, install again
 # over the same managed runtime, uninstall, install again. The release before
@@ -716,8 +727,8 @@ check "the two enrollment requests are byte-identical" \
 I_REQUEST_SECRET="$(sed -n '1s/.*"secret":"\([^"]*\)".*/\1/p' "$I_REQUESTS")"
 check "curl receives the secret through standard input, not its command line" \
   "$(b bash -c '! grep -qF "$2" "$1"' _ "$I_ARGS" "$I_REQUEST_SECRET")"
-check "the request identifies release 0.3.3" \
-  "$(b grep -qF '"release":"0.3.3"' "$I_REQUESTS")"
+check "the request identifies release 0.3.6" \
+  "$(b grep -qF '"release":"0.3.6"' "$I_REQUESTS")"
 check "the completed install removes the pending identity" \
   "$(b test ! -e "$I_DATA/enrollment-pending.json")"
 check "the completed credential is mode 0600" \

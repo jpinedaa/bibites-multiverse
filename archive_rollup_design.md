@@ -4,7 +4,17 @@
 this document is implemented and nothing in it changes a published promise on its own.~~ It is the
 design study behind the change to what the archive keeps, written so the change could be argued
 with before it was made. **It is left as it was written**, except where a later phase corrected it
-in place — each correction is struck through and dated, and there are four.
+in place. The first four corrections are struck through and dated. The fifth is the lineage
+format correction here.
+
+**Fifth correction, 2026-08-23.** The original species fold kept one mutable parent edge for each
+normalized name. The game can reuse a name. A later occurrence can then replace an older edge
+and create a cycle in the derived tree. Roll-up format 3 keeps bounded, immutable lineage
+instances. Each instance is one normalized name on one recorded parent path. A format-2 sidecar
+does not contain the ordered evidence needed to build them. The first format-3 start must rebuild
+the fold from the ordered raw record. `deploy/restart-archive.sh --rebuild-rollup` performs that
+operation and preserves the old sidecar. A format-3 archive refuses to start while a format-2
+sidecar remains in place.
 
 The owner ratified shape **B for the state, D for the raw, and a window on top of D** on
 `2026-08-17`; all six phases shipped and the build carrying them is in production. The governing
@@ -55,15 +65,17 @@ per-record constants belong to that build; `deploy/SIZING.md` owns them and stat
 Three separate things grow with the record, and they do not have the same fix.
 
 **Memory.** One structure grows with the ledger and nothing else does: the duplicate-suppression
-set (`dedup.go`, file header). Every other retained thing is bounded by construction — species at
-~~`4096`~~ **`65,536`, corrected 2026-08-21 after the 17-world public map exhausted the original
-bound**, genome fingerprints for each species at `8192`, brain buckets at a year, lanes at the
-grid, genome gaps at the retention horizon. Isolated by measurement, that one set was about
-`70 percent` of the settled resident set before the `2026-08-16` fingerprint change and about
-`128 MB` of live heap after it. **With the set removed, the archive's retained state is bounded by
-construction and stops following the record count**: about `30 MB` of live heap and about
-`60` to `70 MB` resident, flat for the life of the deployment, against `7.6` to `10.9 GB` of
-retained state that the current shape would reach by the announced end of the run.
+set (`dedup.go`, file header). Every other retained thing is bounded by construction. The species
+bound is ~~`4096`~~ **`65,536`, corrected 2026-08-21 after the public map exhausted the original
+bound**. The lineage-instance bound is **`131,072`, corrected 2026-08-23 after name reuse produced
+derived cycles**. Each species keeps at most `8192` genome fingerprints. Brain buckets, lanes, and
+genome gaps also have fixed bounds. The measurement isolated the duplicate set. Before the
+`2026-08-16` fingerprint change, it used about `70 percent` of the settled resident set. After the
+change, it used about `128 MB` of live heap.
+
+**Without this set, the retained state has a fixed bound and does not follow the record count.**
+The archive uses about `30 MB` of live heap and `60` to `70 MB` of resident memory. The old shape
+can reach `7.6` to `10.9 GB` by the announced end of the run.
 
 That removal is not this document's to make. It is a consequence of the migration protocol
 becoming pure at-most-once — no hold, no re-forward, no bounce — which makes a legitimate
@@ -97,7 +109,7 @@ Every live endpoint and every M5 evidence item, against the minimal durable stat
 | `/api/status` eviction counters | four counters | yes | process-local | roll-up state |
 | `/api/hops` | last `60 s` of crossings | yes, time and count | live only, never persisted | unchanged |
 | `/api/species` | census, joined to all-time species counts | yes, ~~`4096`~~ **`65,536`, corrected 2026-08-21** | full replay | roll-up state |
-| `/api/species/tree` | parent edges, ancestry floor | yes, ~~`4096`~~ **`65,536`, corrected 2026-08-21** | full replay | roll-up state |
+| `/api/species/tree` | immutable lineage instances, ancestry floor | yes, **`131,072` instances, corrected 2026-08-23** | full replay | roll-up state, format 3 |
 | `/api/species/trends` | `metrics.jsonl` tail | yes, byte-bounded read | sample file | unchanged |
 | `/api/species/history` | `metrics.jsonl` tail | yes, byte-bounded read | sample file | unchanged |
 | `/api/species/brains` numerator | brain histograms for each bucket | yes, `365 d` | `brains.jsonl` | unchanged |
@@ -114,7 +126,7 @@ The M5 evidence record, the same way:
 | Crossing rates, per-lane flow | lane cumulative totals | roll-up state |
 | Per-peer archive growth | per-peer record counters | **new counter**, bounded by slot count |
 | All-time species crossings, first, last | species aggregate | roll-up state |
-| Genealogy depth, ancestry floor | parent edges and `edgeFirstMs` | roll-up state |
+| Genealogy depth, ancestry floor | lineage instances and `edgeFirstMs` | roll-up state, format 3 |
 | Brain-complexity coverage | numerator and denominator | `brains.jsonl`, denominator added |
 | Version skew | `gameVersion` for each crossing | `metrics.jsonl`, or a **new bounded counter** |
 | Velocity floor | `60 s` hop window | **never durable, today or after**; derive from the raw window |

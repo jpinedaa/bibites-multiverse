@@ -1067,6 +1067,16 @@ namespace BibitesMultiverse
                 ["pendingIn"] = PendingInboundCount()
             };
 
+            // The sidecar's adaptive admission controller must distinguish a
+            // machine failing to achieve x10 from a player who deliberately
+            // requested x5. Time.timeScale is only the APPLIED value after the
+            // game's FPS governor; targetTimeScale is the request itself.
+            float targetTimeScale = StartupTimescale.CurrentTarget();
+            if (targetTimeScale >= 0f && !float.IsNaN(targetTimeScale) && !float.IsInfinity(targetTimeScale))
+            {
+                data["targetTimeScale"] = targetTimeScale;
+            }
+
             // §5.2, §15 A21 — the OPTIONAL save receipt. It is the only wire path the operator surface
             // has to a world's save state, and it exists because a sidecar on the second machine has no
             // file the archive can read. Absent until this mod has written a save, and absent forever

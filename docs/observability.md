@@ -237,6 +237,26 @@ person reads and the rest are what `monitor.sh` gates on.
 | `ledgerSegmentsAwaitingColdCopy` | **The number that should be zero.** Segments past the window with no confirmed off-host copy. |
 | `ledgerRetiredTotal`, `ledgerRetiredBytes` | What this process removed after confirming a copy, and the bytes it freed. |
 
+**The genealogy has its own integrity view.** After each archive restart or fold rebuild, read
+`/api/species/tree`. The fields separate record limits from valid name reuse.
+
+| Field | Healthy reading |
+|---|---|
+| `ledgerOverflow` | `0`. A non-zero value means the name aggregate refused observations. |
+| `lineageOverflow` | `0`. A non-zero value means the lineage-instance fold refused observations. |
+| `cycleGuard` | `0`. A non-zero value means a cycle reached the view despite ingest protection. |
+| `walkCapped`, `nodesCapped` | `0` and `false`. Either reading means the published tree hit a safety bound. |
+| `lineageInstances` | The number of immutable recorded nodes, including parent-only placeholders. |
+| `splitNames` | Informational. A non-zero value means one normalized name occurs in separate recorded families. |
+| `unresolved` | The number of living rows whose record cannot select one lineage instance. Investigate each row. |
+| `unrecorded` | The number of isolated living rows with no parent evidence. Do not combine it with `unresolved`. |
+
+The old graph used one mutable parent for each normalized name. Reused names created derived
+cycles and disconnected the living tree. A format-3 roll-up keeps immutable lineage instances.
+Format 2 cannot be converted without the ordered raw record. A format-3 archive refuses to start
+while the format-2 sidecar remains. Use the recorded dry run and real
+`restart-archive.sh --rebuild-rollup` operation for the upgrade.
+
 **These fields are refreshed by the archive's maintenance pass and not by the
 status request**, so a page load never walks a directory. That has one
 consequence for anything that reads them: the pass at start compresses before
@@ -510,6 +530,10 @@ Every deployment record carries a window, not a moment:
 | bypassed lanes (and empty cells) | | | | |
 | ledger records | | | | |
 | archive replay seconds, if it restarted | | | | |
+| lineage / name instances | | | | |
+| split / unresolved names | | | | |
+| ledger / lineage overflow | | | | |
+| cycle / walk / node guards | | | | |
 
 `deploy/health-snapshot.sh` produces this. It keeps numbers and decides
 nothing: no thresholds, no severity, no exit code that means "bad". A single
@@ -535,6 +559,10 @@ name**. An exit code proves nothing here and neither does the log line.
 
 **Assert ancestry.** Refuse to install a source older than or unrelated to what
 is running, unless an approved rollback names it.
+
+**Assert genealogy after the restart.** Require zero `ledgerOverflow`, `lineageOverflow`,
+`cycleGuard`, and `walkCapped`. Require `nodesCapped: false`. Record `splitNames` and `unresolved`.
+Do not fail only because `splitNames` is non-zero. It records valid name reuse.
 
 **Take the lease.** One deployment owner per target at a time.
 
