@@ -58,12 +58,14 @@ The relay refuses a migration before it creates a forwarding record when the bou
 queue is full. It keeps that destination connected.
 
 On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
-healthy, but the mandatory relay-only canary did not meet every gate. Investigation found that the
-affected long-running participants were still using the older sidecar while carrying full durable
-inbound and outbound queues. Release `0.3.4` completes the correction on the participant side: it
-paces both journal-backed payloads and acknowledgements, drains older acknowledgements first, and
-keeps ordinary control traffic responsive. The existing journals remain the custody record and
-must not be cleared.
+healthy, but the mandatory relay-only canary did not meet every gate. Later review assigned the
+failed signals to participant-owned sidecar state, not relay transport. Isolated tests reproduced
+the visible pattern with a saturated journal. They also confirmed that the current sidecar recovers
+it. The service did not inspect any external participant's executable, timeout, clock, or journal
+state. Thus, the exact participant-local cause remains open. Release `0.3.4` completes the
+correction on the participant side. It paces journal-backed payloads and acknowledgements, drains
+older acknowledgements first, and keeps ordinary control traffic responsive. The existing journals
+remain the custody record and must not be cleared.
 
 Release `0.3.4` was published and then deployed on 2026-08-23. Five Windows worlds on the release
 machine retained their identities and journals through the upgrade; all five rejoined their
@@ -81,6 +83,9 @@ new relay fault. Five concurrent games requested 10× speed, but some were achie
 so those CPU-limited worlds drain more slowly in wall-clock time. The new relay pacing prevents
 aggregate fan-in from becoming a burst or a capacity disconnect; it does not make an overloaded
 simulation advance faster and it does not erase its durable queue.
+
+Two exact five-minute cloud closeout intervals kept aggregate migration positive. All six hosted
+sources stayed live and mod-connected. None had every open outbound lane at zero.
 
 ### Species genealogy repair
 
