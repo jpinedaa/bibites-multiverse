@@ -131,6 +131,15 @@ post-promotion snapshot reported all eleven live, mod-connected, and enforcing, 
 their learned limits, continuing migrations, zero capacity sheds, and zero discarded journal
 bytes. The cloud rollout used the guarded runtime transaction and passed host verification.
 
+The first 20-minute watch recorded a bounded but important follow-up. Hosted slot 3 wrote 22
+forwards off after the five-minute answer deadline: 15 had relay receipts naming newly closed slot
+6 during one post-activation burst, while the later seven named participant slot 19 around a mod
+disconnect. Pre-promotion logs also contain clustered shadow-mode timeouts from hosted slots 2 and
+5 to overloaded local slot 9, so the post-promotion count alone is not evidence that admission
+caused a regression. Preserve both baselines and investigate the missing ACK/NACK path. Do not
+infer that a receipt proves destination custody, and do not loosen at-most-once routing to hide the
+counter.
+
 The immediate rollback is `adaptive-shadow`, which preserves estimator and journal state. If an
 enforcing fixed fallback is needed while the adaptive calculation is investigated, the reviewed
 starting points are 40 organisms for each hosted world and 10 for each world on the shared local

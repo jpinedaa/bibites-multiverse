@@ -122,6 +122,18 @@ continuing migrations, and no capacity sheds or discarded journal bytes. Existin
 was retained. Automatic `metrics.jsonl` history will be reviewed after 24 and 72 hours; rollback
 criteria and fixed host-class fallbacks are recorded in the population-admission runbook.
 
+The first 20-minute enforcement watch also established the loss baseline that later reviews must
+use. Slot 3 recorded 22 unanswered forwards: 15 were sent to newly closed hosted slot 6 during a
+short post-activation burst, and the later seven targeted participant slot 19 around a mod
+disconnect. Other hosted sources added only isolated losses. This was not classified as a new
+enforcement regression because the retained pre-promotion logs contain similar clustered
+five-minute timeouts from slots 2 and 5 to overloaded local slot 9 while it was still in shadow
+mode. All affected sends had relay forward receipts, so the follow-up is to determine why no ACK
+or pre-custody NACK returned from those destinations, and whether offers to a recently
+mod-disconnected slot can be narrowed without guessing about custody. Enforcement remains active;
+the 24-hour comparison must use rates on each side of the promotion rather than restart-reset
+aggregate totals.
+
 The service host then activated the archive and relay binaries built from `c321aad`. The guarded
 archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
 The archive subscribed before any placement claim, so the receipt reports a complete record. At
