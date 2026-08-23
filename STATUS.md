@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-22 UTC.
+Last updated: 2026-08-23 UTC.
 
 Bibites Multiverse `0.3.3` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
@@ -36,7 +36,7 @@ The dashboard shows this known critical result without weakening or hiding it.
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
 history store. Its Coverage section names the missing tests and profilers.
 
-### Localized migration-flow correction awaiting deployment
+### Localized migration-flow correction rollout
 
 On 2026-08-22, protected five-minute lane samples showed a localized migration-flow problem.
 Specific live, populated sources had every open outbound lane at `0/min` in repeated samples.
@@ -53,13 +53,30 @@ The relay can then close that destination connection.
 The protected observations correlate with this mechanism, but they do not prove that it caused
 every zero lane.
 
-The correction in this source tree paces physical migration writes for each destination identity.
-It also gives durable destination acknowledgements priority in the sidecar's existing send pace.
-The relay refuses a migration before its forwarding record when the new bounded destination queue
-is full, and it keeps that destination connected. Local diagnostics now report acknowledgements
-that still wait to release sender custody.
+Public commit `5ca9bef` paces physical migration writes for each destination identity.
+The relay refuses a migration before it creates a forwarding record when the bounded destination
+queue is full. It keeps that destination connected.
 
-The complete Go test suite passes on this source. This correction is not yet on the hosted service.
+On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
+healthy during the mandatory relay-only canary. Each exact five-minute interval recorded no
+capacity-triggered relay shed, and aggregate migration stayed above zero.
+
+The mandatory canary still failed. One or more live, populated sources repeatedly showed `0/min`
+on every open outbound lane. Participant sidecars returned overload refusals. In each exact
+interval, the aggregate custody and paced-depth totals had a disallowed three-sample rise.
+
+The displayed routes from two long-running affected sources last recorded a unique migration
+before the new relay started. A third source met the repeated-zero rule only in the final two
+samples, after a disconnect and reconnect, and had migrated after relay activation. The evidence
+does not establish one relay regression as their common cause. Suspected participant-journal
+saturation and old sidecar versions are the leading hypothesis for the long-running pair.
+Participant diagnostics must test it and bound the late third source.
+
+The relay half of the correction is live. The source tree also gives durable destination
+acknowledgements priority in the sidecar's existing send pace. The complete Go test suite passes
+with that change. Operators withheld the cloud-sidecar transaction after the failed relay canary.
+Hosted cloud worlds remain on their prior runtime, and the current participant release does not
+include this sidecar change.
 
 ## Hosted service
 
