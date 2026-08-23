@@ -1,137 +1,68 @@
-# Production health dashboard end-state proposal
+# Production telemetry dashboard proposal
 
-Status: design proposal with a static mockup. This document does not specify a production change.
+Status: static design proposal. This proposal does not change production.
 
-The current dashboard proves that many measurements exist. It does not give the operator a fast
-answer about service condition. Raw checks, host counters, archive counters, and coverage gaps all
-have similar visual weight.
+## Goal
 
-The end-state dashboard must answer these questions in order:
+The dashboard gives one organized visual model of the production system. It shows relationships,
+rates, capacity, latency, errors, and data movement.
 
-1. Is the service available now?
-2. Is the permanent record current and safe?
-3. What needs operator action?
-4. What changed before the current condition?
-5. Is performance stable, or is a resource approaching its limit?
-6. Is the evidence fresh and complete?
+The page does not lead with conclusions or an action queue. Short labels and values replace
+explanatory paragraphs.
 
-## Proposed status model
+## Page structure
 
-The top banner reports service impact. It does not copy the worst monitor severity.
+| Order | Layer | Main visualizations |
+|---|---|---|
+| 1 | System map | Hosts, services, traffic paths, data paths, and current flow rates |
+| 2 | Headline signals | Requests, latency, errors, peers, archive input, write lag, CPU, and memory |
+| 3 | Compute | Resource history, pressure, per-service memory, process state, and restart marks |
+| 4 | Cloud and services | Public paths, service state, transfer use, cost pace, and certificate age |
+| 5 | Application and traffic | Request volume, response codes, latency, relay sessions, worlds, and broadcast |
+| 6 | Archive and data | Record pipeline, input and write rates, storage, roll-up, cold copy, and integrity |
+| 7 | Data coverage | Source freshness, gaps, and collection cadence |
 
-| State | Meaning |
-|---|---|
-| Outage | The public path is unavailable, or the archive does not record the map. |
-| Degraded | The service runs, but participants, routing, record integrity, or performance are degraded. |
-| At risk | The service runs normally, but a limit, stale audit, or maintenance gate needs action. |
-| Healthy | All required service results are fresh and inside their limits. |
-| Unknown | Required evidence is absent or stale. |
+Each layer has a fixed color. Health state uses dots, borders, and missing segments. This rule
+prevents one color from having two meanings.
 
-The underlying monitor severity remains visible in the evidence drawer. A critical maintenance
-gate can appear as `At risk` when it has no current service impact. The dashboard must state that
-distinction.
+## Visual rules
 
-## First-screen hierarchy
+- All time charts use one time range and one aligned time axis.
+- Deployment and restart marks appear on the charts.
+- A gap means unknown data. A gap never means zero.
+- When a rate gives more information, rate charts replace cumulative totals.
+- Thresholds appear as lines or bands.
+- Legends stay next to their charts.
+- Units appear with each value.
+- Tables are limited to endpoints, services, and other exact comparisons.
+- Raw fields remain available below each layer, not on the overview.
 
-### 1. Current condition
+## Data in the complete dashboard
 
-Show one state, one plain-language sentence, and the update time. Show four short facts beside it:
+### Available now
 
-- Public path
-- Permanent record
-- Connected worlds
-- Evidence confidence
+- Service-host CPU, load, memory, swap, disk, TCP, connection tracking, and service memory
+- Scheduled monitor results
+- World presence, population, migrations, routes, and achieved time scale
+- Archive records, gaps, roll-up state, replay cost, raw segments, and cold-copy queue
+- Broadcast viewer presence
+- Transfer verdicts and billing freshness
 
-### 2. Needs attention
+### New collection required
 
-Rank active items by impact and urgency. Each item contains four fields:
-
-- Impact
-- Evidence
-- Next operator action
-- Time in this state
-
-Do not show one card for every monitor check. Put related symptoms into one operator problem. For
-example, dark worlds and route bypasses are one participant-availability problem.
-
-### 3. System domains
-
-Group the system into four stable domains:
-
-- Public access and broadcast
-- Worlds and routing
-- Archive and record integrity
-- Host capacity and cost
-
-Each domain shows one state, one sentence, and at most three supporting values.
-
-### 4. Trends that change decisions
-
-Show the current value, recent range, decision limit, and direction. The first set contains:
-
-- Live worlds
-- Memory available
-- Swap used
-- Disk used
-- Replay time
-- Genome-gap rate
-
-Do not graph cumulative counters unless the dashboard converts them into a rate or delta.
-
-### 5. Recent changes
-
-Join incidents, recoveries, deployments, and monitor transitions on one timeline. This timeline
-gives the operator a starting point for cause analysis.
-
-## Progressive disclosure
-
-Keep these items below expandable controls:
-
-- All monitor results
-- Per-unit memory
-- TCP counters
-- Per-world rows
-- Raw archive counters
-- Coverage inventory
-- Data-source timestamps
-
-The first screen can link to a focused detail page for each system domain. The main page must not
-become the detail page.
-
-## Evidence confidence
-
-Freshness and coverage are properties of each result. They are not a separate wall of status cards.
-
-Each domain shows one confidence label:
-
-- Complete: all required sources are fresh.
-- Partial: the conclusion uses fresh data, but a useful source is missing.
-- Stale: a required source is late.
-- Unknown: no current conclusion is possible.
-
-Missing synthetic playback, world-host telemetry, or an external probe can reduce confidence. A
-missing optional profiler does not make the live service unhealthy.
-
-## Data required for the real dashboard
-
-The first implementation can use the current APIs for service state, host samples, map state, and
-viewer presence. It also needs a small presentation model that produces operator problems instead
-of raw check cards.
-
-The complete end state also needs these sources:
-
-- An external public-path and video-playback probe
-- Off-host history for service-host and world-host measurements
-- World-host pressure-stall measurements in the central store
-- Relay close codes and per-slot session counters
-- Deployment and recovery events in a queryable feed
-- Explicit `warming` state for rate checks without a complete time window
-- A current billing reconciliation result
+- Request rate, response code, response size, and latency by public route
+- Relay session count, duration, close code, and bytes by slot
+- Service-host pressure-stall information
+- Central world-host performance history
+- External TLS, API, and video-playback probes
+- Time-series provider transfer, burst capacity, cost, and spot price
+- Deployment, restart, and recovery marks in the same time store
+- Off-host retention for every chart
 
 ## Mockup
 
-Open [`mockup.html`](mockup.html). The file is standalone and uses mock data. The scenario control
-shows the proposed hierarchy during degradation, normal operation, and an outage.
+Open [mockup.html](mockup.html). The file is standalone and uses static data. The scenario control
+changes the visual state for typical load, compute pressure, and an archive stall.
 
-The mockup is for information design. It does not define the final colors, type, thresholds, or
-production API.
+The mockup defines information structure and visual grammar. It does not define production
+thresholds or a storage implementation.

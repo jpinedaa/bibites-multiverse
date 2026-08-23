@@ -3,803 +3,1032 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bibites Multiverse — Health dashboard end-state mockup</title>
-<meta name="description" content="Static information-design mockup for the Bibites Multiverse production health dashboard.">
+<title>Bibites Multiverse — Production telemetry mockup</title>
+<meta name="description" content="Visualization-first mockup for production system telemetry.">
 <link rel="icon" href="data:,">
 <style>
 :root {
   color-scheme: dark;
-  --bg: #07100d;
-  --surface: #0d1814;
-  --surface-2: #12211b;
-  --surface-3: #172a22;
-  --line: #243e33;
-  --line-soft: rgba(91, 134, 112, .24);
-  --text: #edf7f1;
-  --muted: #98ada3;
-  --dim: #6e8379;
-  --good: #64dda6;
-  --good-soft: rgba(100, 221, 166, .11);
-  --warn: #f0bc56;
-  --warn-soft: rgba(240, 188, 86, .12);
-  --bad: #f07178;
-  --bad-soft: rgba(240, 113, 120, .12);
-  --info: #78bdf2;
-  --info-soft: rgba(120, 189, 242, .11);
-  --unknown: #9ca9b2;
-  --max: 1320px;
-  --shadow: 0 24px 70px rgba(0, 0, 0, .24);
+  --bg: #070d18;
+  --surface: #0c1524;
+  --surface-2: #111d2e;
+  --surface-3: #162438;
+  --line: #20324a;
+  --line-soft: rgba(96, 127, 164, .18);
+  --text: #e5edf7;
+  --muted: #8fa2b9;
+  --dim: #65758a;
+  --compute: #55c5ff;
+  --cloud: #a891ff;
+  --app: #53e0b2;
+  --data: #f5b95f;
+  --good: #56d99b;
+  --warn: #ffc35a;
+  --bad: #ff6f7d;
+  --unknown: #6f7e92;
+  --max: 1500px;
+  --shadow: 0 18px 55px rgba(0, 0, 0, .2);
 }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
+  overflow-x: hidden;
   background:
-    radial-gradient(circle at 82% -8%, rgba(61, 151, 112, .16), transparent 30rem),
-    radial-gradient(circle at -5% 30%, rgba(54, 111, 153, .10), transparent 30rem),
+    radial-gradient(circle at 9% -10%, rgba(85, 197, 255, .09), transparent 31rem),
+    radial-gradient(circle at 92% 9%, rgba(168, 145, 255, .08), transparent 32rem),
     var(--bg);
   color: var(--text);
-  font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 13px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-button, input { font: inherit; }
-a { color: inherit; }
-.shell { width: min(calc(100% - 40px), var(--max)); margin-inline: auto; }
+button { font: inherit; }
+.shell { width: min(calc(100% - 36px), var(--max)); margin-inline: auto; }
 .skip {
   position: fixed;
-  left: 12px;
   top: -80px;
+  left: 12px;
   z-index: 100;
   padding: 9px 13px;
-  border-radius: 7px;
-  background: var(--text);
+  border-radius: 6px;
   color: var(--bg);
+  background: var(--text);
 }
 .skip:focus { top: 12px; }
 
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 20;
-  border-bottom: 1px solid rgba(76, 117, 97, .3);
-  background: rgba(7, 16, 13, .9);
+  z-index: 30;
+  border-bottom: 1px solid rgba(78, 104, 136, .26);
+  background: rgba(7, 13, 24, .91);
   backdrop-filter: blur(18px);
 }
 .nav {
-  min-height: 68px;
+  min-height: 62px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 22px;
 }
-.brand { display: flex; align-items: center; gap: 11px; font-weight: 760; letter-spacing: -.02em; }
-.brand svg { width: 30px; color: var(--good); }
-.context { color: var(--muted); font-size: 13px; }
-.context strong { color: var(--text); font-weight: 650; }
-.navright { display: flex; align-items: center; gap: 14px; }
-.mock-label {
-  border: 1px solid rgba(120, 189, 242, .42);
-  border-radius: 999px;
-  padding: 5px 9px;
-  color: var(--info);
-  background: var(--info-soft);
-  font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.fresh { color: var(--muted); font-size: 12px; }
-
-main { padding-bottom: 72px; }
-.hero { padding: 44px 0 20px; }
-.hero-tools {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 14px;
-}
-.eyebrow {
-  margin: 0;
-  color: var(--muted);
-  font: 700 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 760; letter-spacing: -.02em; }
+.brand svg { width: 26px; color: var(--app); }
+.brand-context { color: var(--muted); font-size: 12px; font-weight: 550; }
+.top-tools { display: flex; align-items: center; gap: 10px; }
 .scenario-control {
   display: inline-flex;
-  padding: 4px;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(13, 24, 20, .9);
+  border-radius: 8px;
+  background: var(--surface);
 }
 .scenario-control button {
   border: 0;
-  border-radius: 7px;
-  padding: 7px 11px;
+  border-radius: 5px;
+  padding: 6px 9px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
 }
 .scenario-control button[aria-pressed="true"] { color: var(--text); background: var(--surface-3); }
-.scenario-control button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
-
-.condition {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  padding: 30px;
-  background: linear-gradient(145deg, rgba(18, 33, 27, .98), rgba(9, 18, 15, .96));
-  box-shadow: var(--shadow);
-}
-.condition::after {
-  content: "";
-  position: absolute;
-  width: 330px;
-  height: 330px;
-  right: -130px;
-  top: -190px;
-  border-radius: 50%;
-  background: var(--condition-glow, var(--warn-soft));
-  filter: blur(4px);
-}
-body[data-tone="good"] .condition { --condition-glow: rgba(100, 221, 166, .15); }
-body[data-tone="bad"] .condition { --condition-glow: rgba(240, 113, 120, .18); }
-.condition-main {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 30px;
-}
-.state-line { display: flex; align-items: center; gap: 13px; }
-.state-dot {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
-  border-radius: 50%;
-  background: var(--warn);
-  box-shadow: 0 0 0 7px var(--warn-soft);
-}
-body[data-tone="good"] .state-dot { background: var(--good); box-shadow: 0 0 0 7px var(--good-soft); }
-body[data-tone="bad"] .state-dot { background: var(--bad); box-shadow: 0 0 0 7px var(--bad-soft); }
-.condition h1 { margin: 0; font-size: clamp(34px, 5vw, 58px); line-height: 1; letter-spacing: -.05em; }
-.condition-copy { max-width: 760px; margin: 17px 0 0; color: #c2d2ca; font-size: 18px; }
-.condition-meta { margin-top: 14px; color: var(--muted); font-size: 12px; }
-.condition-meta strong { color: var(--text); }
-.confidence {
-  min-width: 200px;
-  border-left: 1px solid var(--line);
-  padding-left: 26px;
-}
-.confidence span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-.confidence strong { display: block; margin-top: 5px; font-size: 22px; }
-.confidence p { max-width: 220px; margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-.condition-facts {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 26px;
-}
-.fact {
-  border: 1px solid var(--line-soft);
-  border-radius: 12px;
-  padding: 14px 15px;
-  background: rgba(7, 16, 13, .46);
-}
-.fact-label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
-.fact strong { display: block; margin-top: 4px; font-size: 17px; }
-.fact small { display: block; margin-top: 2px; color: var(--dim); font-size: 11px; }
-
-.section { padding-top: 42px; }
-.section-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 16px;
-}
-.section-head h2 { margin: 4px 0 0; font-size: 29px; line-height: 1.15; letter-spacing: -.035em; }
-.section-head > p { max-width: 590px; margin: 0; color: var(--muted); text-align: right; font-size: 13px; }
-.card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(13, 24, 20, .92);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, .12);
-}
-
-.attention-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, .75fr); gap: 16px; }
-.attention-list { overflow: hidden; }
-.issue {
-  border-top: 1px solid var(--line-soft);
-  border-left: 3px solid var(--warn);
-  padding: 18px 20px 17px;
-}
-.issue:first-child { border-top: 0; }
-.issue.bad { border-left-color: var(--bad); }
-.issue.info { border-left-color: var(--info); }
-.issue summary { list-style: none; cursor: pointer; }
-.issue summary::-webkit-details-marker { display: none; }
-.issue-top { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 15px; align-items: start; }
-.issue-rank { color: var(--muted); font: 700 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .08em; }
-.issue-title { font-weight: 720; font-size: 16px; }
-.issue-impact { margin-top: 3px; color: var(--muted); font-size: 13px; }
-.issue-age { color: var(--muted); font-size: 11px; white-space: nowrap; }
-.issue-toggle { color: var(--info); font-size: 12px; }
-.issue-body {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin: 14px 0 2px 107px;
-}
-.issue-body div { border-radius: 9px; padding: 11px 12px; background: var(--surface-2); }
-.issue-body span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
-.issue-body p { margin: 5px 0 0; color: #cedbd5; font-size: 12px; }
-.empty-attention { padding: 34px; display: flex; gap: 14px; align-items: center; color: #c7d6cf; }
-.empty-attention .state-dot { width: 11px; height: 11px; flex-basis: 11px; }
-
-.maintenance { padding: 21px; }
-.maintenance h3 { margin: 0; font-size: 17px; }
-.maintenance > p { margin: 5px 0 17px; color: var(--muted); font-size: 12px; }
-.maintenance-item { padding: 13px 0; border-top: 1px solid var(--line-soft); }
-.maintenance-item:first-of-type { border-top: 0; }
-.maintenance-item strong { display: block; font-size: 13px; }
-.maintenance-item span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
-.maintenance-tag { display: inline-flex !important; width: max-content; margin-top: 7px !important; padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--info) !important; }
-
-.domains { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
-.domain { padding: 19px; min-height: 210px; }
-.domain-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.domain h3 { margin: 0; font-size: 15px; }
-.status-pill {
+.scenario-control button:focus-visible { outline: 2px solid var(--compute); outline-offset: 2px; }
+.mock-tag, .time-tag, .data-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   color: var(--muted);
-  font: 700 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .07em;
+  background: rgba(12, 21, 36, .8);
+  font: 650 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mock-tag { color: var(--compute); border-color: rgba(85, 197, 255, .32); }
+
+main { padding: 30px 0 64px; }
+.page-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 13px;
+}
+.overline {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .12em;
   text-transform: uppercase;
 }
-.status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.status-pill.good { color: var(--good); border-color: rgba(100, 221, 166, .34); }
-.status-pill.warn { color: var(--warn); border-color: rgba(240, 188, 86, .34); }
-.status-pill.bad { color: var(--bad); border-color: rgba(240, 113, 120, .36); }
-.status-pill.info { color: var(--info); border-color: rgba(120, 189, 242, .34); }
-.domain-copy { min-height: 60px; margin: 14px 0 0; color: #c6d5ce; font-size: 13px; }
-.domain-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 18px; }
-.domain-metric { padding-top: 10px; border-top: 1px solid var(--line-soft); }
-.domain-metric span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
-.domain-metric strong { display: block; margin-top: 3px; font-size: 15px; }
-.domain-confidence { margin-top: 15px; color: var(--dim); font-size: 10px; }
-.domain-confidence b { color: var(--muted); font-weight: 650; }
-
-.trend-card { overflow: hidden; }
-.rangebar { display: flex; justify-content: flex-end; padding: 14px 18px 0; }
-.rangebar .scenario-control { background: var(--bg); }
-.trend-head, .trend-row {
-  display: grid;
-  grid-template-columns: minmax(160px, 1fr) 110px 120px minmax(180px, 1.4fr) 105px;
-  gap: 16px;
+h1 { margin: 0; font-size: clamp(26px, 3vw, 38px); line-height: 1; letter-spacing: -.04em; }
+.head-meta { display: flex; align-items: center; gap: 8px; }
+.global-state {
+  display: inline-flex;
   align-items: center;
+  gap: 7px;
+  font-weight: 700;
 }
-.trend-head { padding: 13px 20px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
-.trend-row { min-height: 80px; padding: 13px 20px; border-top: 1px solid var(--line-soft); }
-.trend-name strong { display: block; font-size: 13px; }
-.trend-name span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
-.trend-current { font-size: 17px; font-weight: 720; }
-.trend-range { color: var(--muted); font-size: 12px; }
-.spark { width: 100%; height: 38px; }
-.spark .gridline { stroke: rgba(91, 134, 112, .22); stroke-width: 1; }
-.spark polyline { fill: none; stroke: var(--info); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
-.spark circle { fill: var(--info); }
-.spark.warn polyline, .spark.warn circle { stroke: var(--warn); fill: var(--warn); }
-.spark.bad polyline, .spark.bad circle { stroke: var(--bad); fill: var(--bad); }
-.decision { font-size: 11px; }
-.decision b { display: block; color: var(--text); }
-.decision span { color: var(--muted); }
+.state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(86, 217, 155, .09); }
+body[data-scenario="compute"] .global-state .state-dot,
+body[data-scenario="compute"] .compute-node .node-dot { background: var(--bad); }
+body[data-scenario="archive"] .global-state .state-dot,
+body[data-scenario="archive"] .archive-node .node-dot,
+body[data-scenario="archive"] .storage-node .node-dot { background: var(--bad); }
 
-.lower-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
-.timeline { padding: 8px 21px 16px; }
-.event { position: relative; display: grid; grid-template-columns: 72px 18px 1fr; gap: 10px; min-height: 65px; }
-.event::before { content: ""; position: absolute; left: 80px; top: 21px; bottom: -2px; width: 1px; background: var(--line); }
-.event:last-child::before { display: none; }
-.event time { padding-top: 15px; color: var(--muted); font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.event-dot { position: relative; z-index: 1; width: 8px; height: 8px; margin: 18px 0 0 5px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 5px var(--surface); }
-.event.warn .event-dot { background: var(--warn); }
-.event.bad .event-dot { background: var(--bad); }
-.event.good .event-dot { background: var(--good); }
-.event-copy { padding: 13px 0 12px; border-bottom: 1px solid var(--line-soft); }
-.event:last-child .event-copy { border-bottom: 0; }
-.event-copy strong { display: block; font-size: 13px; }
-.event-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
-
-.evidence { padding: 20px; }
-.evidence h3 { margin: 0; font-size: 17px; }
-.evidence > p { margin: 5px 0 17px; color: var(--muted); font-size: 12px; }
-.source { padding: 11px 0; border-top: 1px solid var(--line-soft); }
-.source:first-of-type { border-top: 0; }
-.source-top { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
-.source-top span { color: var(--muted); }
-.source-bar { height: 4px; margin-top: 7px; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
-.source-bar i { display: block; width: var(--width, 100%); height: 100%; border-radius: inherit; background: var(--good); }
-.source.warn .source-bar i { background: var(--warn); }
-.source.bad .source-bar i { background: var(--bad); }
-.source.info .source-bar i { background: var(--info); }
-.coverage-note { margin-top: 15px; padding: 12px; border-radius: 9px; color: #bbd4e6; background: var(--info-soft); font-size: 11px; }
-
-.details-stack { display: grid; gap: 10px; }
-.drawer { overflow: hidden; }
-.drawer summary {
-  list-style: none;
+.panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(17, 29, 46, .95), rgba(10, 19, 32, .97));
+  box-shadow: var(--shadow);
+}
+.panel-head {
+  min-height: 46px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.panel-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.panel-title h2, .panel-title h3 { margin: 0; font-size: 12px; letter-spacing: .01em; }
+.panel-title small { color: var(--dim); font-size: 10px; }
+.legend { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 14px; height: 2px; border-radius: 999px; background: currentColor; }
+.legend .compute { color: var(--compute); }
+.legend .cloud { color: var(--cloud); }
+.legend .app { color: var(--app); }
+.legend .data { color: var(--data); }
+.legend .bad { color: var(--bad); }
+
+/* system map */
+.topology { overflow: hidden; }
+.flow-scroll { overflow-x: auto; scrollbar-color: var(--line) transparent; }
+.flow-map { min-width: 1060px; padding: 16px; }
+.flow-row {
+  display: grid;
+  grid-template-columns: 116px 1fr 150px 1fr 150px 1fr 150px;
+  align-items: center;
+  gap: 10px;
+}
+.flow-row + .flow-row { margin-top: 10px; }
+.lane-label {
+  color: var(--dim);
+  font: 650 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.node {
+  position: relative;
+  min-height: 58px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--node-color, var(--muted));
+  border-radius: 8px;
+  background: rgba(7, 13, 24, .58);
+}
+.node.compute-node { --node-color: var(--compute); }
+.node.cloud-node { --node-color: var(--cloud); }
+.node.app-node { --node-color: var(--app); }
+.node.archive-node, .node.storage-node { --node-color: var(--data); }
+body[data-scenario="compute"] .compute-node {
+  border-color: rgba(255, 111, 125, .7);
+  box-shadow: inset 0 0 28px rgba(255, 111, 125, .06);
+}
+body[data-scenario="archive"] .archive-node,
+body[data-scenario="archive"] .storage-node {
+  border-color: rgba(255, 111, 125, .7);
+  box-shadow: inset 0 0 28px rgba(255, 111, 125, .06);
+}
+.node-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.node strong { font-size: 11px; }
+.node-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+.node-value { display: block; margin-top: 7px; color: var(--muted); font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.flow-link { position: relative; height: 1px; background: linear-gradient(90deg, var(--line), var(--app), var(--line)); }
+.flow-link.data { background: linear-gradient(90deg, var(--line), var(--data), var(--line)); }
+.flow-link.cloud { background: linear-gradient(90deg, var(--line), var(--cloud), var(--line)); }
+.flow-link::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -3px;
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 5px solid var(--app);
+}
+.flow-link.data::after { border-left-color: var(--data); }
+.flow-link.cloud::after { border-left-color: var(--cloud); }
+.flow-value {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  translate: -50% 0;
+  color: var(--muted);
+  font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+/* headline metrics */
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+.signal {
+  position: relative;
+  min-width: 0;
+  min-height: 92px;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(12, 21, 36, .86);
+}
+.signal::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--signal-color); }
+.signal.compute { --signal-color: var(--compute); }
+.signal.cloud { --signal-color: var(--cloud); }
+.signal.app { --signal-color: var(--app); }
+.signal.data { --signal-color: var(--data); }
+body[data-scenario="compute"] .signal.compute { border-color: rgba(255, 111, 125, .55); }
+body[data-scenario="archive"] .signal.data { border-color: rgba(255, 111, 125, .55); }
+.signal-label { display: block; color: var(--muted); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
+.signal-value { display: block; margin-top: 5px; font-size: 21px; line-height: 1; letter-spacing: -.03em; white-space: nowrap; }
+.signal-value small { color: var(--muted); font-size: 10px; font-weight: 550; letter-spacing: 0; }
+.mini-spark { position: absolute; left: 10px; right: 10px; bottom: 7px; width: calc(100% - 20px); height: 23px; opacity: .72; }
+.mini-spark path { fill: none; stroke: var(--signal-color); stroke-width: 1.7; vector-effect: non-scaling-stroke; }
+
+/* domain layout */
+.domain-section { margin-top: 32px; scroll-margin-top: 76px; }
+.domain-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
   gap: 20px;
-  padding: 17px 20px;
-  cursor: pointer;
+  margin-bottom: 9px;
 }
-.drawer summary::-webkit-details-marker { display: none; }
-.drawer summary strong { font-size: 14px; }
-.drawer summary span { color: var(--muted); font-size: 12px; }
-.drawer summary::after { content: "+"; color: var(--info); font-size: 18px; }
-.drawer[open] summary::after { content: "−"; }
-.drawer-body { padding: 0 20px 19px; border-top: 1px solid var(--line-soft); }
-.checks-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-top: 14px; }
-.check-group { padding: 13px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-2); }
-.check-group h4 { margin: 0 0 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
-.check-line { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 11px; }
-.check-line:first-of-type { border-top: 0; }
-.check-line i { font-style: normal; color: var(--good); }
-.check-line i.warn { color: var(--warn); }
-.check-line i.bad { color: var(--bad); }
-.coverage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 14px; }
-.coverage-item { padding: 13px; border-radius: 10px; background: var(--surface-2); }
-.coverage-item strong { display: block; font-size: 12px; }
-.coverage-item p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.domain-name { display: flex; align-items: center; gap: 10px; }
+.domain-mark { width: 4px; height: 30px; border-radius: 999px; background: var(--domain-color); box-shadow: 0 0 22px color-mix(in srgb, var(--domain-color) 35%, transparent); }
+.domain-heading h2 { margin: 0; font-size: 22px; line-height: 1; letter-spacing: -.03em; }
+.domain-heading small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.domain-section.compute { --domain-color: var(--compute); }
+.domain-section.cloud { --domain-color: var(--cloud); }
+.domain-section.app { --domain-color: var(--app); }
+.domain-section.data { --domain-color: var(--data); }
+.domain-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 9px; }
+.span-12 { grid-column: span 12; }
+.span-8 { grid-column: span 8; }
+.span-7 { grid-column: span 7; }
+.span-6 { grid-column: span 6; }
+.span-5 { grid-column: span 5; }
+.span-4 { grid-column: span 4; }
+.span-3 { grid-column: span 3; }
 
-.mock-foot { margin-top: 48px; padding: 22px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-.mock-foot .shell { display: flex; justify-content: space-between; gap: 24px; }
+/* charts */
+.chart-wrap { padding: 10px 13px 12px; }
+.chart { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .grid { stroke: rgba(105, 134, 169, .14); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .axis { fill: var(--dim); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chart .line { fill: none; stroke-width: 2.1; vector-effect: non-scaling-stroke; }
+.chart .area { opacity: .16; }
+.chart .compute-line { stroke: var(--compute); }
+.chart .cloud-line { stroke: var(--cloud); }
+.chart .app-line { stroke: var(--app); }
+.chart .data-line { stroke: var(--data); }
+.chart .bad-line { stroke: var(--bad); }
+.chart .threshold { stroke: var(--warn); stroke-dasharray: 4 4; opacity: .72; vector-effect: non-scaling-stroke; }
+.chart .event-mark { stroke: var(--cloud); stroke-dasharray: 2 3; opacity: .65; vector-effect: non-scaling-stroke; }
+.chart .event-label { fill: var(--cloud); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.scenario-series { display: none; }
+body[data-scenario="nominal"] .scenario-series.nominal,
+body[data-scenario="compute"] .scenario-series.compute,
+body[data-scenario="archive"] .scenario-series.archive { display: inline; }
 
-@media (max-width: 1080px) {
-  .domains { grid-template-columns: 1fr 1fr; }
-  .attention-layout, .lower-grid { grid-template-columns: 1fr; }
-  .trend-head, .trend-row { grid-template-columns: minmax(150px, 1fr) 90px 110px minmax(150px, 1fr); }
-  .trend-head > :last-child, .trend-row > :last-child { display: none; }
+/* gauges and exact lists */
+.pressure-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 18px 14px 15px; }
+.gauge { text-align: center; }
+.ring {
+  --value: 10;
+  --ring-color: var(--compute);
+  width: 72px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-color) calc(var(--value) * 1%), var(--surface-3) 0);
+  position: relative;
 }
-@media (max-width: 760px) {
-  .shell { width: min(calc(100% - 24px), var(--max)); }
-  .nav { min-height: 60px; }
-  .context, .fresh { display: none; }
-  .hero { padding-top: 26px; }
-  .hero-tools, .section-head { align-items: flex-start; flex-direction: column; }
-  .section-head > p { text-align: left; }
-  .condition { padding: 21px; }
-  .condition-main { grid-template-columns: 1fr; }
-  .confidence { border-left: 0; border-top: 1px solid var(--line); padding: 17px 0 0; }
-  .condition-facts, .domains { grid-template-columns: 1fr 1fr; }
-  .issue-top { grid-template-columns: 70px 1fr; }
-  .issue-age { display: none; }
-  .issue-body { grid-template-columns: 1fr; margin-left: 85px; }
-  .trend-head { display: none; }
-  .trend-row { grid-template-columns: 1fr 80px; gap: 10px; }
-  .trend-range, .spark, .decision { display: none; }
-  .checks-grid, .coverage-grid { grid-template-columns: 1fr; }
+.ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--surface); }
+.ring strong { position: relative; z-index: 1; font-size: 15px; }
+.gauge span { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+.pressure-foot { display: flex; justify-content: space-around; gap: 12px; padding: 0 14px 15px; color: var(--muted); font-size: 10px; }
+.pressure-foot b { color: var(--text); font-size: 12px; }
+
+.service-bars { padding: 8px 14px 13px; }
+.service-bar {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr) 72px 52px;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  border-top: 1px solid var(--line-soft);
 }
-@media (max-width: 480px) {
-  .mock-label { display: none; }
-  .condition-facts, .domains { grid-template-columns: 1fr; }
-  .scenario-control button { padding-inline: 8px; }
-  .issue { padding-inline: 14px; }
-  .issue-top { grid-template-columns: 1fr; gap: 5px; }
-  .issue-body { margin-left: 0; }
-  .mock-foot .shell { flex-direction: column; }
+.service-bar:first-child { border-top: 0; }
+.service-name { font-size: 10px; }
+.bar-track { height: 7px; overflow: hidden; display: flex; border-radius: 999px; background: var(--surface-3); }
+.bar-anon { width: var(--anon); background: var(--compute); }
+.bar-file { width: var(--file); background: rgba(85, 197, 255, .35); }
+.service-number, .service-restarts { color: var(--muted); text-align: right; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.service-restarts b { color: var(--good); }
+
+.service-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 10px; }
+.service-cell { padding: 11px; border: 1px solid var(--line-soft); border-radius: 7px; background: rgba(7, 13, 24, .45); }
+.service-cell-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.service-cell strong { font-size: 10px; }
+.service-cell .uptime { display: block; margin-top: 7px; font: 700 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.service-cell small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.microtrack { display: flex; gap: 2px; margin-top: 8px; }
+.microtrack i { flex: 1; height: 4px; border-radius: 1px; background: var(--good); opacity: .75; }
+.microtrack i.warn { background: var(--warn); }
+.microtrack i.bad { background: var(--bad); }
+
+.table-scroll { overflow-x: auto; }
+.metric-table { width: 100%; min-width: 510px; border-collapse: collapse; }
+.metric-table th, .metric-table td { padding: 8px 12px; border-top: 1px solid var(--line-soft); text-align: right; font-size: 10px; white-space: nowrap; }
+.metric-table th { border-top: 0; color: var(--dim); font-size: 8px; letter-spacing: .07em; text-transform: uppercase; }
+.metric-table th:first-child, .metric-table td:first-child { text-align: left; }
+.metric-table td:first-child { color: var(--text); font-weight: 650; }
+.status-code { display: inline-flex; align-items: center; gap: 5px; }
+.tiny-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+.tiny-dot.warn { background: var(--warn); }
+.tiny-dot.bad { background: var(--bad); }
+
+.cloud-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
+.cloud-card { min-height: 76px; padding: 11px; border: 1px solid var(--line-soft); border-radius: 7px; }
+.cloud-card span { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.cloud-card strong { display: block; margin-top: 5px; font: 700 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cloud-card small { display: block; margin-top: 6px; color: var(--dim); font-size: 9px; }
+
+/* application */
+.status-bars { display: flex; align-items: end; gap: 5px; height: 154px; padding: 18px 14px 10px; }
+.status-column { flex: 1; min-width: 5px; height: 100%; display: flex; flex-direction: column-reverse; gap: 1px; }
+.status-column i { display: block; border-radius: 1px; }
+.status-column .s2 { height: var(--ok); background: var(--app); opacity: .78; }
+.status-column .s4 { height: var(--client); background: var(--warn); }
+.status-column .s5 { height: var(--server); background: var(--bad); }
+.bar-axis { display: flex; justify-content: space-between; padding: 0 14px 12px; color: var(--dim); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.world-summary { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 13px 14px 8px; }
+.world-summary strong { font: 700 23px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.world-summary span { color: var(--muted); font-size: 9px; }
+.world-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; padding: 8px 14px 13px; }
+.world {
+  aspect-ratio: 1.5;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(83, 224, 178, .28);
+  border-radius: 4px;
+  color: var(--app);
+  background: rgba(83, 224, 178, .07);
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.world.dark { color: var(--dim); border-color: var(--line); background: rgba(101, 117, 138, .07); }
+.world.bypass { color: var(--warn); border-color: rgba(255, 195, 90, .46); background: rgba(255, 195, 90, .08); }
+body[data-scenario="nominal"] .world.scenario-dark,
+body[data-scenario="archive"] .world.scenario-dark { color: var(--app); border-color: rgba(83, 224, 178, .28); background: rgba(83, 224, 178, .07); }
+body[data-scenario="compute"] .world.scenario-dark { color: var(--bad); border-color: rgba(255, 111, 125, .52); background: rgba(255, 111, 125, .08); }
+
+.relay-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border-top: 1px solid var(--line-soft); background: var(--line-soft); }
+.relay-stat { padding: 11px; background: var(--surface); text-align: center; }
+.relay-stat strong { display: block; font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.relay-stat span { display: block; margin-top: 5px; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+
+/* archive */
+.pipeline-scroll { overflow-x: auto; }
+.pipeline {
+  min-width: 740px;
+  display: grid;
+  grid-template-columns: 1fr 70px 1fr 70px 1fr 70px 1fr;
+  align-items: center;
+  padding: 18px;
+}
+.pipe-stage {
+  position: relative;
+  min-height: 108px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--data);
+  border-radius: 8px;
+  background: rgba(7, 13, 24, .48);
+}
+.pipe-stage span { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+.pipe-stage strong { display: block; margin-top: 8px; font: 700 21px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pipe-stage small { display: block; margin-top: 8px; color: var(--dim); font-size: 9px; }
+.pipe-stage .tiny-dot { position: absolute; top: 12px; right: 12px; }
+body[data-scenario="archive"] .pipe-stage.archive-fault { border-color: var(--bad); box-shadow: inset 0 0 30px rgba(255, 111, 125, .07); }
+body[data-scenario="archive"] .pipe-stage.archive-fault .tiny-dot { background: var(--bad); }
+.pipe-link { position: relative; height: 2px; background: var(--data); opacity: .65; }
+.pipe-link::after { content: ""; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left-color: var(--data); border-right: 0; }
+.pipe-link span { position: absolute; left: 50%; bottom: 7px; translate: -50% 0; color: var(--muted); font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+body[data-scenario="archive"] .pipe-link.stalled { background: repeating-linear-gradient(90deg, var(--bad) 0 5px, transparent 5px 9px); }
+body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var(--bad); }
+
+.storage-layout { display: grid; grid-template-columns: 128px 1fr; align-items: center; gap: 12px; padding: 16px; }
+.donut {
+  width: 116px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(var(--data) 0 48%, #d99061 48% 70%, var(--cloud) 70% 84%, var(--surface-3) 84%);
+}
+.donut::before { content: ""; width: 70px; aspect-ratio: 1; border-radius: 50%; background: var(--surface); }
+.donut-label { position: absolute; text-align: center; }
+.donut-label strong { display: block; font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.donut-label span { color: var(--muted); font-size: 8px; }
+.storage-legend { display: grid; gap: 9px; }
+.storage-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; font-size: 9px; }
+.storage-row i { width: 7px; height: 7px; border-radius: 2px; background: var(--data); }
+.storage-row:nth-child(2) i { background: #d99061; }
+.storage-row:nth-child(3) i { background: var(--cloud); }
+.storage-row:nth-child(4) i { background: var(--surface-3); }
+.storage-row span { color: var(--muted); }
+.storage-row b { font: 650 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.integrity-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line-soft); }
+.integrity-cell { min-height: 74px; padding: 12px; background: var(--surface); }
+.integrity-cell span { display: block; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.integrity-cell strong { display: block; margin-top: 6px; font: 700 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.integrity-cell small { display: block; margin-top: 6px; color: var(--muted); font-size: 8px; }
+
+/* collection coverage */
+.coverage-panel { margin-top: 32px; overflow: hidden; }
+.coverage-row {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
+}
+.coverage-source { min-width: 0; padding: 11px; background: var(--surface); }
+.coverage-source strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.coverage-source span { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: var(--muted); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.foot { margin-top: 30px; display: flex; justify-content: space-between; gap: 20px; color: var(--dim); font-size: 9px; }
+
+@media (max-width: 1180px) {
+  .signal-grid { grid-template-columns: repeat(4, 1fr); }
+  .span-8, .span-7 { grid-column: span 12; }
+  .span-5, .span-4 { grid-column: span 6; }
+  .coverage-row { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 780px) {
+  .shell { width: min(calc(100% - 20px), var(--max)); }
+  .nav { align-items: flex-start; flex-direction: column; padding: 10px 0; gap: 8px; }
+  .top-tools { width: 100%; justify-content: space-between; }
+  .brand-context, .mock-tag { display: none; }
+  main { padding-top: 21px; }
+  .page-head, .domain-heading { align-items: flex-start; flex-direction: column; }
+  .head-meta { width: 100%; justify-content: space-between; }
+  .signal-grid { grid-template-columns: repeat(2, 1fr); }
+  .span-6, .span-5, .span-4, .span-3 { grid-column: span 12; }
+  .coverage-row { grid-template-columns: repeat(2, 1fr); }
+  .panel-head { align-items: flex-start; flex-direction: column; }
+  .pressure-grid { gap: 4px; }
+  .ring { width: 64px; }
+}
+@media (max-width: 440px) {
+  .scenario-control button { padding-inline: 7px; font-size: 10px; }
+  .time-tag { display: none; }
+  .storage-layout { grid-template-columns: 1fr; justify-items: center; }
+  .storage-legend { width: 100%; }
+  .service-bar { grid-template-columns: 82px minmax(0, 1fr) 60px; }
+  .service-restarts { display: none; }
 }
 </style>
 </head>
-<body data-tone="warn">
-<a class="skip" href="#main">Skip to dashboard</a>
+<body data-scenario="nominal">
+<a class="skip" href="#main">Skip to telemetry</a>
 <header class="topbar">
   <div class="shell nav">
     <div class="brand">
-      <svg viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
+      <svg viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#070d18"/></svg>
       <span>Bibites Multiverse</span>
-      <span class="context">/ <strong>Production health</strong></span>
+      <span class="brand-context">/ production telemetry</span>
     </div>
-    <div class="navright"><span class="mock-label">Design mockup · not live</span><span class="fresh">Updated 38 seconds ago</span></div>
+    <div class="top-tools">
+      <span class="mock-tag">Mock data</span>
+      <div class="scenario-control" aria-label="Telemetry scenario">
+        <button type="button" data-scenario-button="nominal" aria-pressed="true">Typical load</button>
+        <button type="button" data-scenario-button="compute" aria-pressed="false">Compute pressure</button>
+        <button type="button" data-scenario-button="archive" aria-pressed="false">Archive stall</button>
+      </div>
+    </div>
   </div>
 </header>
 
-<main id="main">
-  <section class="shell hero">
-    <div class="hero-tools">
-      <p class="eyebrow">Operator overview</p>
-      <div class="scenario-control" aria-label="Mock dashboard scenario">
-        <button type="button" data-scenario="current" aria-pressed="true">Degraded</button>
-        <button type="button" data-scenario="healthy" aria-pressed="false">Healthy</button>
-        <button type="button" data-scenario="incident" aria-pressed="false">Outage</button>
-      </div>
+<main id="main" class="shell">
+  <div class="page-head">
+    <div><p class="overline">Production · all systems</p><h1>System telemetry</h1></div>
+    <div class="head-meta">
+      <span class="global-state"><i class="state-dot" aria-hidden="true"></i><span data-bind="globalState">Stable</span></span>
+      <span class="time-tag">Last 6 hours · 5 min</span>
+      <span class="data-tag">Updated 38 s ago</span>
     </div>
-    <div class="condition" aria-live="polite">
-      <div class="condition-main">
-        <div>
-          <div class="state-line"><i class="state-dot" aria-hidden="true"></i><h1 data-bind="state">Degraded</h1></div>
-          <p class="condition-copy" data-bind="summary">The service is available. Two worlds are offline, and record-integrity risk is increasing.</p>
-          <p class="condition-meta"><strong data-bind="since">Since 09:41 UTC</strong> · <span data-bind="change">No public outage</span></p>
+  </div>
+
+  <section class="panel topology" aria-labelledby="map-title">
+    <div class="panel-head">
+      <div class="panel-title"><h2 id="map-title">Live system map</h2><small>rates on links · status on nodes</small></div>
+      <div class="legend" aria-label="Layer colors"><span class="compute"><i></i>Compute</span><span class="cloud"><i></i>Cloud</span><span class="app"><i></i>Application</span><span class="data"><i></i>Data</span></div>
+    </div>
+    <div class="flow-scroll">
+      <div class="flow-map">
+        <div class="flow-row">
+          <span class="lane-label">Simulation record</span>
+          <div class="node compute-node"><div class="node-top"><strong>World hosts</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="worlds">19 / 19</span> worlds</span></div>
+          <div class="flow-link"><span class="flow-value" data-bind="peerTraffic">1.8 Mb/s</span></div>
+          <div class="node app-node"><div class="node-top"><strong>Relay</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="relaySessions">19</span> sessions</span></div>
+          <div class="flow-link data"><span class="flow-value" data-bind="archiveInput">14.8 rec/s</span></div>
+          <div class="node archive-node"><div class="node-top"><strong>Archive</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="ledgerRecords">61.4 M</span> records</span></div>
+          <div class="flow-link data"><span class="flow-value" data-bind="copyRate">2.4 GB/h</span></div>
         </div>
-        <div class="confidence">
-          <span>Evidence confidence</span>
-          <strong data-bind="confidence">Partial</strong>
-          <p data-bind="confidenceCopy">Four live sources are fresh. External playback and world-host telemetry are absent.</p>
+        <div class="flow-row">
+          <span class="lane-label">Public traffic</span>
+          <div class="node cloud-node"><div class="node-top"><strong>Browsers</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="requests">42.8</span> req/s</span></div>
+          <div class="flow-link cloud"><span class="flow-value" data-bind="publicLatency">184 ms p95</span></div>
+          <div class="node cloud-node"><div class="node-top"><strong>Nginx + TLS</strong><i class="node-dot"></i></div><span class="node-value">6 routes · 0.18% 5xx</span></div>
+          <div class="flow-link"><span class="flow-value">API + WebSocket</span></div>
+          <div class="node app-node"><div class="node-top"><strong>Map + stream</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="viewers">2</span> viewers · HLS live</span></div>
+          <div class="flow-link cloud"><span class="flow-value">off-host copy</span></div>
+        </div>
+        <div class="flow-row">
+          <span class="lane-label">Infrastructure</span>
+          <div class="node compute-node"><div class="node-top"><strong>Service host</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="hostCpu">46%</span> CPU · <span data-bind="hostMem">52%</span> mem free</span></div>
+          <div class="flow-link cloud"><span class="flow-value">systemd</span></div>
+          <div class="node cloud-node"><div class="node-top"><strong>Lightsail</strong><i class="node-dot"></i></div><span class="node-value">burst 88% · 34 d TLS</span></div>
+          <div class="flow-link data"><span class="flow-value">ledger + metrics</span></div>
+          <div class="node storage-node"><div class="node-top"><strong>Local volume</strong><i class="node-dot"></i></div><span class="node-value">69% used · +18 GB/d</span></div>
+          <div class="flow-link data"><span class="flow-value">verified segments</span></div>
         </div>
       </div>
-      <div class="condition-facts">
-        <div class="fact"><span class="fact-label">Public path</span><strong data-bind="publicPath">Serving</strong><small data-bind="publicPathNote">6 of 6 routes answer</small></div>
-        <div class="fact"><span class="fact-label">Permanent record</span><strong data-bind="record">Current</strong><small data-bind="recordNote">Archive subscribed</small></div>
-        <div class="fact"><span class="fact-label">Worlds connected</span><strong data-bind="worlds">17 / 19</strong><small data-bind="worldsNote">2 routed around</small></div>
-        <div class="fact"><span class="fact-label">Next decision</span><strong data-bind="decision">Within 5 hours</strong><small data-bind="decisionNote">Gap-rate window completes</small></div>
-      </div>
     </div>
   </section>
 
-  <section class="shell section" aria-labelledby="attention-title">
-    <div class="section-head">
-      <div><p class="eyebrow">Decision queue</p><h2 id="attention-title">Needs attention</h2></div>
-      <p>Problems are grouped by operator decision. Monitor names and raw counters stay in the evidence drawer.</p>
-    </div>
-    <div class="attention-layout">
-      <div class="card attention-list" id="attention-list"></div>
-      <aside class="card maintenance" aria-labelledby="maintenance-title">
-        <h3 id="maintenance-title">Maintenance queue</h3>
-        <p>These items do not affect the live service now.</p>
-        <div id="maintenance-list"></div>
-      </aside>
+  <section class="signal-grid" aria-label="Headline telemetry">
+    <article class="signal app"><span class="signal-label">Requests</span><strong class="signal-value"><span data-bind="requests">42.8</span> <small>/s</small></strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 18L10 16L20 17L30 9L40 12L50 8L60 11L70 6L80 9L90 5L100 8L110 4L120 7"/></svg></article>
+    <article class="signal app"><span class="signal-label">Public p95</span><strong class="signal-value"><span data-bind="latency">184</span> <small>ms</small></strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 14L10 13L20 15L30 11L40 12L50 10L60 13L70 12L80 9L90 11L100 10L110 8L120 10"/></svg></article>
+    <article class="signal app"><span class="signal-label">5xx rate</span><strong class="signal-value"><span data-bind="errors">0.18</span><small>%</small></strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 20L10 20L20 19L30 20L40 18L50 20L60 19L70 20L80 15L90 19L100 20L110 18L120 19"/></svg></article>
+    <article class="signal app"><span class="signal-label">Worlds</span><strong class="signal-value" data-bind="worlds">19 / 19</strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 7L120 7"/></svg></article>
+    <article class="signal data"><span class="signal-label">Archive input</span><strong class="signal-value"><span data-bind="archiveRate">14.8</span> <small>rec/s</small></strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 17L10 14L20 16L30 10L40 13L50 8L60 12L70 7L80 9L90 5L100 8L110 6L120 7"/></svg></article>
+    <article class="signal data"><span class="signal-label">Write lag</span><strong class="signal-value" data-bind="writeLag">0.8 s</strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 18L10 17L20 18L30 16L40 17L50 15L60 18L70 17L80 16L90 18L100 16L110 17L120 16"/></svg></article>
+    <article class="signal compute"><span class="signal-label">Host CPU</span><strong class="signal-value" data-bind="hostCpu">46%</strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 18L10 15L20 17L30 9L40 13L50 8L60 14L70 7L80 12L90 6L100 11L110 8L120 10"/></svg></article>
+    <article class="signal compute"><span class="signal-label">Memory free</span><strong class="signal-value" data-bind="hostMem">52%</strong><svg class="mini-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 7L10 8L20 7L30 9L40 10L50 9L60 11L70 10L80 12L90 11L100 12L110 13L120 12"/></svg></article>
+  </section>
+
+  <section class="domain-section compute" id="compute" aria-labelledby="compute-title">
+    <div class="domain-heading"><div class="domain-name"><i class="domain-mark"></i><div><h2 id="compute-title">Compute</h2><small>service host · processes · saturation</small></div></div><span class="time-tag">6 h history</span></div>
+    <div class="domain-grid">
+      <article class="panel span-8">
+        <div class="panel-head"><div class="panel-title"><h3>Host resources</h3><small>percent</small></div><div class="legend"><span class="compute"><i></i>CPU busy</span><span class="app"><i></i>Memory free</span><span class="bad"><i></i>Limit</span></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 760 226" role="img" aria-label="Six hours of service-host CPU use and available memory">
+            <path class="grid" d="M42 18H746M42 58H746M42 98H746M42 138H746M42 178H746M42 218H746"/>
+            <text class="axis" x="4" y="22">100%</text><text class="axis" x="15" y="102">60%</text><text class="axis" x="15" y="182">20%</text>
+            <text class="axis" x="42" y="224">06:00</text><text class="axis" x="263" y="224">08:00</text><text class="axis" x="497" y="224">10:00</text><text class="axis" x="712" y="224">12:00</text>
+            <path class="threshold" d="M42 178H746"/>
+            <path class="event-mark" d="M520 18V218"/><text class="event-label" x="525" y="29">deploy</text>
+            <g class="scenario-series nominal">
+              <polyline class="line compute-line" points="42,139 82,146 122,128 162,144 202,117 242,132 282,105 322,124 362,116 402,139 442,111 482,126 522,94 562,121 602,112 642,133 682,115 746,126"/>
+              <polyline class="line app-line" points="42,106 82,103 122,110 162,107 202,112 242,115 282,109 322,116 362,120 402,116 442,122 482,119 522,127 562,121 602,124 642,127 682,123 746,122"/>
+            </g>
+            <g class="scenario-series compute">
+              <polyline class="line bad-line" points="42,139 82,126 122,112 162,99 202,82 242,67 282,49 322,38 362,29 402,26 442,25 482,27 522,22 562,24 602,23 642,25 682,24 746,27"/>
+              <polyline class="line app-line" points="42,106 82,113 122,121 162,130 202,143 242,154 282,165 322,175 362,184 402,190 442,194 482,197 522,199 562,200 602,201 642,201 682,202 746,201"/>
+            </g>
+            <g class="scenario-series archive">
+              <polyline class="line compute-line" points="42,139 82,130 122,118 162,126 202,104 242,92 282,76 322,83 362,71 402,80 442,66 482,73 522,58 562,68 602,62 642,72 682,65 746,74"/>
+              <polyline class="line bad-line" points="42,106 82,111 122,118 162,124 202,132 242,140 282,149 322,157 362,165 402,171 442,176 482,181 522,184 562,187 602,189 642,190 682,191 746,191"/>
+            </g>
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-head"><div class="panel-title"><h3>Pressure and load</h3><small>current sample</small></div><span class="data-tag">1 min</span></div>
+        <div class="pressure-grid">
+          <div class="gauge"><div class="ring" data-ring="cpuPressure" style="--value:8"><strong data-bind="cpuPressure">0.8%</strong></div><span>CPU PSI</span></div>
+          <div class="gauge"><div class="ring" data-ring="memPressure" style="--value:3"><strong data-bind="memPressure">0.3%</strong></div><span>Memory PSI</span></div>
+          <div class="gauge"><div class="ring" data-ring="ioPressure" style="--value:1"><strong data-bind="ioPressure">0.1%</strong></div><span>IO PSI</span></div>
+        </div>
+        <div class="pressure-foot"><span>Load 1m <b data-bind="load1">0.92</b></span><span>Swap <b data-bind="swap">3.2%</b></span><span>Conntrack <b>0.7%</b></span></div>
+      </article>
+
+      <article class="panel span-7">
+        <div class="panel-head"><div class="panel-title"><h3>Memory by service</h3><small>anonymous + file cache</small></div><div class="legend"><span class="compute"><i></i>Anonymous</span><span><i></i>File</span></div></div>
+        <div class="service-bars">
+          <div class="service-bar"><span class="service-name">archive</span><div class="bar-track"><i class="bar-anon" style="--anon:58%"></i><i class="bar-file" style="--file:18%"></i></div><span class="service-number" data-bind="archiveMem">1.84 GB</span><span class="service-restarts"><b>0</b> rst</span></div>
+          <div class="service-bar"><span class="service-name">relay</span><div class="bar-track"><i class="bar-anon" style="--anon:26%"></i><i class="bar-file" style="--file:5%"></i></div><span class="service-number">312 MB</span><span class="service-restarts"><b>0</b> rst</span></div>
+          <div class="service-bar"><span class="service-name">stream</span><div class="bar-track"><i class="bar-anon" style="--anon:16%"></i><i class="bar-file" style="--file:3%"></i></div><span class="service-number">188 MB</span><span class="service-restarts"><b>0</b> rst</span></div>
+          <div class="service-bar"><span class="service-name">nginx</span><div class="bar-track"><i class="bar-anon" style="--anon:7%"></i><i class="bar-file" style="--file:2%"></i></div><span class="service-number">74 MB</span><span class="service-restarts"><b>0</b> rst</span></div>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-head"><div class="panel-title"><h3>Compute inventory</h3><small>current</small></div></div>
+        <div class="cloud-cards">
+          <div class="cloud-card"><span>vCPU</span><strong>2</strong><small>96% peak</small></div>
+          <div class="cloud-card"><span>RAM</span><strong>8 GB</strong><small><span data-bind="hostMem">52%</span> free</small></div>
+          <div class="cloud-card"><span>Disk</span><strong>69%</strong><small>+18 GB/day</small></div>
+          <div class="cloud-card"><span>Replay HWM</span><strong>2.06 GB</strong><small>82.7 s start</small></div>
+        </div>
+      </article>
     </div>
   </section>
 
-  <section class="shell section" aria-labelledby="domains-title">
-    <div class="section-head">
-      <div><p class="eyebrow">System view</p><h2 id="domains-title">Four domains</h2></div>
-      <p>Each domain states its condition and the evidence that supports it.</p>
+  <section class="domain-section cloud" id="cloud" aria-labelledby="cloud-title">
+    <div class="domain-heading"><div class="domain-name"><i class="domain-mark"></i><div><h2 id="cloud-title">Cloud &amp; services</h2><small>public paths · units · transfer · cost</small></div></div><span class="time-tag">6 h aligned</span></div>
+    <div class="domain-grid">
+      <article class="panel span-7">
+        <div class="panel-head"><div class="panel-title"><h3>Network transfer</h3><small>month-to-date and projected</small></div><div class="legend"><span class="cloud"><i></i>Actual</span><span class="data"><i></i>Pace</span><span class="bad"><i></i>Allowance</span></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 760 226" role="img" aria-label="Month-to-date network transfer against the Lightsail allowance">
+            <path class="grid" d="M46 18H744M46 62H744M46 106H744M46 150H744M46 194H744"/>
+            <text class="axis" x="0" y="22">3.1 TB</text><text class="axis" x="9" y="110">1.5 TB</text><text class="axis" x="29" y="198">0</text>
+            <path class="threshold" d="M46 18H744"/><text class="axis" x="664" y="14">allowance</text>
+            <path d="M46 194L82 188L118 180L154 171L190 163L226 155L262 146L298 138L334 129L370 121L406 113L442 104L478 96L514 87L550 79L586 70L622 62L658 53L694 45L730 36L730 194L46 194Z" fill="rgba(168,145,255,.12)"/>
+            <polyline class="line cloud-line" points="46,194 82,188 118,180 154,171 190,163 226,155 262,146 298,138 334,129 370,121 406,113 442,104 478,96 514,87 550,79 586,70 622,62"/>
+            <path class="data-line" d="M622 62L730 36" fill="none" stroke-dasharray="5 4" stroke-width="2"/>
+            <text class="axis" x="46" y="218">Aug 1</text><text class="axis" x="350" y="218">Aug 12</text><text class="axis" x="600" y="218">Aug 23</text><text class="axis" x="700" y="218">Aug 31</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-head"><div class="panel-title"><h3>Service state</h3><small>30 day uptime</small></div><span class="data-tag">4 / 4 active</span></div>
+        <div class="service-grid">
+          <div class="service-cell"><div class="service-cell-top"><strong>nginx</strong><i class="tiny-dot"></i></div><span class="uptime">99.99%</span><small>0 restarts</small><div class="microtrack"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          <div class="service-cell"><div class="service-cell-top"><strong>relay</strong><i class="tiny-dot"></i></div><span class="uptime">99.97%</span><small>1 restart</small><div class="microtrack"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="warn"></i><i></i><i></i></div></div>
+          <div class="service-cell"><div class="service-cell-top"><strong>archive</strong><i class="tiny-dot"></i></div><span class="uptime">99.94%</span><small>2 planned restarts</small><div class="microtrack"><i></i><i></i><i></i><i class="warn"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          <div class="service-cell"><div class="service-cell-top"><strong>stream</strong><i class="tiny-dot"></i></div><span class="uptime">99.91%</span><small>on demand</small><div class="microtrack"><i></i><i></i><i class="warn"></i><i></i><i></i><i></i><i></i><i></i><i class="warn"></i><i></i><i></i><i></i></div></div>
+        </div>
+      </article>
+
+      <article class="panel span-8">
+        <div class="panel-head"><div class="panel-title"><h3>Public routes</h3><small>external probe · 5 min</small></div></div>
+        <div class="table-scroll">
+          <table class="metric-table">
+            <thead><tr><th>Route</th><th>State</th><th>req/s</th><th>p50</th><th>p95</th><th>p99</th><th>5xx</th></tr></thead>
+            <tbody>
+              <tr><td>/</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>3.2</td><td>42 ms</td><td>96 ms</td><td>131 ms</td><td>0%</td></tr>
+              <tr><td>/live</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>8.4</td><td>63 ms</td><td>142 ms</td><td>211 ms</td><td>0.02%</td></tr>
+              <tr><td>/api/status</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>24.1</td><td>71 ms</td><td data-bind="routeP95">184 ms</td><td>286 ms</td><td data-bind="routeErrors">0.18%</td></tr>
+              <tr><td>/api/history</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>1.7</td><td>91 ms</td><td>251 ms</td><td>390 ms</td><td>0.06%</td></tr>
+              <tr><td>/stream/</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>5.1</td><td>28 ms</td><td>88 ms</td><td>172 ms</td><td>0.11%</td></tr>
+              <tr><td>/healthz</td><td><span class="status-code"><i class="tiny-dot"></i>200</span></td><td>0.3</td><td>18 ms</td><td>31 ms</td><td>44 ms</td><td>0%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-head"><div class="panel-title"><h3>Cloud pace</h3><small>August</small></div></div>
+        <div class="cloud-cards">
+          <div class="cloud-card"><span>Transfer used</span><strong>1.84 TB</strong><small>60% of 3.07 TB</small></div>
+          <div class="cloud-card"><span>Projection</span><strong>2.89 TB</strong><small>94% at month end</small></div>
+          <div class="cloud-card"><span>Cost</span><strong>$14.38</strong><small>$18.00 forecast</small></div>
+          <div class="cloud-card"><span>TLS age</span><strong>34 d</strong><small>56 d remaining</small></div>
+        </div>
+      </article>
     </div>
-    <div class="domains" id="domains"></div>
   </section>
 
-  <section class="shell section" aria-labelledby="trends-title">
-    <div class="section-head">
-      <div><p class="eyebrow">Performance and limits</p><h2 id="trends-title">Signals that change decisions</h2></div>
-      <p>Each row joins a current value, a recent range, a trend, and the limit that changes action.</p>
-    </div>
-    <div class="card trend-card">
-      <div class="rangebar">
-        <span class="mock-label">24-hour mock sample</span>
-      </div>
-      <div class="trend-head"><span>Signal</span><span>Current</span><span>Range</span><span>Trend</span><span>Decision limit</span></div>
-      <div id="trends"></div>
+  <section class="domain-section app" id="application" aria-labelledby="application-title">
+    <div class="domain-heading"><div class="domain-name"><i class="domain-mark"></i><div><h2 id="application-title">Application &amp; traffic</h2><small>HTTP · relay · worlds · broadcast</small></div></div><span class="time-tag">6 h aligned</span></div>
+    <div class="domain-grid">
+      <article class="panel span-8">
+        <div class="panel-head"><div class="panel-title"><h3>Request volume</h3><small>requests per second by route group</small></div><div class="legend"><span class="app"><i></i>API</span><span class="compute"><i></i>Pages</span><span class="cloud"><i></i>Stream</span></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 760 226" role="img" aria-label="Six hours of request volume grouped by API, page, and stream routes">
+            <path class="grid" d="M42 18H746M42 58H746M42 98H746M42 138H746M42 178H746M42 218H746"/>
+            <text class="axis" x="9" y="22">60/s</text><text class="axis" x="9" y="102">36/s</text><text class="axis" x="22" y="182">12/s</text>
+            <path d="M42 190L82 186L122 183L162 174L202 179L242 166L282 170L322 158L362 164L402 153L442 157L482 149L522 157L562 146L602 150L642 141L682 146L746 139L746 218L42 218Z" fill="rgba(83,224,178,.18)"/>
+            <path d="M42 177L82 174L122 171L162 162L202 166L242 153L282 156L322 145L362 151L402 141L442 145L482 136L522 144L562 132L602 137L642 128L682 132L746 126L746 139L682 146L642 141L602 150L562 146L522 157L482 149L442 157L402 153L362 164L322 158L282 170L242 166L202 179L162 174L122 183L82 186L42 190Z" fill="rgba(85,197,255,.2)"/>
+            <path d="M42 170L82 167L122 163L162 155L202 158L242 145L282 148L322 136L362 142L402 132L442 136L482 127L522 135L562 123L602 128L642 119L682 123L746 117L746 126L682 132L642 128L602 137L562 132L522 144L482 136L442 145L402 141L362 151L322 145L282 156L242 153L202 166L162 162L122 171L82 174L42 177Z" fill="rgba(168,145,255,.24)"/>
+            <polyline class="line app-line" points="42,190 82,186 122,183 162,174 202,179 242,166 282,170 322,158 362,164 402,153 442,157 482,149 522,157 562,146 602,150 642,141 682,146 746,139"/>
+            <path class="event-mark" d="M520 18V218"/><text class="event-label" x="525" y="29">deploy</text>
+            <text class="axis" x="42" y="224">06:00</text><text class="axis" x="263" y="224">08:00</text><text class="axis" x="497" y="224">10:00</text><text class="axis" x="712" y="224">12:00</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-head"><div class="panel-title"><h3>Response codes</h3><small>5 minute buckets</small></div><div class="legend"><span class="app"><i></i>2xx</span><span class="data"><i></i>4xx</span><span class="bad"><i></i>5xx</span></div></div>
+        <div class="status-bars" role="img" aria-label="Stacked bars for HTTP status code groups">
+          <div class="status-column"><i class="s2" style="--ok:72%"></i><i class="s4" style="--client:3%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:78%"></i><i class="s4" style="--client:4%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:66%"></i><i class="s4" style="--client:2%"></i><i class="s5" style="--server:2%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:84%"></i><i class="s4" style="--client:3%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:76%"></i><i class="s4" style="--client:6%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:90%"></i><i class="s4" style="--client:3%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:82%"></i><i class="s4" style="--client:2%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:86%"></i><i class="s4" style="--client:4%"></i><i class="s5" style="--server:2%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:71%"></i><i class="s4" style="--client:3%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:88%"></i><i class="s4" style="--client:2%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:93%"></i><i class="s4" style="--client:4%"></i><i class="s5" style="--server:1%"></i></div>
+          <div class="status-column"><i class="s2" style="--ok:85%"></i><i class="s4" style="--client:3%"></i><i class="s5" style="--server:1%"></i></div>
+        </div>
+        <div class="bar-axis"><span>06:00</span><span>09:00</span><span>12:00</span></div>
+      </article>
+
+      <article class="panel span-7">
+        <div class="panel-head"><div class="panel-title"><h3>Public latency</h3><small>milliseconds</small></div><div class="legend"><span class="app"><i></i>p50</span><span class="compute"><i></i>p95</span><span class="data"><i></i>p99</span></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 760 220" role="img" aria-label="Six hours of p50, p95, and p99 public request latency">
+            <path class="grid" d="M42 18H746M42 58H746M42 98H746M42 138H746M42 178H746M42 210H746"/>
+            <text class="axis" x="0" y="22">800ms</text><text class="axis" x="6" y="102">400ms</text><text class="axis" x="28" y="182">0</text>
+            <polyline class="line app-line" points="42,170 82,171 122,168 162,169 202,166 242,168 282,164 322,167 362,163 402,166 442,161 482,164 522,159 562,163 602,160 642,162 682,159 746,161"/>
+            <g class="scenario-series nominal"><polyline class="line compute-line" points="42,146 82,149 122,142 162,147 202,138 242,145 282,133 322,141 362,136 402,144 442,130 482,139 522,124 562,136 602,128 642,139 682,131 746,135"/><polyline class="line data-line" points="42,127 82,132 122,122 162,129 202,117 242,125 282,110 322,120 362,113 402,123 442,103 482,116 522,96 562,112 602,101 642,118 682,106 746,111"/></g>
+            <g class="scenario-series compute"><polyline class="line bad-line" points="42,146 82,139 122,131 162,121 202,110 242,98 282,87 322,73 362,62 402,51 442,44 482,40 522,36 562,39 602,35 642,38 682,34 746,37"/><polyline class="line data-line" points="42,127 82,119 122,108 162,96 202,84 242,72 282,58 322,46 362,35 402,29 442,26 482,23 522,21 562,24 602,20 642,23 682,19 746,22"/></g>
+            <g class="scenario-series archive"><polyline class="line compute-line" points="42,146 82,144 122,140 162,142 202,136 242,132 282,129 322,124 362,121 402,118 442,115 482,111 522,106 562,109 602,105 642,108 682,104 746,107"/><polyline class="line data-line" points="42,127 82,124 122,120 162,121 202,115 242,111 282,106 322,101 362,97 402,94 442,89 482,85 522,79 562,82 602,78 642,81 682,77 746,80"/></g>
+            <path class="event-mark" d="M520 18V210"/><text class="event-label" x="525" y="29">deploy</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-head"><div class="panel-title"><h3>Worlds and relay</h3><small>24 map positions</small></div><div class="legend"><span class="app"><i></i>Live</span><span class="data"><i></i>Bypass</span><span><i></i>Empty</span></div></div>
+        <div class="world-summary"><div><strong data-bind="worlds">19 / 19</strong><span> expected worlds</span></div><span><b data-bind="laneRate">22.4</b> migrations/min</span></div>
+        <div class="world-grid" aria-label="World position matrix">
+          <span class="world">01</span><span class="world">02</span><span class="world">03</span><span class="world">04</span><span class="world">05</span><span class="world">06</span><span class="world dark">07</span><span class="world">08</span>
+          <span class="world">09</span><span class="world">10</span><span class="world">11</span><span class="world dark">12</span><span class="world">13</span><span class="world">14</span><span class="world">15</span><span class="world">16</span>
+          <span class="world scenario-dark">17</span><span class="world">18</span><span class="world">19</span><span class="world dark">20</span><span class="world">21</span><span class="world">22</span><span class="world bypass scenario-dark">23</span><span class="world dark">24</span>
+        </div>
+        <div class="relay-stats"><div class="relay-stat"><strong data-bind="relaySessions">19</strong><span>sessions</span></div><div class="relay-stat"><strong>0</strong><span>closed lanes</span></div><div class="relay-stat"><strong>3.1 s</strong><span>oldest queue</span></div></div>
+      </article>
+
+      <article class="panel span-6">
+        <div class="panel-head"><div class="panel-title"><h3>Relay events</h3><small>rates and deltas</small></div></div>
+        <div class="integrity-grid">
+          <div class="integrity-cell"><span>Active sessions</span><strong data-bind="relaySessions">19</strong><small>+1 / 6 h</small></div>
+          <div class="integrity-cell"><span>Reconnects</span><strong>7</strong><small>1.2 / hour</small></div>
+          <div class="integrity-cell"><span>TCP resets</span><strong>3</strong><small>+2 / 6 h</small></div>
+          <div class="integrity-cell"><span>Retransmits</span><strong>184</strong><small>+31 / hour</small></div>
+          <div class="integrity-cell"><span>Queue depth</span><strong>14</strong><small>p95 21</small></div>
+          <div class="integrity-cell"><span>Flow rate</span><strong data-bind="laneRate">22.4</strong><small>migrations/min</small></div>
+        </div>
+      </article>
+
+      <article class="panel span-6">
+        <div class="panel-head"><div class="panel-title"><h3>Broadcast</h3><small>viewer and stream telemetry</small></div></div>
+        <div class="cloud-cards">
+          <div class="cloud-card"><span>Viewers</span><strong data-bind="viewers">2</strong><small>peak 7</small></div>
+          <div class="cloud-card"><span>Media rate</span><strong>1.52 Mb/s</strong><small>fMP4 HLS</small></div>
+          <div class="cloud-card"><span>Publisher</span><strong>Live</strong><small>RTMP 1 session</small></div>
+          <div class="cloud-card"><span>Segment age</span><strong>1.8 s</strong><small>2 s target</small></div>
+        </div>
+      </article>
     </div>
   </section>
 
-  <section class="shell section" aria-labelledby="changes-title">
-    <div class="section-head">
-      <div><p class="eyebrow">Cause context</p><h2 id="changes-title">What changed</h2></div>
-      <p>Recoveries, warnings, and deployments share one time axis.</p>
-    </div>
-    <div class="lower-grid">
-      <div class="card timeline" id="timeline"></div>
-      <aside class="card evidence" aria-labelledby="evidence-title">
-        <h3 id="evidence-title">Evidence freshness</h3>
-        <p>Freshness belongs to the conclusion that uses each source.</p>
-        <div id="sources"></div>
-        <div class="coverage-note" data-bind="coverageNote">This view cannot prove external playback or world-host pressure.</div>
-      </aside>
+  <section class="domain-section data" id="archive" aria-labelledby="archive-title">
+    <div class="domain-heading"><div class="domain-name"><i class="domain-mark"></i><div><h2 id="archive-title">Archive &amp; data</h2><small>input · record · roll-up · retention</small></div></div><span class="time-tag">6 h aligned</span></div>
+    <div class="domain-grid">
+      <article class="panel span-12">
+        <div class="panel-head"><div class="panel-title"><h3>Record pipeline</h3><small>current throughput and queue</small></div><div class="legend"><span class="data"><i></i>Data flow</span><span class="bad"><i></i>Stall</span></div></div>
+        <div class="pipeline-scroll">
+          <div class="pipeline">
+            <div class="pipe-stage"><i class="tiny-dot"></i><span>Relay input</span><strong data-bind="archiveRate">14.8 rec/s</strong><small>19 sources</small></div>
+            <div class="pipe-link stalled"><span data-bind="inputQueue">822 queued</span></div>
+            <div class="pipe-stage archive-fault"><i class="tiny-dot"></i><span>Raw ledger</span><strong data-bind="ledgerRecords">61.4 M</strong><small data-bind="writeLag">0.8 s lag</small></div>
+            <div class="pipe-link stalled"><span>60 s fold</span></div>
+            <div class="pipe-stage archive-fault"><i class="tiny-dot"></i><span>Roll-up</span><strong data-bind="rollupCoverage">99.998%</strong><small>saved 42 s ago</small></div>
+            <div class="pipe-link stalled"><span data-bind="copyQueue">0 waiting</span></div>
+            <div class="pipe-stage storage-node"><i class="tiny-dot"></i><span>Cold storage</span><strong>148 seg</strong><small>verified SHA-256</small></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel span-8">
+        <div class="panel-head"><div class="panel-title"><h3>Input and commit rate</h3><small>records per second</small></div><div class="legend"><span class="app"><i></i>Input</span><span class="data"><i></i>Committed</span><span class="bad"><i></i>Gap</span></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 760 226" role="img" aria-label="Six hours of archive input and committed record rate">
+            <path class="grid" d="M42 18H746M42 58H746M42 98H746M42 138H746M42 178H746M42 218H746"/>
+            <text class="axis" x="5" y="22">24/s</text><text class="axis" x="5" y="102">14/s</text><text class="axis" x="22" y="182">4/s</text>
+            <g class="scenario-series nominal"><polyline class="line app-line" points="42,131 82,125 122,132 162,110 202,119 242,99 282,114 322,94 362,108 402,91 442,103 482,87 522,101 562,83 602,96 642,80 682,92 746,86"/><polyline class="line data-line" points="42,134 82,128 122,135 162,113 202,122 242,102 282,117 322,97 362,111 402,94 442,106 482,90 522,104 562,86 602,99 642,83 682,95 746,89"/></g>
+            <g class="scenario-series compute"><polyline class="line app-line" points="42,131 82,127 122,134 162,119 202,125 242,115 282,121 322,110 362,116 402,108 442,113 482,105 522,111 562,103 602,109 642,101 682,107 746,104"/><polyline class="line data-line" points="42,136 82,133 122,140 162,126 202,132 242,122 282,128 322,118 362,124 402,116 442,121 482,113 522,119 562,111 602,117 642,109 682,115 746,112"/></g>
+            <g class="scenario-series archive"><polyline class="line app-line" points="42,131 82,125 122,132 162,110 202,119 242,99 282,114 322,94 362,108 402,91 442,103 482,87 522,101 562,83 602,96 642,80 682,92 746,86"/><polyline class="line bad-line" points="42,134 82,128 122,135 162,113 202,122 242,102 282,117 322,97 362,111 402,94 442,106 482,90 522,117 562,142 602,168 642,189 682,205 746,210"/></g>
+            <path class="event-mark" d="M520 18V218"/><text class="event-label" x="525" y="29">deploy</text>
+            <text class="axis" x="42" y="224">06:00</text><text class="axis" x="263" y="224">08:00</text><text class="axis" x="497" y="224">10:00</text><text class="axis" x="712" y="224">12:00</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-head"><div class="panel-title"><h3>Stored data</h3><small>6.84 TB volume</small></div><span class="data-tag">69% used</span></div>
+        <div class="storage-layout">
+          <div style="position:relative"><div class="donut"></div><div class="donut-label" style="inset:43px 0 auto"><strong>4.72 TB</strong><span>used</span></div></div>
+          <div class="storage-legend">
+            <div class="storage-row"><i></i><span>Raw ledger</span><b>2.27 TB</b></div>
+            <div class="storage-row"><i></i><span>Genome store</span><b>1.04 TB</b></div>
+            <div class="storage-row"><i></i><span>Roll-up + metrics</span><b>0.66 TB</b></div>
+            <div class="storage-row"><i></i><span>Other + free</span><b>2.87 TB</b></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel span-7">
+        <div class="panel-head"><div class="panel-title"><h3>Integrity and retention</h3><small>current values and rates</small></div></div>
+        <div class="integrity-grid">
+          <div class="integrity-cell"><span>Genome gaps</span><strong data-bind="genomeGaps">142.8 k</strong><small data-bind="gapRate">+4.1 k/day</small></div>
+          <div class="integrity-cell"><span>Duplicate refusals</span><strong>0</strong><small>30 day delta 0</small></div>
+          <div class="integrity-cell"><span>Skipped lines</span><strong>0</strong><small>all time</small></div>
+          <div class="integrity-cell"><span>Roll-up coverage</span><strong data-bind="rollupCoverage">99.998%</strong><small>61.39 M records</small></div>
+          <div class="integrity-cell"><span>Cold-copy queue</span><strong data-bind="copyQueue">0</strong><small>segments</small></div>
+          <div class="integrity-cell"><span>Replay</span><strong>82.7 s</strong><small>14.6 M raw records</small></div>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-head"><div class="panel-title"><h3>Raw retention window</h3><small>aggregates remain</small></div></div>
+        <div class="chart-wrap">
+          <svg class="chart" viewBox="0 0 520 180" role="img" aria-label="Raw ledger retention window and cold-copy completion">
+            <path class="grid" d="M20 38H500M20 88H500M20 138H500"/>
+            <rect x="20" y="57" width="480" height="18" rx="4" fill="var(--surface-3)"/>
+            <rect x="212" y="57" width="288" height="18" rx="4" fill="var(--data)" opacity=".78"/>
+            <path class="threshold" d="M212 38V104"/>
+            <text class="axis" x="20" y="28">aggregate history</text><text class="axis" x="212" y="28">raw window · 90 days</text>
+            <rect x="20" y="115" width="480" height="8" rx="4" fill="var(--cloud)" opacity=".32"/>
+            <rect x="20" y="115" width="466" height="8" rx="4" fill="var(--cloud)" opacity=".8"/>
+            <text class="axis" x="20" y="151">cold-copy coverage</text><text class="axis" x="450" y="151">97.1%</text>
+          </svg>
+        </div>
+      </article>
     </div>
   </section>
 
-  <section class="shell section" aria-labelledby="details-title">
-    <div class="section-head">
-      <div><p class="eyebrow">Supporting evidence</p><h2 id="details-title">Details on demand</h2></div>
-      <p>The operator can inspect implementation detail without carrying it through the first screen.</p>
-    </div>
-    <div class="details-stack">
-      <details class="card drawer">
-        <summary><strong>All monitor results</strong><span data-bind="monitorSummary">19 pass · 3 warning · 1 critical · 1 warming</span></summary>
-        <div class="drawer-body"><div class="checks-grid" id="checks-grid"></div></div>
-      </details>
-      <details class="card drawer">
-        <summary><strong>Coverage and blind spots</strong><span>3 missing sources · 1 stale audit</span></summary>
-        <div class="drawer-body"><div class="coverage-grid">
-          <div class="coverage-item"><strong>World-host performance</strong><p>Measurements remain on the world host. The dashboard does not receive them.</p></div>
-          <div class="coverage-item"><strong>External path probe</strong><p>No off-host probe checks TLS, the API, and video playback.</p></div>
-          <div class="coverage-item"><strong>Connection cause</strong><p>The relay does not record close codes or per-slot session counts.</p></div>
-          <div class="coverage-item"><strong>Continuous profiles</strong><p>No continuous CPU or heap profile exists. This absence does not reduce live-service health.</p></div>
-        </div></div>
-      </details>
-      <details class="card drawer">
-        <summary><strong>Raw counters and per-unit data</strong><span>For incident analysis</span></summary>
-        <div class="drawer-body"><div class="coverage-grid">
-          <div class="coverage-item"><strong>Service-host counters</strong><p>TCP deltas, connection counts, load, and per-unit memory belong here.</p></div>
-          <div class="coverage-item"><strong>Archive counters</strong><p>Ledger totals, roll-up coverage, duplicate totals, and segment counts belong here.</p></div>
-        </div></div>
-      </details>
+  <section class="panel coverage-panel" aria-labelledby="coverage-title">
+    <div class="panel-head"><div class="panel-title"><h2 id="coverage-title">Data coverage</h2><small>freshness and cadence</small></div><div class="legend"><span class="app"><i></i>Fresh</span><span class="data"><i></i>Partial</span><span><i></i>Missing</span></div></div>
+    <div class="coverage-row">
+      <div class="coverage-source"><strong>Service host</strong><span><i class="tiny-dot"></i>38 s · 1 min</span></div>
+      <div class="coverage-source"><strong>World hosts</strong><span><i class="tiny-dot warn"></i>4 / 6 · 5 min</span></div>
+      <div class="coverage-source"><strong>Application</strong><span><i class="tiny-dot"></i>6 s · 1 min</span></div>
+      <div class="coverage-source"><strong>Public probe</strong><span><i class="tiny-dot"></i>22 s · 1 min</span></div>
+      <div class="coverage-source"><strong>Archive</strong><span><i class="tiny-dot"></i>6 s · 1 min</span></div>
+      <div class="coverage-source"><strong>Provider</strong><span><i class="tiny-dot"></i>11 min · 5 min</span></div>
+      <div class="coverage-source"><strong>Billing</strong><span><i class="tiny-dot warn"></i>19 h · daily</span></div>
+      <div class="coverage-source"><strong>Profiles</strong><span><i class="tiny-dot" style="background:var(--unknown)"></i>not collected</span></div>
     </div>
   </section>
+
+  <footer class="foot"><span>Static design data · no production API calls</span><span>Visualization-first end-state mockup</span></footer>
 </main>
-
-<footer class="mock-foot"><div class="shell"><span>Static mock data · no production API calls</span><span>End-state information design for review</span></div></footer>
 
 <script>
 (function () {
   "use strict";
 
   var scenarios = {
-    current: {
-      tone: "warn",
-      state: "Degraded",
-      summary: "The service is available. Two worlds are offline, and record-integrity risk is increasing.",
-      since: "Since 09:41 UTC",
-      change: "No public outage",
-      confidence: "Partial",
-      confidenceCopy: "Four live sources are fresh. External playback and world-host telemetry are absent.",
-      publicPath: "Serving", publicPathNote: "6 of 6 routes answer",
-      record: "Current", recordNote: "Archive subscribed",
-      worlds: "17 / 19", worldsNote: "2 routed around",
-      decision: "Within 5 hours", decisionNote: "Gap-rate window completes",
-      coverageNote: "This view cannot prove external playback or world-host pressure.",
-      monitorSummary: "19 pass · 3 warning · 1 critical · 1 warming",
-      attention: [
-        {rank: "Priority 1", tone: "bad", title: "Genome capture is falling behind", impact: "Some organisms can lose genome detail after a world leaves.", age: "17 h 55 m", evidence: "Gaps increased by 22,680. The projected rate is 30,400 per day against a 20,000 limit.", next: "Inspect archive capture delay and the worlds that hold the missing genomes."},
-        {rank: "Priority 2", tone: "warn", title: "Two participant worlds are offline", impact: "Migrations route around two map positions. All effective lanes remain open.", age: "16 h 31 m", evidence: "The map moved between 14 and 17 live worlds. Slots 17 and 23 remain dark.", next: "Contact those participants. Use client logs because the relay has no close code."},
-        {rank: "Priority 3", tone: "warn", title: "Swap pressure is near a warning", impact: "The service runs, but memory pressure can increase latency and restart risk.", age: "10 m", evidence: "Swap is 27.7% used for two checks. Three checks at 25% create a warning.", next: "Read the next five-minute sample. Inspect world-host pressure before a resize decision."}
-      ],
-      maintenance: [
-        {title: "Cost audit is overdue", copy: "The last provider reconciliation is 101 hours old.", tag: "Run daily audit"},
-        {title: "Restart model is obsolete", copy: "The model says critical. The measured replay peak fits in physical memory.", tag: "Replace model"}
-      ],
-      domains: [
-        {title: "Public access", state: "Serving", tone: "good", copy: "The website, map, health page, APIs, and HLS origin answer.", metrics: [["Routes", "6 / 6"], ["Broadcast", "Live"]], confidence: "Partial · no external playback probe"},
-        {title: "Worlds and routing", state: "Degraded", tone: "warn", copy: "Two worlds are dark. Routing skips them without closing a lane.", metrics: [["Worlds", "17 / 19"], ["Closed lanes", "0"]], confidence: "Fresh · relay status is 6 seconds old"},
-        {title: "Archive and record", state: "At risk", tone: "bad", copy: "The archive records now. Genome capture grows faster than its decision limit.", metrics: [["Write lag", "822 records"], ["Cold-copy wait", "0"]], confidence: "Fresh · rate window still warming"},
-        {title: "Capacity and cost", state: "At risk", tone: "warn", copy: "Host capacity is stable. Swap pressure and the stale cost audit need action.", metrics: [["Memory free", "38.7%"], ["Disk used", "69%"]], confidence: "Partial · provider audit is stale"}
-      ],
-      trends: [
-        {name: "Live worlds", note: "Participant availability", current: "17 / 19", range: "14–19", values: [18,18,17,16,15,14,15,15,16,17,16,17], tone: "warn", limit: "Less than 18", action: "Contact participants"},
-        {name: "Memory available", note: "Service host", current: "38.7%", range: "31.7–46.0%", values: [36,39,42,46,40,35,32,34,38,41,39,39], tone: "info", limit: "Less than 20%", action: "Inspect PSI"},
-        {name: "Swap used", note: "Sustained use", current: "27.7%", range: "0–29.6%", values: [0,0,4,12,18,23,25,26,24,26,27,28], tone: "warn", limit: "25% for 15 m", action: "Size memory"},
-        {name: "Disk used", note: "Archive volume", current: "69%", range: "68–69%", values: [68,68,68,68,68,68,68,69,69,69,69,69], tone: "info", limit: "More than 75%", action: "Project days to full"},
-        {name: "Replay time", note: "Last measured start", current: "82.7 s", range: "82.7–87.7 s", values: [88,88,88,88,88,88,83,83,83,83,83,83], tone: "info", limit: "More than 180 s", action: "Announce restart"},
-        {name: "Genome-gap rate", note: "Projected daily increase", current: "30.4k/day", range: "18–33k/day", values: [18,19,21,23,24,26,29,33,31,30,30,30], tone: "bad", limit: "More than 20k/day", action: "Inspect capture"}
-      ],
-      timeline: [
-        {time: "10:42", tone: "good", title: "One participant world recovered", copy: "The live count increased from 16 to 17. Routes recomputed without a closed lane."},
-        {time: "10:31", tone: "warn", title: "Swap reached its second warning sample", copy: "Used swap remained above 25%. One more sample creates a warning."},
-        {time: "09:57", tone: "warn", title: "Genome-gap projection crossed its limit", copy: "The monitor remains in warm-up until its rate window completes."},
-        {time: "03:22", tone: "info", title: "Release v0.3.3 activated", copy: "The archive replay took 82.7 seconds. No automatic service restart followed."}
-      ],
-      sources: [
-        {name: "Map and archive", state: "6 s old", tone: "good", width: 100},
-        {name: "Scheduled monitor", state: "1 m old", tone: "good", width: 96},
-        {name: "Service-host sample", state: "38 s old", tone: "good", width: 100},
-        {name: "Viewer presence", state: "4 s old", tone: "good", width: 100},
-        {name: "Provider cost audit", state: "101 h old", tone: "bad", width: 18}
-      ]
+    nominal: {
+      globalState: "Stable",
+      requests: "42.8",
+      latency: "184",
+      errors: "0.18",
+      worlds: "19 / 19",
+      relaySessions: "19",
+      peerTraffic: "1.8 Mb/s",
+      archiveInput: "14.8 rec/s",
+      archiveRate: "14.8",
+      writeLag: "0.8 s",
+      ledgerRecords: "61.4 M",
+      copyRate: "2.4 GB/h",
+      viewers: "2",
+      hostCpu: "46%",
+      hostMem: "52%",
+      publicLatency: "184 ms p95",
+      routeP95: "184 ms",
+      routeErrors: "0.18%",
+      cpuPressure: "0.8%",
+      memPressure: "0.3%",
+      ioPressure: "0.1%",
+      cpuPressureLevel: 8,
+      memPressureLevel: 3,
+      ioPressureLevel: 1,
+      load1: "0.92",
+      swap: "3.2%",
+      archiveMem: "1.84 GB",
+      laneRate: "22.4",
+      inputQueue: "822 queued",
+      rollupCoverage: "99.998%",
+      copyQueue: "0",
+      genomeGaps: "142.8 k",
+      gapRate: "+4.1 k/day"
     },
-    healthy: {
-      tone: "good",
-      state: "Healthy",
-      summary: "The public path, participant worlds, permanent record, and host capacity are healthy.",
-      since: "Stable for 7 days",
-      change: "No active degradation",
-      confidence: "Complete",
-      confidenceCopy: "All required sources are fresh. The external path probe completed 22 seconds ago.",
-      publicPath: "Serving", publicPathNote: "99.99% over 7 days",
-      record: "Current", recordNote: "No integrity backlog",
-      worlds: "19 / 19", worldsNote: "No bypasses",
-      decision: "No action", decisionNote: "Next review in 24 hours",
-      coverageNote: "All required health sources are fresh. Continuous profiles remain optional diagnostic evidence.",
-      monitorSummary: "24 pass · 0 warning · 0 critical",
-      attention: [],
-      maintenance: [
-        {title: "No urgent maintenance", copy: "The next planned review is the daily cost audit.", tag: "Review in 24 h"}
-      ],
-      domains: [
-        {title: "Public access", state: "Healthy", tone: "good", copy: "The external probe reaches the site, APIs, and playable video.", metrics: [["Success", "99.99%"], ["p95 latency", "218 ms"]], confidence: "Complete · external probe is fresh"},
-        {title: "Worlds and routing", state: "Healthy", tone: "good", copy: "Every expected world is live. All routes use direct neighbors.", metrics: [["Worlds", "19 / 19"], ["Bypasses", "0"]], confidence: "Complete · host and relay data agree"},
-        {title: "Archive and record", state: "Healthy", tone: "good", copy: "The archive records now. Roll-up, copy, and integrity rates are inside limits.", metrics: [["Write lag", "0.4 s"], ["Cold-copy wait", "0"]], confidence: "Complete · 24-hour windows are mature"},
-        {title: "Capacity and cost", state: "Healthy", tone: "good", copy: "Memory, disk, replay time, and transfer remain inside their decision limits.", metrics: [["Memory free", "52.1%"], ["Disk used", "62%"]], confidence: "Complete · provider audit is fresh"}
-      ],
-      trends: [
-        {name: "Live worlds", note: "Participant availability", current: "19 / 19", range: "19", values: [19,19,19,19,19,19,19,19,19,19,19,19], tone: "info", limit: "Less than 18", action: "Contact participants"},
-        {name: "Memory available", note: "Service host", current: "52.1%", range: "46–57%", values: [49,51,54,52,50,48,46,49,53,57,54,52], tone: "info", limit: "Less than 20%", action: "Inspect PSI"},
-        {name: "Swap used", note: "Sustained use", current: "3.2%", range: "0–5%", values: [0,0,1,1,2,2,3,5,4,3,3,3], tone: "info", limit: "25% for 15 m", action: "Size memory"},
-        {name: "Disk used", note: "Archive volume", current: "62%", range: "61–62%", values: [61,61,61,61,61,61,62,62,62,62,62,62], tone: "info", limit: "More than 75%", action: "Project days to full"},
-        {name: "Replay time", note: "Last measured start", current: "71.4 s", range: "69–73 s", values: [73,73,73,71,71,71,70,70,69,70,71,71], tone: "info", limit: "More than 180 s", action: "Announce restart"},
-        {name: "Genome-gap rate", note: "Measured daily increase", current: "4.1k/day", range: "2–6k/day", values: [6,5,4,3,2,3,4,5,5,4,4,4], tone: "info", limit: "More than 20k/day", action: "Inspect capture"}
-      ],
-      timeline: [
-        {time: "09:00", tone: "good", title: "Daily evidence review passed", copy: "All health sources and the provider audit were fresh."},
-        {time: "Yesterday", tone: "info", title: "One participant reconnected", copy: "The reconnect completed in 18 seconds without a route bypass."},
-        {time: "7 days", tone: "good", title: "Last service degradation ended", copy: "The health state has remained stable since that recovery."}
-      ],
-      sources: [
-        {name: "External path probe", state: "22 s old", tone: "good", width: 100},
-        {name: "Map and archive", state: "4 s old", tone: "good", width: 100},
-        {name: "Host measurements", state: "31 s old", tone: "good", width: 100},
-        {name: "World-host measurements", state: "2 m old", tone: "good", width: 96},
-        {name: "Provider cost audit", state: "3 h old", tone: "good", width: 88}
-      ]
+    compute: {
+      globalState: "Compute pressure",
+      requests: "39.2",
+      latency: "612",
+      errors: "1.40",
+      worlds: "17 / 19",
+      relaySessions: "17",
+      peerTraffic: "1.5 Mb/s",
+      archiveInput: "13.1 rec/s",
+      archiveRate: "13.1",
+      writeLag: "3.4 s",
+      ledgerRecords: "61.4 M",
+      copyRate: "1.7 GB/h",
+      viewers: "2",
+      hostCpu: "96%",
+      hostMem: "8.2%",
+      publicLatency: "612 ms p95",
+      routeP95: "612 ms",
+      routeErrors: "1.40%",
+      cpuPressure: "18.4%",
+      memPressure: "41.2%",
+      ioPressure: "3.8%",
+      cpuPressureLevel: 78,
+      memPressureLevel: 92,
+      ioPressureLevel: 28,
+      load1: "3.86",
+      swap: "82.1%",
+      archiveMem: "4.92 GB",
+      laneRate: "16.7",
+      inputQueue: "3.1 k queued",
+      rollupCoverage: "99.994%",
+      copyQueue: "2",
+      genomeGaps: "145.2 k",
+      gapRate: "+18.9 k/day"
     },
-    incident: {
-      tone: "bad",
-      state: "Outage",
-      summary: "The public map answers, but the archive is not subscribed. New migrations are not entering the permanent record.",
-      since: "Since 10:38 UTC",
-      change: "Permanent-record outage",
-      confidence: "High",
-      confidenceCopy: "The external probe, relay, archive, and host sources agree on the failure.",
-      publicPath: "Partly serving", publicPathNote: "Map view is stale",
-      record: "Not recording", recordNote: "Archive unsubscribed",
-      worlds: "19 / 19", worldsNote: "Relay still accepts traffic",
-      decision: "Act now", decisionNote: "Hold placement traffic",
-      coverageNote: "The failure is proven from both on-host and off-host sources.",
-      monitorSummary: "17 pass · 1 warning · 6 critical",
-      attention: [
-        {rank: "Priority 1", tone: "bad", title: "Stop unrecorded placement traffic", impact: "Each new migration can create a permanent gap while the archive is unsubscribed.", age: "4 m", evidence: "The relay accepts worlds. The archive subscription is absent, and record count is flat.", next: "Raise the peer gate. Then restore the archive subscription before traffic resumes."},
-        {rank: "Priority 2", tone: "bad", title: "Archive memory is exhausted", impact: "The archive cannot complete replay and cannot serve a current status view.", age: "6 m", evidence: "Memory pressure is 100%. The archive restarted three times and replay stopped at the same point.", next: "Keep the gate active. Capture the failure record and use the approved recovery plan."}
-      ],
-      maintenance: [
-        {title: "Defer routine work", copy: "Billing and participant maintenance wait until recording returns.", tag: "Incident only"}
-      ],
-      domains: [
-        {title: "Public access", state: "Degraded", tone: "warn", copy: "The site answers, but the map view is stale and video playback is intermittent.", metrics: [["Routes", "4 / 6"], ["p95 latency", "2.8 s"]], confidence: "Complete · external probe is fresh"},
-        {title: "Worlds and routing", state: "At risk", tone: "warn", copy: "All worlds remain connected, but their migrations are not entering the record.", metrics: [["Worlds", "19 / 19"], ["Peer gate", "Open"]], confidence: "Fresh · relay status is current"},
-        {title: "Archive and record", state: "Outage", tone: "bad", copy: "The archive is unsubscribed. The permanent record does not advance.", metrics: [["Write lag", "4 m 12 s"], ["Restarts", "3"]], confidence: "Complete · three sources agree"},
-        {title: "Capacity and cost", state: "Critical", tone: "bad", copy: "Memory pressure prevents replay. Disk and transfer remain inside limits.", metrics: [["Memory free", "1.2%"], ["Swap used", "98%"]], confidence: "Complete · host pressure is fresh"}
-      ],
-      trends: [
-        {name: "Live worlds", note: "Participant availability", current: "19 / 19", range: "18–19", values: [19,19,19,18,19,19,19,19,19,19,19,19], tone: "info", limit: "Less than 18", action: "Contact participants"},
-        {name: "Memory available", note: "Service host", current: "1.2%", range: "1–42%", values: [42,40,38,35,30,24,18,12,8,4,2,1], tone: "bad", limit: "Less than 20%", action: "Keep gate active"},
-        {name: "Swap used", note: "Sustained use", current: "98%", range: "8–98%", values: [8,12,18,25,39,52,68,79,88,94,97,98], tone: "bad", limit: "25% for 15 m", action: "Recover capacity"},
-        {name: "Disk used", note: "Archive volume", current: "70%", range: "69–70%", values: [69,69,69,69,69,69,70,70,70,70,70,70], tone: "info", limit: "More than 75%", action: "Project days to full"},
-        {name: "Record write lag", note: "Permanent record", current: "4 m 12 s", range: "0–4 m", values: [0,0,0,0,0,0,0,1,2,3,4,4.2], tone: "bad", limit: "More than 30 s", action: "Hold traffic"},
-        {name: "Archive restarts", note: "Current incident", current: "3", range: "0–3", values: [0,0,0,0,0,0,0,1,1,2,2,3], tone: "bad", limit: "More than 0", action: "Stop retry loop"}
-      ],
-      timeline: [
-        {time: "10:42", tone: "bad", title: "Third archive restart failed", copy: "Replay stopped at the same memory-pressure point."},
-        {time: "10:40", tone: "bad", title: "Permanent record stopped", copy: "The archive lost its relay subscription. The record count stopped."},
-        {time: "10:38", tone: "warn", title: "Memory pressure crossed its limit", copy: "Available memory fell below 5% and swap use reached 94%."},
-        {time: "10:31", tone: "info", title: "Routine deployment completed", copy: "The event is correlated. It is not yet proven as the cause."}
-      ],
-      sources: [
-        {name: "External path probe", state: "8 s old", tone: "good", width: 100},
-        {name: "Relay status", state: "3 s old", tone: "good", width: 100},
-        {name: "Archive status", state: "Unavailable", tone: "bad", width: 4},
-        {name: "Service-host pressure", state: "21 s old", tone: "good", width: 100},
-        {name: "Deployment events", state: "Current", tone: "good", width: 100}
-      ]
+    archive: {
+      globalState: "Archive stall",
+      requests: "41.1",
+      latency: "244",
+      errors: "0.70",
+      worlds: "19 / 19",
+      relaySessions: "19",
+      peerTraffic: "1.9 Mb/s",
+      archiveInput: "14.6 rec/s",
+      archiveRate: "0.0",
+      writeLag: "4 m 12 s",
+      ledgerRecords: "61.4 M",
+      copyRate: "0 GB/h",
+      viewers: "3",
+      hostCpu: "71%",
+      hostMem: "15%",
+      publicLatency: "244 ms p95",
+      routeP95: "244 ms",
+      routeErrors: "0.70%",
+      cpuPressure: "4.2%",
+      memPressure: "12.8%",
+      ioPressure: "21.6%",
+      cpuPressureLevel: 32,
+      memPressureLevel: 64,
+      ioPressureLevel: 82,
+      load1: "2.14",
+      swap: "47.3%",
+      archiveMem: "4.18 GB",
+      laneRate: "21.9",
+      inputQueue: "18.2 k queued",
+      rollupCoverage: "99.921%",
+      copyQueue: "7",
+      genomeGaps: "151.7 k",
+      gapRate: "+30.4 k/day"
     }
   };
 
-  var checkGroups = [
-    {title: "Availability", items: [["Required services", "pass"], ["Public path", "pass"], ["Relay", "pass"], ["Archive", "pass"], ["Subscription", "pass"]]},
-    {title: "Worlds and routing", items: [["World presence", "warning"], ["Lane bypass", "warning"], ["Internal route", "pass"]]},
-    {title: "Record integrity", items: [["Roll-up", "pass"], ["Cold copy", "pass"], ["Duplicates", "warming"], ["Genome gaps", "warning"]]},
-    {title: "Capacity", items: [["Memory model", "critical"], ["Replay time", "pass"], ["Swap", "warning"], ["Disk", "pass"]]},
-    {title: "Cost", items: [["Transfer total", "pass"], ["Transfer rate", "pass"], ["Billing audit", "warning"]]},
-    {title: "Maintenance", items: [["Service errors", "pass"], ["Certificate", "pass"], ["Backup", "pass"], ["Reboot", "pass"]]}
-  ];
-
-  function escapeText(value) {
-    return String(value).replace(/[&<>"']/g, function (char) {
-      return {"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"}[char];
-    });
-  }
-
-  function bind(data) {
+  function selectScenario(name) {
+    var data = scenarios[name];
+    document.body.setAttribute("data-scenario", name);
     document.querySelectorAll("[data-bind]").forEach(function (node) {
       var key = node.getAttribute("data-bind");
       if (Object.prototype.hasOwnProperty.call(data, key)) node.textContent = data[key];
     });
-  }
-
-  function renderAttention(items) {
-    var target = document.getElementById("attention-list");
-    if (!items.length) {
-      target.innerHTML = '<div class="empty-attention"><i class="state-dot" aria-hidden="true"></i><div><strong>No active operator problem</strong><div class="issue-impact">All required results are inside their decision limits.</div></div></div>';
-      return;
-    }
-    target.innerHTML = items.map(function (item, index) {
-      return '<details class="issue '+escapeText(item.tone)+'" '+(index === 0 ? "open" : "")+'>'+
-        '<summary><div class="issue-top"><span class="issue-rank">'+escapeText(item.rank)+'</span><div><div class="issue-title">'+escapeText(item.title)+'</div><div class="issue-impact">'+escapeText(item.impact)+'</div><span class="issue-toggle">Evidence and next action</span></div><span class="issue-age">'+escapeText(item.age)+'</span></div></summary>'+
-        '<div class="issue-body"><div><span>Evidence</span><p>'+escapeText(item.evidence)+'</p></div><div><span>Next action</span><p>'+escapeText(item.next)+'</p></div></div></details>';
-    }).join("");
-  }
-
-  function renderMaintenance(items) {
-    document.getElementById("maintenance-list").innerHTML = items.map(function (item) {
-      return '<div class="maintenance-item"><strong>'+escapeText(item.title)+'</strong><span>'+escapeText(item.copy)+'</span><span class="maintenance-tag">'+escapeText(item.tag)+'</span></div>';
-    }).join("");
-  }
-
-  function renderDomains(items) {
-    document.getElementById("domains").innerHTML = items.map(function (item) {
-      var metrics = item.metrics.map(function (metric) {
-        return '<div class="domain-metric"><span>'+escapeText(metric[0])+'</span><strong>'+escapeText(metric[1])+'</strong></div>';
-      }).join("");
-      return '<article class="card domain"><div class="domain-top"><h3>'+escapeText(item.title)+'</h3><span class="status-pill '+escapeText(item.tone)+'">'+escapeText(item.state)+'</span></div><p class="domain-copy">'+escapeText(item.copy)+'</p><div class="domain-metrics">'+metrics+'</div><div class="domain-confidence"><b>Evidence:</b> '+escapeText(item.confidence)+'</div></article>';
-    }).join("");
-  }
-
-  function spark(values, tone) {
-    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
-    if (max === min) max = min + 1;
-    var points = values.map(function (value, index) {
-      var x = index * (220 / (values.length - 1));
-      var y = 34 - ((value - min) / (max - min)) * 28;
-      return x.toFixed(1)+","+y.toFixed(1);
-    }).join(" ");
-    var last = points.split(" ").pop().split(",");
-    return '<svg class="spark '+escapeText(tone)+'" viewBox="0 0 220 40" preserveAspectRatio="none" aria-hidden="true"><path class="gridline" d="M0 34H220 M0 20H220 M0 6H220"/><polyline points="'+points+'"/><circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.7"/></svg>';
-  }
-
-  function renderTrends(items) {
-    document.getElementById("trends").innerHTML = items.map(function (item) {
-      return '<div class="trend-row"><div class="trend-name"><strong>'+escapeText(item.name)+'</strong><span>'+escapeText(item.note)+'</span></div><div class="trend-current">'+escapeText(item.current)+'</div><div class="trend-range">'+escapeText(item.range)+'</div><div>'+spark(item.values, item.tone)+'</div><div class="decision"><b>'+escapeText(item.limit)+'</b><span>'+escapeText(item.action)+'</span></div></div>';
-    }).join("");
-  }
-
-  function renderTimeline(items) {
-    document.getElementById("timeline").innerHTML = items.map(function (item) {
-      return '<div class="event '+escapeText(item.tone)+'"><time>'+escapeText(item.time)+'</time><i class="event-dot" aria-hidden="true"></i><div class="event-copy"><strong>'+escapeText(item.title)+'</strong><span>'+escapeText(item.copy)+'</span></div></div>';
-    }).join("");
-  }
-
-  function renderSources(items) {
-    document.getElementById("sources").innerHTML = items.map(function (item) {
-      return '<div class="source '+escapeText(item.tone)+'"><div class="source-top"><strong>'+escapeText(item.name)+'</strong><span>'+escapeText(item.state)+'</span></div><div class="source-bar"><i style="--width:'+Number(item.width)+'%"></i></div></div>';
-    }).join("");
-  }
-
-  function renderChecks(name) {
-    var groups = checkGroups.map(function (group) {
-      var items = group.items.map(function (item) {
-        var severity = item[1];
-        if (name === "healthy") severity = "pass";
-        if (name === "incident" && ["Required services", "Archive", "Subscription", "Memory model", "Replay time", "Service errors"].indexOf(item[0]) >= 0) severity = "critical";
-        var tone = severity === "critical" ? "bad" : (severity === "warning" || severity === "warming" ? "warn" : "");
-        return '<div class="check-line"><span>'+escapeText(item[0])+'</span><i class="'+tone+'">'+escapeText(severity)+'</i></div>';
-      }).join("");
-      return '<div class="check-group"><h4>'+escapeText(group.title)+'</h4>'+items+'</div>';
-    }).join("");
-    document.getElementById("checks-grid").innerHTML = groups;
-  }
-
-  function selectScenario(name) {
-    var data = scenarios[name];
-    document.body.setAttribute("data-tone", data.tone);
-    bind(data);
-    renderAttention(data.attention);
-    renderMaintenance(data.maintenance);
-    renderDomains(data.domains);
-    renderTrends(data.trends);
-    renderTimeline(data.timeline);
-    renderSources(data.sources);
-    renderChecks(name);
-    document.querySelectorAll("[data-scenario]").forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-scenario") === name ? "true" : "false");
+    document.querySelectorAll("[data-ring]").forEach(function (node) {
+      var key = node.getAttribute("data-ring") + "Level";
+      node.style.setProperty("--value", data[key]);
+      node.style.setProperty("--ring-color", data[key] > 70 ? "var(--bad)" : (data[key] > 40 ? "var(--warn)" : "var(--compute)"));
+    });
+    document.querySelectorAll("[data-scenario-button]").forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-scenario-button") === name ? "true" : "false");
     });
   }
 
-  document.querySelectorAll("[data-scenario]").forEach(function (button) {
-    button.addEventListener("click", function () { selectScenario(button.getAttribute("data-scenario")); });
+  document.querySelectorAll("[data-scenario-button]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      selectScenario(button.getAttribute("data-scenario-button"));
+    });
   });
-  selectScenario("current");
+  selectScenario("nominal");
 }());
 </script>
 </body>
