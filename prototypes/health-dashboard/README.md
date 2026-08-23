@@ -34,6 +34,7 @@ prevents one color from having two meanings.
 - Thresholds appear as lines or bands.
 - Legends stay next to their charts.
 - Units appear with each value.
+- Every metric, chart, legend, and status mark has a hover and keyboard-focus tooltip.
 - Tables are limited to endpoints, services, and other exact comparisons.
 - Raw fields remain available below each layer, not on the overview.
 

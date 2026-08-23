@@ -486,6 +486,37 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
 
 .foot { margin-top: 30px; display: flex; justify-content: space-between; gap: 20px; color: var(--dim); font-size: 9px; }
 
+[data-tooltip] { cursor: help; }
+[data-tooltip][tabindex]:focus-visible {
+  outline: 2px solid var(--compute);
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+.telemetry-tooltip {
+  position: fixed;
+  z-index: 100;
+  width: max-content;
+  max-width: min(310px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid #38516f;
+  border-radius: 8px;
+  color: #eef6ff;
+  background: rgba(11, 22, 37, .98);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .42);
+  font-size: 11px;
+  line-height: 1.45;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 100ms ease, transform 100ms ease, visibility 100ms;
+}
+.telemetry-tooltip[data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 @media (max-width: 1180px) {
   .signal-grid { grid-template-columns: repeat(4, 1fr); }
   .span-8, .span-7 { grid-column: span 12; }
@@ -894,6 +925,8 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
   <footer class="foot"><span>Static design data · no production API calls</span><span>Visualization-first end-state mockup</span></footer>
 </main>
 
+<div class="telemetry-tooltip" id="telemetry-tooltip" role="tooltip" aria-hidden="true"></div>
+
 <script>
 (function () {
   "use strict";
@@ -1006,6 +1039,364 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
     }
   };
 
+  var panelTips = {
+    "Live system map": "Nodes show system components. Lines show connections and current flow rates.",
+    "Host resources": "This chart compares CPU use with available memory on the service host.",
+    "Pressure and load": "Pressure stall information measures time that work waits for CPU, memory, or storage.",
+    "Memory by service": "Each bar splits service memory into anonymous memory and reclaimable file cache.",
+    "Compute inventory": "These values show provisioned compute capacity and measured archive restart cost.",
+    "Network transfer": "This chart compares monthly inbound and outbound transfer with the Lightsail allowance.",
+    "Service state": "Each card shows 30-day service availability and restart marks.",
+    "Public routes": "Each row shows external request rate, latency percentiles, status, and server-error rate.",
+    "Cloud pace": "These values compare current transfer and cost with their month-end projections.",
+    "Request volume": "The stacked areas show request rate for API, page, and stream routes.",
+    "Response codes": "Each bar splits one request bucket into successful, client-error, and server-error responses.",
+    "Public latency": "The lines show median, p95, and p99 response time on one scale.",
+    "Worlds and relay": "The grid shows each map position and its current relay state.",
+    "Relay events": "These counters show relay sessions, reconnects, network errors, queues, and migration flow.",
+    "Broadcast": "These values show audience size, stream rate, publisher state, and segment age.",
+    "Record pipeline": "The pipeline follows migration records from relay input through cold storage.",
+    "Input and commit rate": "The lines compare records that enter the archive with records that reach the ledger.",
+    "Stored data": "The ring divides used storage among the raw ledger, genomes, roll-up data, and other files.",
+    "Integrity and retention": "These values show record completeness, copy state, and measured replay cost.",
+    "Raw retention window": "This chart separates permanent aggregates from the limited raw-ledger window.",
+    "Data coverage": "Each source shows measurement age and collection cadence. Gray means that no source exists."
+  };
+
+  var signalTips = {
+    "Requests": "Total public HTTP request rate across the displayed routes.",
+    "Public p95": "Ninety-five percent of public requests finish within this time.",
+    "5xx rate": "Share of public requests that return a server error.",
+    "Worlds": "Live participant worlds compared with the expected world count.",
+    "Archive input": "Migration records that enter the archive each second.",
+    "Write lag": "Time between relay receipt and a durable archive write.",
+    "Host CPU": "Share of service-host CPU time that is busy.",
+    "Memory free": "Share of service-host memory that the kernel can allocate without reclaim pressure."
+  };
+
+  var nodeTips = {
+    "World hosts": "Machines that run participant worlds and send migration traffic to the relay.",
+    "Relay": "The WebSocket service that receives worlds, routes migrations, and feeds the archive.",
+    "Archive": "The service that records migrations and builds the public map and historical views.",
+    "Browsers": "Public clients that request pages, APIs, and video through the front door.",
+    "Nginx + TLS": "The public front door that terminates TLS and routes HTTP and WebSocket traffic.",
+    "Map + stream": "The public map application and the HLS broadcast origin.",
+    "Service host": "The Lightsail instance that runs nginx, relay, archive, and stream services.",
+    "Lightsail": "The cloud instance, network allowance, burst capacity, and public address.",
+    "Local volume": "The attached storage that holds the ledger, genomes, metrics, and roll-up files."
+  };
+
+  var cardTips = {
+    "vcpu": "Virtual CPU capacity on the service host.",
+    "ram": "Physical memory capacity on the service host.",
+    "disk": "Current volume use and its recent daily growth.",
+    "replay hwm": "Highest archive memory use measured during the last replay.",
+    "transfer used": "Combined inbound and outbound transfer since the start of the month.",
+    "projection": "Month-end transfer estimate from the current usage pace.",
+    "cost": "Current cloud cost and the month-end forecast.",
+    "tls age": "Certificate age and the number of days before renewal.",
+    "viewers": "Current external viewers and the peak for this time window.",
+    "media rate": "Encoded video bitrate that the HLS origin sends.",
+    "publisher": "Current state of the RTMP publishing session.",
+    "segment age": "Age of the newest HLS media segment at the origin."
+  };
+
+  var integrityTips = {
+    "active sessions": "Current relay sessions with participant worlds.",
+    "reconnects": "New relay sessions after a previous session ended.",
+    "tcp resets": "TCP connections that ended with a reset during this window.",
+    "retransmits": "TCP segments that the service host sent again.",
+    "queue depth": "Migration envelopes that wait inside the relay.",
+    "flow rate": "Migration envelopes that cross world boundaries each minute.",
+    "genome gaps": "Archived organisms whose genome detail is not present.",
+    "duplicate refusals": "Records that the duplicate guard rejected.",
+    "skipped lines": "Ledger lines that the archive did not parse.",
+    "roll-up coverage": "Share of ledger records included in the durable aggregate.",
+    "cold-copy queue": "Closed ledger segments that still need a verified off-host copy.",
+    "replay": "Measured time and raw record count from the last archive start."
+  };
+
+  var coverageTips = {
+    "service host": "CPU, memory, disk, TCP, and service measurements from the production host.",
+    "world hosts": "Resource and world-process measurements from participant hosts.",
+    "application": "Request, relay, world, and broadcast measurements from application services.",
+    "public probe": "External TLS, API, and video requests from outside the service host.",
+    "archive": "Ledger, roll-up, replay, retention, and integrity measurements from the archive.",
+    "provider": "Lightsail transfer, burst capacity, instance, and spot-price measurements.",
+    "billing": "Cost Explorer totals and usage quantities from the daily reconciliation.",
+    "profiles": "Continuous CPU and heap profiles. This source does not exist in the mockup."
+  };
+
+  var tableHeaderTips = {
+    "route": "Public path that the external probe requests.",
+    "state": "Latest HTTP response status from the external probe.",
+    "req/s": "Average requests per second for this route.",
+    "p50": "Median response time for this route.",
+    "p95": "Response time that contains 95 percent of requests.",
+    "p99": "Response time that contains 99 percent of requests.",
+    "5xx": "Share of requests that return a server error."
+  };
+
+  function cleanText(node) {
+    return node.textContent.replace(/\s+/g, " ").trim();
+  }
+
+  function addTooltip(node, text, focusable) {
+    if (!node || !text) return;
+    node.setAttribute("data-tooltip", text);
+    node.setAttribute("aria-description", text);
+    if (focusable !== false && !node.matches("button, a, input, select, textarea")) {
+      node.setAttribute("tabindex", "0");
+    }
+  }
+
+  function setupTooltips() {
+    addTooltip(document.querySelector(".global-state"),
+      "This state combines availability, capacity, traffic, and record flow for the selected scenario.");
+    document.querySelectorAll(".time-tag").forEach(function (node) {
+      addTooltip(node, "All time charts use this time window and sample interval.");
+    });
+    document.querySelectorAll(".data-tag").forEach(function (node) {
+      var text = cleanText(node);
+      addTooltip(node, text.indexOf("Updated") === 0
+        ? "This age is the time since the newest dashboard refresh."
+        : "This badge shows the scope, freshness, or state of the adjacent visualization.");
+    });
+    addTooltip(document.querySelector(".mock-tag"),
+      "All values are static examples. This page makes no production requests.");
+
+    var scenarioTips = {
+      nominal: "Load a static example of normal production activity.",
+      compute: "Load a static example of CPU and memory pressure.",
+      archive: "Load a static example of stalled archive writes."
+    };
+    document.querySelectorAll("[data-scenario-button]").forEach(function (node) {
+      addTooltip(node, scenarioTips[node.getAttribute("data-scenario-button")]);
+    });
+
+    var domainTips = [
+      "Host resource use, saturation, service memory, and restart cost.",
+      "Public paths, service state, cloud transfer, and cost pace.",
+      "HTTP traffic, latency, relay state, participant worlds, and broadcast.",
+      "Record flow, ledger storage, roll-up state, retention, and integrity."
+    ];
+    document.querySelectorAll(".domain-name").forEach(function (node, index) {
+      addTooltip(node, domainTips[index]);
+    });
+
+    var laneTips = [
+      "Migration data moves from participant worlds through the relay into permanent storage.",
+      "Public clients reach pages, APIs, WebSockets, and video through nginx.",
+      "The service host connects compute, cloud state, local storage, and off-host storage."
+    ];
+    document.querySelectorAll(".lane-label").forEach(function (node, index) {
+      addTooltip(node, laneTips[index]);
+    });
+
+    document.querySelectorAll(".node").forEach(function (node) {
+      var label = cleanText(node.querySelector("strong"));
+      addTooltip(node, nodeTips[label]);
+    });
+
+    var flowTips = [
+      "Current network traffic from participant worlds to the relay.",
+      "Current migration-record rate from the relay to the archive.",
+      "Current cold-copy transfer rate from the archive.",
+      "External p95 latency from public clients to nginx.",
+      "Application traffic from nginx to API and WebSocket services.",
+      "Video and data traffic that leaves the service host.",
+      "Service control and resource accounting through systemd.",
+      "Ledger and metric writes to the local volume.",
+      "Verified ledger segments copied to off-host storage."
+    ];
+    document.querySelectorAll(".flow-link").forEach(function (node, index) {
+      addTooltip(node, flowTips[index]);
+    });
+
+    document.querySelectorAll(".signal").forEach(function (node) {
+      addTooltip(node, signalTips[cleanText(node.querySelector(".signal-label"))]);
+    });
+
+    document.querySelectorAll(".panel-title").forEach(function (node) {
+      var heading = node.querySelector("h2, h3");
+      addTooltip(node, heading ? panelTips[cleanText(heading)] : "");
+    });
+    document.querySelectorAll("svg.chart").forEach(function (node) {
+      var panel = node.closest(".panel");
+      var heading = panel && panel.querySelector(".panel-title h2, .panel-title h3");
+      addTooltip(node, heading ? panelTips[cleanText(heading)] : "");
+    });
+    document.querySelectorAll(".legend span").forEach(function (node) {
+      addTooltip(node, "This color identifies the " + cleanText(node).toLowerCase() + " series or state.");
+    });
+
+    var gaugeTips = {
+      "CPU PSI": "Share of time that runnable work waits for CPU.",
+      "Memory PSI": "Share of time that work waits for available memory.",
+      "IO PSI": "Share of time that work waits for storage input or output."
+    };
+    document.querySelectorAll(".gauge").forEach(function (node) {
+      addTooltip(node, gaugeTips[cleanText(node.querySelector("span"))]);
+    });
+
+    var pressureTips = [
+      "One-minute runnable load on the service host.",
+      "Share of configured swap space that contains memory pages.",
+      "Share of the connection-tracking table that is in use."
+    ];
+    document.querySelectorAll(".pressure-foot span").forEach(function (node, index) {
+      addTooltip(node, pressureTips[index]);
+    });
+
+    document.querySelectorAll(".service-bar").forEach(function (node) {
+      var service = cleanText(node.querySelector(".service-name"));
+      addTooltip(node, "The " + service + " cgroup memory split. Anonymous memory cannot be reclaimed like file cache.");
+    });
+    document.querySelectorAll(".service-cell").forEach(function (node) {
+      var service = cleanText(node.querySelector("strong"));
+      addTooltip(node, "The " + service + " card shows 30-day uptime, restart count, and state samples.");
+    });
+    document.querySelectorAll(".cloud-card").forEach(function (node) {
+      var label = cleanText(node.querySelector("span")).toLowerCase();
+      addTooltip(node, cardTips[label]);
+    });
+
+    var headers = [];
+    document.querySelectorAll(".metric-table th").forEach(function (node) {
+      var key = cleanText(node).toLowerCase();
+      headers.push(tableHeaderTips[key]);
+      addTooltip(node, tableHeaderTips[key]);
+    });
+    document.querySelectorAll(".metric-table tbody tr").forEach(function (row) {
+      var route = cleanText(row.cells[0]);
+      addTooltip(row, "External request measurements for " + route + ".");
+      Array.from(row.cells).forEach(function (cell, index) {
+        addTooltip(cell, headers[index] + " Current value: " + cleanText(cell) + ".");
+      });
+    });
+
+    addTooltip(document.querySelector(".status-bars"),
+      "Each stacked bar shows successful, client-error, and server-error responses in one five-minute bucket.");
+    addTooltip(document.querySelector(".world-summary"),
+      "Expected worlds, current migration flow, and relay state for the selected scenario.");
+    document.querySelectorAll(".world").forEach(function (node) {
+      addTooltip(node, "Map position " + cleanText(node) + ". Green is live. Red is unavailable. Gray is empty.");
+    });
+
+    var relayTips = [
+      "Current participant sessions on the relay.",
+      "Migration lanes with no available route.",
+      "Age of the oldest migration envelope in a relay queue."
+    ];
+    document.querySelectorAll(".relay-stat").forEach(function (node, index) {
+      addTooltip(node, relayTips[index]);
+    });
+
+    var pipelineTips = {
+      "relay input": "Migration records that the relay sends to the archive.",
+      "raw ledger": "Durable append-only migration records on the local volume.",
+      "roll-up": "Permanent aggregates built from raw ledger records.",
+      "cold storage": "Verified compressed ledger segments on off-host storage."
+    };
+    document.querySelectorAll(".pipe-stage").forEach(function (node) {
+      addTooltip(node, pipelineTips[cleanText(node.querySelector("span")).toLowerCase()]);
+    });
+    var pipeLinkTips = [
+      "Records that wait between relay receipt and a ledger write.",
+      "The archive folds new ledger records into the roll-up every 60 seconds.",
+      "Closed ledger segments that wait for a verified cold copy."
+    ];
+    document.querySelectorAll(".pipe-link").forEach(function (node, index) {
+      addTooltip(node, pipeLinkTips[index]);
+    });
+
+    addTooltip(document.querySelector(".donut"),
+      "The ring divides used volume among raw ledger, genomes, roll-up data, and other files.");
+    document.querySelectorAll(".storage-row").forEach(function (node) {
+      addTooltip(node, cleanText(node.querySelector("span")) + " storage and its current byte total.");
+    });
+    document.querySelectorAll(".integrity-cell").forEach(function (node) {
+      var label = cleanText(node.querySelector("span")).toLowerCase();
+      addTooltip(node, integrityTips[label]);
+    });
+    document.querySelectorAll(".coverage-source").forEach(function (node) {
+      var label = cleanText(node.querySelector("strong")).toLowerCase();
+      addTooltip(node, coverageTips[label]);
+    });
+
+    installTooltipBehavior();
+  }
+
+  function installTooltipBehavior() {
+    var tooltip = document.getElementById("telemetry-tooltip");
+    var activeTarget = null;
+
+    function positionTooltip(target) {
+      var rect = target.getBoundingClientRect();
+      var tipRect = tooltip.getBoundingClientRect();
+      var left = rect.left + rect.width / 2 - tipRect.width / 2;
+      left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+      var top = rect.top - tipRect.height - 9;
+      if (top < 8) top = rect.bottom + 9;
+      if (top + tipRect.height > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - tipRect.height - 8);
+      }
+      tooltip.style.left = left + "px";
+      tooltip.style.top = top + "px";
+    }
+
+    function showTooltip(target) {
+      if (!target || !target.getAttribute("data-tooltip")) return;
+      activeTarget = target;
+      tooltip.textContent = target.getAttribute("data-tooltip");
+      tooltip.setAttribute("data-open", "true");
+      tooltip.setAttribute("aria-hidden", "false");
+      positionTooltip(target);
+    }
+
+    function hideTooltip(target) {
+      if (target && activeTarget !== target) return;
+      activeTarget = null;
+      tooltip.removeAttribute("data-open");
+      tooltip.setAttribute("aria-hidden", "true");
+    }
+
+    document.addEventListener("pointerover", function (event) {
+      var target = event.target.closest("[data-tooltip]");
+      if (target && target !== activeTarget) showTooltip(target);
+    });
+    document.addEventListener("pointerout", function (event) {
+      var target = event.target.closest("[data-tooltip]");
+      var next = event.relatedTarget && event.relatedTarget.closest
+        ? event.relatedTarget.closest("[data-tooltip]") : null;
+      if (target && target !== next && document.activeElement !== target) hideTooltip(target);
+    });
+    document.addEventListener("focusin", function (event) {
+      var target = event.target.closest("[data-tooltip]");
+      if (target) showTooltip(target);
+    });
+    document.addEventListener("focusout", function (event) {
+      var target = event.target.closest("[data-tooltip]");
+      if (target) hideTooltip(target);
+    });
+    document.addEventListener("pointerdown", function (event) {
+      var target = event.target.closest("[data-tooltip]");
+      if (target && event.pointerType !== "mouse") {
+        target.focus({preventScroll: true});
+        showTooltip(target);
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") hideTooltip();
+    });
+    window.addEventListener("resize", function () {
+      if (activeTarget) positionTooltip(activeTarget);
+    });
+    window.addEventListener("scroll", function () {
+      if (activeTarget) positionTooltip(activeTarget);
+    }, true);
+  }
+
   function selectScenario(name) {
     var data = scenarios[name];
     document.body.setAttribute("data-scenario", name);
@@ -1028,6 +1419,7 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
       selectScenario(button.getAttribute("data-scenario-button"));
     });
   });
+  setupTooltips();
   selectScenario("nominal");
 }());
 </script>
