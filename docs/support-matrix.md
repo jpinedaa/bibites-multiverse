@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.7` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.7` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -186,7 +186,7 @@ one record rather than a per-row one because the plugin is a single file for bot
 
 | | |
 |---|---|
-| Mod version | `0.6.7` |
+| Mod version | `0.6.8` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
 | `cmd/sidecar` source commit | `93107a6773f49ce3520126e7ffdeac05d78a1f45` |
@@ -268,10 +268,10 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.3.5",
+  "release": "0.3.6",
   "published": "2026-08-23",
   "testedBuild": {
-    "mod": "0.6.7",
+    "mod": "0.6.8",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
     "sidecarSourceCommit": "93107a6773f49ce3520126e7ffdeac05d78a1f45",
@@ -288,7 +288,7 @@ reads. The installers ignore it; the release gates do not.
       "store": "Steam",
       "storeBuild": "app 2736860, buildid 22383127",
       "assemblySha256": "12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE",
-      "mod": "0.6.7",
+      "mod": "0.6.8",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
@@ -302,7 +302,7 @@ reads. The installers ignore it; the release gates do not.
       "store": "itch.io",
       "storeBuild": "upload 16838443, archive sha256 E15695D7944B4DED9E6D29A21518D00E9689C1A2B8CEB7288D51651ADCE57F4E",
       "assemblySha256": "5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA",
-      "mod": "0.6.7",
+      "mod": "0.6.8",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",

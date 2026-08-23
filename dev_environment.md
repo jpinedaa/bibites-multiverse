@@ -69,7 +69,7 @@ broaden a source search to include custody directories.
 | Component | Public development baseline |
 |---|---|
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.7` |
+| Plugin | `0.6.8` |
 | Contract A | `contract-a/2.4` |
 | Contract B | `contract-b/4.1` |
 | Genome projection | `bb8-genome/1` |

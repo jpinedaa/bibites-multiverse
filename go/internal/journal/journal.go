@@ -232,6 +232,10 @@ type State struct {
 	RerouteFrom  int    `json:"rerouteFrom,omitempty"`
 	RerouteProof string `json:"rerouteProof,omitempty"`
 	RerouteAtMs  int64  `json:"rerouteAtMs,omitempty"`
+	// RefusedSlots is the durable set of live destinations that explicitly
+	// declined this migration. It prevents overload spillover from circling
+	// back to a world already tried after a process restart.
+	RefusedSlots []int `json:"refusedSlots,omitempty"`
 
 	seq uint64
 }
@@ -248,6 +252,7 @@ func (s *State) AwaitsUpstreamAck() bool {
 // Clone returns a copy safe to hand outside the journal's lock.
 func (s *State) Clone() *State {
 	c := *s
+	c.RefusedSlots = append([]int(nil), s.RefusedSlots...)
 	return &c
 }
 
@@ -295,6 +300,7 @@ type record struct {
 	RerouteFrom    *int     `json:"rerouteFrom,omitempty"`
 	RerouteProof   *string  `json:"rerouteProof,omitempty"`
 	RerouteAtMs    *int64   `json:"rerouteAtMs,omitempty"`
+	RefusedSlots   []int    `json:"refusedSlots,omitempty"`
 
 	// B26's four. The COUNT is written absolute rather than as an increment,
 	// which is what makes a record idempotent under both of the ways this log is
@@ -619,6 +625,9 @@ func (j *Journal) apply(rec record) {
 		if rec.RerouteAtMs != nil {
 			st.RerouteAtMs = *rec.RerouteAtMs
 		}
+		if len(rec.RefusedSlots) > 0 {
+			st.RefusedSlots = append([]int(nil), rec.RefusedSlots...)
+		}
 		if rec.ForwardReceipts != nil {
 			st.ForwardReceipts = *rec.ForwardReceipts
 		}
@@ -762,7 +771,8 @@ func (j *Journal) compact() error {
 			Duplicate: boolPtr(st.Duplicate), Note: st.Note,
 			SentAtMs: int64Ptr(st.SentAtMs), DestSlot: intPtr(st.Entry.DestSlot),
 			RerouteCount: intPtr(st.RerouteCount), RerouteFrom: intPtr(st.RerouteFrom),
-			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs)}
+			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs),
+			RefusedSlots: append([]int(nil), st.RefusedSlots...)}
 		if st.Handoff != "" {
 			h := st.Handoff
 			status.Handoff = &h
@@ -1002,6 +1012,7 @@ type Update struct {
 	RerouteFrom  *int
 	RerouteProof *string
 	RerouteAtMs  *int64
+	RefusedSlots []int
 	// The FORWARD_RECEIPT block (§6.12, §22 B26). ForwardReceipts is the new
 	// ABSOLUTE count, not a delta; the caller reads the current one and writes
 	// count+1, so a replayed record can never double-count a forward.
@@ -1027,6 +1038,7 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 		Note: u.Note, RelaySessionID: u.RelaySessionID, SentAtMs: u.SentAtMs,
 		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
 		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
+		RefusedSlots:     append([]int(nil), u.RefusedSlots...),
 		ForwardReceipts:  u.ForwardReceipts,
 		ReceiptSessionID: u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
 		ReceiptForwardedAtMs: u.ReceiptForwardedAtMs}

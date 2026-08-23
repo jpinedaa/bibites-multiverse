@@ -94,6 +94,25 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"token-bucket capacity for --inbound-rate (contract-a.md §7.5, "+
 			"inboundRateBurst), the largest clump ever released at once. 0 keeps "+
 			"the default (50.0)")
+	inboundAdmission := fs.String("inbound-admission",
+		env("MULTIVERSE_INBOUND_ADMISSION", AdmissionAdaptiveShadow),
+		"pre-custody population admission: off, fixed, adaptive-shadow, or adaptive. "+
+			"adaptive-shadow is the safe default: it learns and reports a limit but refuses nothing")
+	inboundPopulationLimit := fs.Int("inbound-population-limit",
+		envInt("MULTIVERSE_INBOUND_POPULATION_LIMIT", 0),
+		"hard living-population limit used by --inbound-admission=fixed; must be positive")
+	inboundTargetScale := fs.Float64("inbound-target-time-scale",
+		envFloat("MULTIVERSE_INBOUND_TARGET_TIME_SCALE", defaultAdmissionTarget),
+		"achieved simulation speed the adaptive population estimator is sized to hold (default x10)")
+	inboundPopulationMin := fs.Int("inbound-population-min",
+		envInt("MULTIVERSE_INBOUND_POPULATION_MIN", defaultAdmissionMin),
+		"lowest population limit the adaptive estimator may learn")
+	inboundPopulationMax := fs.Int("inbound-population-max",
+		envInt("MULTIVERSE_INBOUND_POPULATION_MAX", defaultAdmissionMax),
+		"highest population limit the adaptive estimator may learn")
+	inboundPopulationHysteresis := fs.Int("inbound-population-hysteresis",
+		envInt("MULTIVERSE_INBOUND_POPULATION_HYSTERESIS", defaultAdmissionHysteresis),
+		"population fall below a closed limit required before inbound admission reopens")
 	// heartbeatTimeoutMs was a compiled constant with no knob, and §20 A45 raised
 	// it from 3500 to 13000 because a periodic world save blocks the thread that
 	// sends the heartbeat. The number is sized from a save-stall tail that has
@@ -232,7 +251,19 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.Secret = secret
 	cfg.ContractATokenFile = *contractATokenFile
 	cfg.InsecureNoContractAToken = *insecureContractA
+	cfg.InboundAdmissionMode = strings.ToLower(strings.TrimSpace(*inboundAdmission))
+	cfg.InboundPopulationLimit = *inboundPopulationLimit
+	cfg.InboundTargetTimeScale = *inboundTargetScale
+	cfg.InboundPopulationMin = *inboundPopulationMin
+	cfg.InboundPopulationMax = *inboundPopulationMax
+	cfg.InboundPopulationHysteresis = *inboundPopulationHysteresis
 	cfg.Logger = logger
+	logger.Info("sidecar: inbound population admission configured",
+		"mode", cfg.InboundAdmissionMode, "fixedLimit", cfg.InboundPopulationLimit,
+		"targetTimeScale", cfg.InboundTargetTimeScale,
+		"adaptiveMin", cfg.InboundPopulationMin, "adaptiveMax", cfg.InboundPopulationMax,
+		"hysteresis", cfg.InboundPopulationHysteresis,
+		"note", "adaptive-shadow learns and reports but never refuses")
 	if *insecureContractA {
 		logger.Warn("sidecar: --insecure-no-contract-a-token is set; ANY local process can drive " +
 			"this world's migrations and impersonate this sidecar to the mod. It exists for a " +

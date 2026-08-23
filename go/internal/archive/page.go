@@ -2034,6 +2034,14 @@ function cellTitle(v){
              : "; the delivered rate is not measured yet")
       + "\narrivals: " + paceDepthText(v) + " queued, cap " + paceRateText(v)
       + " per simulated minute";
+    if (v.admissionMode){
+      s += "\npopulation admission: " + v.admissionMode
+        + (v.admissionPopulationLimit == null ? ", learning"
+          : ", limit " + v.admissionPopulationLimit + ", committed "
+            + (v.admissionCommitted == null ? "unknown" : v.admissionCommitted))
+        + (v.admissionEnforcing ? (v.admissionClosed ? ", CLOSED" : ", enforcing open")
+          : (v.admissionClosed ? ", shadow would close" : ", shadow open"));
+    }
     s += "\ncustody "+(v.custodyDepth==null?"unknown":v.custodyDepth)
       +", lost "+(v.lostForwardTotal==null?"unknown":v.lostForwardTotal);
     if (v.lastSave) s += "\nlast save "+ms(v.lastSaveAgeMs)+" ago";
@@ -4655,6 +4663,22 @@ function settingsCard(v){
   setKV(card, "population", "population", (v.statsKnown && v.population != null)
     ? txt(v.population) : unkEl());
   setKV(card, "egg", "eggs", (v.statsKnown && v.eggCount != null) ? txt(v.eggCount) : unkEl());
+  var admission = el("span");
+  if (!v.statsKnown || !v.admissionMode){
+    admission.appendChild(unkEl());
+  } else if (v.admissionMode === "off"){
+    admission.appendChild(txt("off"));
+  } else {
+    var admissionLimit = v.admissionPopulationLimit == null
+      ? "learning (" + (v.admissionSampleCount || 0) + " samples)"
+      : "limit " + v.admissionPopulationLimit + " for ×" + fmtScale(v.admissionTargetTimeScale);
+    admission.appendChild(txt(admissionLimit + ", committed " +
+      (v.admissionCommitted == null ? "?" : v.admissionCommitted) + ", "));
+    admission.appendChild(v.admissionEnforcing
+      ? el("span", v.admissionClosed ? "bad" : "ok", v.admissionClosed ? "CLOSED" : "enforcing open")
+      : el("span", "muted", v.admissionClosed ? "shadow would close" : "shadow open"));
+  }
+  setKV(card, null, "population admission", admission);
 
   card.appendChild(el("div", "cardsub", "if the machine stops"));
   var save = el("span");

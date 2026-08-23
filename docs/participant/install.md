@@ -12,11 +12,11 @@ string, compiler, SDK, administrator rights, or root.
 
 | Platform | Download | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.3.5-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
-| Windows, advanced ZIP | `bibites-multiverse-0.3.5-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
-| Windows, add-on | `bibites-multiverse-0.3.5-windows-x64.zip` | your existing Steam copy |
-| Linux, recommended | `bibites-multiverse-0.3.5-linux-x64-complete.zip` | included native game |
-| Linux, add-on | `bibites-multiverse-0.3.5-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.3.6-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
+| Windows, advanced ZIP | `bibites-multiverse-0.3.6-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
+| Windows, add-on | `bibites-multiverse-0.3.6-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.3.6-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.3.6-linux-x64.zip` | your existing itch.io copy |
 
 Every participant package includes `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each
@@ -40,11 +40,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.3.5-windows-x64-setup.exe).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.3.6-windows-x64-setup.exe).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.3.5-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.3.6-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -55,7 +55,7 @@ again; if it does not match twice, report it and do not run it. That is `INS-CHE
 Windows marks a downloaded setup or archive. **Clear the mark only after its checksum passes:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.3.5-windows-x64-setup.exe
+Unblock-File .\bibites-multiverse-0.3.6-windows-x64-setup.exe
 ```
 
 You can also right-click the setup, select **Properties**, and if present, select **Unblock**. The
@@ -127,7 +127,7 @@ build can reuse. You can check yourself before downloading anything — the matr
 one-line command for each platform.
 
 **A row is keyed on a game version AND a platform**, and today the matrix has two: game
-**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.7` and
+**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.8` and
 sidecar `m5.0`. The same version is two different files — they differ by 512 bytes, in the native
 file-dialog shim — so **each installer looks up only its own platform's rows.** Running the wrong
 archive on the right game is `INS-GAMEBUILD`, and the refusal prints the rows so you can see which

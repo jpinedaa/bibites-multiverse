@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-23 UTC.
 
-Bibites Multiverse `0.3.5` is public. The first announced service period runs from
+Bibites Multiverse `0.3.6` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -147,9 +147,9 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.5`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.5) |
+| Release | [`v0.3.6`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.6) |
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.7` |
+| Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.1` — what this release speaks, and what the hosted service speaks; see [Hosted service](#hosted-service). A world on `contract-b/4.0` still joins |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
@@ -217,6 +217,13 @@ preserved during the update.
 Release `0.3.5` fixes Linux complete-edition upgrades and removals. The Linux `0.3.4` installer or
 uninstaller sometimes stopped when it read a large install record. Release `0.3.5` changes no game,
 plugin, sidecar, or protocol version.
+Release `0.3.6` makes a live world's pre-custody overload refusal send the organism onward to the
+next compatible world it has not tried, rather than repeatedly offering it back to the same full
+destination. It also adds fixed and adaptive living-population admission, with adaptive estimation
+deployed in non-enforcing shadow mode while production evidence accumulates, and publishes the
+decision in local and live status views. Mod `0.6.8` reports requested speed separately from
+achieved speed so the estimator does not mistake a deliberately slower world for an overloaded
+machine.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
