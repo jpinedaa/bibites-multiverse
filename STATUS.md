@@ -58,25 +58,10 @@ The relay refuses a migration before it creates a forwarding record when the bou
 queue is full. It keeps that destination connected.
 
 On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
-healthy during the mandatory relay-only canary. Each exact five-minute interval recorded no
-capacity-triggered relay shed, and aggregate migration stayed above zero.
-
-The mandatory canary still failed. One or more live, populated sources repeatedly showed `0/min`
-on every open outbound lane. Participant sidecars returned overload refusals. In each exact
-interval, the aggregate custody and paced-depth totals had a disallowed three-sample rise.
-
-The displayed routes from two long-running affected sources last recorded a unique migration
-before the new relay started. A third source met the repeated-zero rule only in the final two
-samples, after a disconnect and reconnect, and had migrated after relay activation. The evidence
-does not establish one relay regression as their common cause. Suspected participant-journal
-saturation and old sidecar versions are the leading hypothesis for the long-running pair.
-Participant diagnostics must test it and bound the late third source.
-
-The relay half of the correction is live. The source tree also gives durable destination
-acknowledgements priority in the sidecar's existing send pace. The complete Go test suite passes
-with that change. Operators withheld the cloud-sidecar transaction after the failed relay canary.
-Hosted cloud worlds remain on their prior runtime, and the current participant release does not
-include this sidecar change.
+healthy, but the mandatory relay-only canary did not meet every gate. Operators therefore withheld
+the cloud-sidecar transaction. The relay correction remains live while the investigation continues.
+Hosted cloud worlds remain on their prior runtime. The current participant release does not include
+the sidecar change.
 
 ## Hosted service
 
