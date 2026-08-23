@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected, reported requested speed and non-enforcing adaptive shadow state, and had zero capacity sheds and discarded journal bytes |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction completed, every world retained its slot with mod and relay connected, and host verification passed |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected through shadow bring-up and controlled adaptive enforcement; initial enforcement verification had zero capacity sheds and discarded journal bytes |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction promoted the retained adaptive state to enforcement, every world retained its slot with mod and relay connected, and host verification passed |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -277,7 +277,7 @@ reads. The installers ignore it; the release gates do not.
     "sidecarSourceCommit": "94a71b2b40978fb28f5a6393cd19e8919619a9a8",
     "sidecarInputsSha256": "4f4469bb93f13b86df9e8e55ef2939d675589f94dbd55ffc741b95a8906e3a04",
     "testedOn": "2026-08-23",
-    "evidence": "On 2026-08-23 candidate 94a71b2 passed the full uncached Go suite and vet, the fixed/adaptive controller, durable refusal replay, directional spillover, and three-live-world integration regressions, a release .NET build, and CGO-disabled Windows and Linux amd64 sidecar cross-builds that produced a valid PE and static ELF; the same mod 0.6.8 plugin and sidecar then ran in five Windows worlds and six hosted Linux worlds, all eleven retained their reserved slots with mod and relay connected, reported requested speed plus adaptive-shadow with enforcement false, zero capacity sheds, and zero discarded journal bytes, and the cloud runtime transaction and host verification completed successfully; not exercised: the Go race suite because this WSL image has no CGO compiler, enforcing adaptive mode in production, crash replay, disk failure, private-map behavior, or a forced rollback"
+    "evidence": "On 2026-08-23 candidate 94a71b2 passed the full uncached Go suite and vet, the fixed/adaptive controller, durable refusal replay, directional spillover, and three-live-world integration regressions, a release .NET build, and CGO-disabled Windows and Linux amd64 sidecar cross-builds that produced a valid PE and static ELF; the same mod 0.6.8 plugin and sidecar then ran in five Windows worlds and six hosted Linux worlds, all eleven retained their reserved slots with mod and relay connected through adaptive-shadow bring-up and the later controlled adaptive-enforcement promotion, with zero capacity sheds and zero discarded journal bytes at initial enforcement verification, and the guarded cloud runtime transaction and host verification completed successfully; not exercised: the Go race suite because this WSL image has no CGO compiler, crash replay, disk failure, private-map behavior, or a forced rollback"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -294,7 +294,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.1",
-      "tested": "five-world deployment on 2026-08-23; every world retained its slot with mod and relay connected, requested-speed and adaptive-shadow telemetry present, zero capacity sheds and discarded journal bytes"
+      "tested": "five-world deployment on 2026-08-23; every world retained its slot with mod and relay connected through adaptive-shadow bring-up and controlled adaptive enforcement, with zero capacity sheds and discarded journal bytes at initial enforcement verification"
     },
     {
       "gameVersion": "0.6.3.1",
@@ -308,7 +308,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.1",
-      "tested": "six hosted worlds on 2026-08-23; guarded runtime activation and host verification passed, every world retained its slot with mod and relay connected"
+      "tested": "six hosted worlds on 2026-08-23; guarded runtime activation promoted retained adaptive state to enforcement, host verification passed, and every world retained its slot with mod and relay connected"
     }
   ]
 }

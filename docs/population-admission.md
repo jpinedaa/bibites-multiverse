@@ -1,6 +1,7 @@
 # Population-aware inbound admission
 
-Status: implemented; production rollout is `adaptive-shadow` (non-enforcing).
+Status: implemented. Operator-controlled production worlds enforce `adaptive`; participant
+packages retain the `adaptive-shadow` default.
 
 ## Why this exists
 
@@ -43,7 +44,7 @@ the original bounce deadline.
 |---|---|
 | `off` | No population decision. The journal queue ceiling still applies. |
 | `fixed` | Reject a new inbound migration when committed load reaches `inboundPopulationLimit`. |
-| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. This is the rollout default. |
+| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. This is the participant-package default. |
 | `adaptive` | Enforce the learned limit after the estimator is ready. Before readiness it fails open. |
 
 Committed load is the last heartbeat population plus inbound journal entries plus successful
@@ -94,8 +95,10 @@ MULTIVERSE_INBOUND_ADMISSION=fixed
 MULTIVERSE_INBOUND_POPULATION_LIMIT=40
 ```
 
-Do not enable `adaptive` in production until shadow history shows stable learned limits across
-save cycles, restarts, and representative ecology.
+The normal promotion path is to enable `adaptive` only after shadow history shows stable learned
+limits across save cycles, restarts, and representative ecology. An operator may authorize an
+earlier controlled-world promotion to collect enforcement evidence, but the exception, initial
+health evidence, fixed fallbacks, and rollback conditions must be recorded below.
 
 ## Observability and rollout gates
 
@@ -111,6 +114,31 @@ The enforcement promotion gate is:
 - no regression in migration loss, capacity sheds, journal discard, or live/mod-connected state;
 - a reviewed fixed fallback limit for each host class.
 
+The service already archives these fields in `metrics.jsonl`, so an enforcing rollout does not
+need a second telemetry path. Evaluate deltas rather than isolated cumulative counters. At 24-hour
+and 72-hour checkpoints, compare achieved speed and population against effective-limit changes,
+then review rejection, spillover, lost-forward, custody-depth, capacity-shed, journal-discard, and
+live/mod-connected deltas. A rejection is expected evidence that the gate worked; a custody loss,
+discard, or sustained loss increase is not.
+
+## Controlled enforcement record
+
+On 2026-08-23 the operator explicitly authorized early enforcement on the eleven worlds under
+direct control so real refusal and spillover evidence could be collected. Five Windows worlds
+and six hosted Linux worlds retained their learned `admission-state.json` and switched from
+`adaptive-shadow` to `adaptive`; the public participant default did not change. The initial
+post-promotion snapshot reported all eleven live, mod-connected, and enforcing, six closed by
+their learned limits, continuing migrations, zero capacity sheds, and zero discarded journal
+bytes. The cloud rollout used the guarded runtime transaction and passed host verification.
+
+The immediate rollback is `adaptive-shadow`, which preserves estimator and journal state. If an
+enforcing fixed fallback is needed while the adaptive calculation is investigated, the reviewed
+starting points are 40 organisms for each hosted world and 10 for each world on the shared local
+Windows machine. Roll back if any world loses liveness or mod connectivity, capacity sheds or
+journal discards appear, lost-forward deltas rise persistently, or limit oscillation produces
+unacceptable routing pressure. Do not delete `admission-state.json` or migration journals during
+rollback.
+
 ## Verification record
 
 - Unit tests cover robust estimation, shadow non-enforcement, fixed hysteresis, target mismatch,
@@ -123,3 +151,8 @@ The enforcement promotion gate is:
   `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
   requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds
   and zero discarded journal bytes. The cloud activation and its host verification completed.
+- Later on 2026-08-23, the operator-authorized controlled rollout promoted those same eleven
+  worlds to `adaptive` without discarding their learned state. All eleven reported enforcement
+  active after restart; the initial snapshot had six gates closed, migrations continuing, and no
+  capacity shed or journal discard. `metrics.jsonl` now supplies the 24-hour and 72-hour evidence
+  described above.
