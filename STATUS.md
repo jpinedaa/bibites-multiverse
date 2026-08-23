@@ -65,6 +65,23 @@ paces both journal-backed payloads and acknowledgements, drains older acknowledg
 keeps ordinary control traffic responsive. The existing journals remain the custody record and
 must not be cleared.
 
+Release `0.3.4` was published and then deployed on 2026-08-23. Five Windows worlds on the release
+machine retained their identities and journals through the upgrade; all five rejoined their
+reserved slots with the new sidecar binary. The guarded cloud runtime transaction then activated
+the same source on all six hosted worlds and verified the installed binary against the candidate
+hash. All eleven worlds were live, game-connected and relay-connected after their respective
+health windows. Every one reported zero relay capacity sheds and zero discarded journal bytes.
+One Windows world's 50-entry durable acknowledgement backlog drained to zero after restart, while
+the pacing deferral counters advanced. The public health and status routes returned HTTP `200`,
+and the status route reported a connected relay.
+
+The release-machine sample also records why a paced delivery queue can remain nonzero without a
+new relay fault. Five concurrent games requested 10× speed, but some were achieving only about
+1.2× to 5.1×. Delivery pacing is deliberately measured in the receiving world's simulated time,
+so those CPU-limited worlds drain more slowly in wall-clock time. The new relay pacing prevents
+aggregate fan-in from becoming a burst or a capacity disconnect; it does not make an overloaded
+simulation advance faster and it does not erase its durable queue.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
