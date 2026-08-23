@@ -110,6 +110,15 @@ The guarded cloud runtime transaction and host verification completed successful
 was not rerun because this WSL image has no CGO compiler; enforcing adaptive mode, forced rollback,
 disk failure, crash replay, and private-map behavior were not exercised in production.
 
+The service host then activated the archive and relay binaries built from `c321aad`. The guarded
+archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
+The archive subscribed before any placement claim, so the receipt reports a complete record. At
+the 60-second closeout, the map had the same 15 live and four dark slots and a connected relay.
+All four public routes checked returned HTTP `200`. The public status reported 11 mod `0.6.8`
+worlds in `adaptive-shadow`, zero enforcing population gates, and the live page carried the new
+population-admission explanation. The announcements page published the planned window and its
+actual return time.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
