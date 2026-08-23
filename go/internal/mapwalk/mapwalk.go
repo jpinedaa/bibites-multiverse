@@ -107,6 +107,50 @@ func Walk(status contractb.PeerStatus, me contractb.SlotInfo, edge string) (cont
 	return contractb.SlotInfo{}, skipped, false
 }
 
+// WalkAfter continues an edge walk after a destination that explicitly
+// refused a migration. Unlike Walk, its origin is not me, so the scan can pass
+// over me; that position is ignored rather than offered back to the source.
+// excluded contains destinations that already refused this migration. Keeping
+// that set in the sender's durable journal makes a chain of live overloads a
+// walk over distinct worlds instead of a loop between the first two.
+func WalkAfter(status contractb.PeerStatus, me contractb.SlotInfo, edge string, afterSlot int,
+	excluded map[int]bool) (contractb.SlotInfo, bool) {
+	after, ok := Find(status, afterSlot)
+	if !ok {
+		return contractb.SlotInfo{}, false
+	}
+	vertical := contracta.Vertical(edge)
+	length := status.Map.Width
+	if vertical {
+		length = status.Map.Height
+		if after.Position.Col != me.Position.Col {
+			return contractb.SlotInfo{}, false
+		}
+	} else if after.Position.Row != me.Position.Row {
+		return contractb.SlotInfo{}, false
+	}
+	delta := 1
+	if contracta.Reverse(edge) {
+		delta = -1
+	}
+	for step := 1; step < length; step++ {
+		pos := after.Position
+		if vertical {
+			pos.Row = wrapIndex(after.Position.Row+delta*step, status.Map.Height)
+		} else {
+			pos.Col = wrapIndex(after.Position.Col+delta*step, status.Map.Width)
+		}
+		cand, reserved := At(status, pos)
+		if !reserved || cand.Slot == me.Slot || excluded[cand.Slot] {
+			continue
+		}
+		if Deliverable(me, cand) == "" {
+			return cand, true
+		}
+	}
+	return contractb.SlotInfo{}, false
+}
+
 // wrapIndex is the torus. Go's % keeps the sign of the dividend, so a reverse
 // walk off column 0 would address column -1 without it.
 func wrapIndex(i, n int) int {

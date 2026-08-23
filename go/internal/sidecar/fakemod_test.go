@@ -519,10 +519,11 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 				scale = 0
 			}
 			simSize := m.opts.simSize
+			targetScale := 10.0
 			hb := contracta.Heartbeat{
 				SessionID: m.world.sessionID, SimTick: &tick, SimulatedTime: &simTime,
 				Population: &pop, EggCount: &eggs, Paused: &paused, TimeScale: &scale,
-				SimulationSize: &simSize}
+				TargetTimeScale: &targetScale, SimulationSize: &simSize}
 			if m.opts.lastSave != nil {
 				save := *m.opts.lastSave
 				hb.LastSave = &save

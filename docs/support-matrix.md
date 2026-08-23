@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.7` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.7` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected, reported requested speed and non-enforcing adaptive shadow state, and had zero capacity sheds and discarded journal bytes |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction completed, every world retained its slot with mod and relay connected, and host verification passed |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -186,12 +186,12 @@ one record rather than a per-row one because the plugin is a single file for bot
 
 | | |
 |---|---|
-| Mod version | `0.6.7` |
-| `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
-| `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
-| `cmd/sidecar` source commit | `93107a6773f49ce3520126e7ffdeac05d78a1f45` |
-| `cmd/sidecar` input digest | `10f4458884fc974db09ed03a18ee12c5d4f02ecfd48cc32f0a20d0b7bd2e7284` |
-| Tested on | 2026-08-22 |
+| Mod version | `0.6.8` |
+| `BibitesMultiverse.dll` SHA-256 | `c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc` |
+| `bibites-mod/` tree | `27baa92d9c66c043465d4dac3e736c25dcb2e8a0` |
+| `cmd/sidecar` source commit | `94a71b2b40978fb28f5a6393cd19e8919619a9a8` |
+| `cmd/sidecar` input digest | `4f4469bb93f13b86df9e8e55ef2939d675589f94dbd55ffc741b95a8906e3a04` |
+| Tested on | 2026-08-23 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -268,16 +268,16 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.3.5",
+  "release": "0.3.6",
   "published": "2026-08-23",
   "testedBuild": {
-    "mod": "0.6.7",
-    "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
-    "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
-    "sidecarSourceCommit": "93107a6773f49ce3520126e7ffdeac05d78a1f45",
-    "sidecarInputsSha256": "10f4458884fc974db09ed03a18ee12c5d4f02ecfd48cc32f0a20d0b7bd2e7284",
+    "mod": "0.6.8",
+    "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
+    "bibitesModTree": "27baa92d9c66c043465d4dac3e736c25dcb2e8a0",
+    "sidecarSourceCommit": "94a71b2b40978fb28f5a6393cd19e8919619a9a8",
+    "sidecarInputsSha256": "4f4469bb93f13b86df9e8e55ef2939d675589f94dbd55ffc741b95a8906e3a04",
     "testedOn": "2026-08-23",
-    "evidence": "on 2026-08-22 the sidecar and relay source at 93107a6 passed the full uncached Go and race suites, Linux and Windows vet, targeted aggregate-fan-in, durable-ACK priority, reconnect, replacement, fairness, and hard-deadline drain regressions, and CGO-disabled Windows and Linux amd64 sidecar cross-builds with -trimpath and VCS metadata disabled produced valid PE and static ELF binaries; on 2026-08-23 the published Windows sidecar ran in five local worlds and the Linux sidecar ran in six hosted worlds, all eleven rejoined their reserved slots with mod and relay connected, zero capacity sheds, and zero discarded journal bytes, the installed Windows binary matched the published package hash, the installed cloud binary matched the candidate hash, and one 50-entry durable ACK backlog drained to zero; the unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised in the 2026-08-23 rollout: crash replay, disk failure, private-map behavior, or a forced rollback"
+    "evidence": "On 2026-08-23 candidate 94a71b2 passed the full uncached Go suite and vet, the fixed/adaptive controller, durable refusal replay, directional spillover, and three-live-world integration regressions, a release .NET build, and CGO-disabled Windows and Linux amd64 sidecar cross-builds that produced a valid PE and static ELF; the same mod 0.6.8 plugin and sidecar then ran in five Windows worlds and six hosted Linux worlds, all eleven retained their reserved slots with mod and relay connected, reported requested speed plus adaptive-shadow with enforcement false, zero capacity sheds, and zero discarded journal bytes, and the cloud runtime transaction and host verification completed successfully; not exercised: the Go race suite because this WSL image has no CGO compiler, enforcing adaptive mode in production, crash replay, disk failure, private-map behavior, or a forced rollback"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -288,13 +288,13 @@ reads. The installers ignore it; the release gates do not.
       "store": "Steam",
       "storeBuild": "app 2736860, buildid 22383127",
       "assemblySha256": "12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE",
-      "mod": "0.6.7",
+      "mod": "0.6.8",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.1",
-      "tested": "the six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15"
+      "tested": "five-world deployment on 2026-08-23; every world retained its slot with mod and relay connected, requested-speed and adaptive-shadow telemetry present, zero capacity sheds and discarded journal bytes"
     },
     {
       "gameVersion": "0.6.3.1",
@@ -302,13 +302,13 @@ reads. The installers ignore it; the release gates do not.
       "store": "itch.io",
       "storeBuild": "upload 16838443, archive sha256 E15695D7944B4DED9E6D29A21518D00E9689C1A2B8CEB7288D51651ADCE57F4E",
       "assemblySha256": "5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA",
-      "mod": "0.6.7",
+      "mod": "0.6.8",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.1",
-      "tested": "one 14-minute authenticated headless session on 2026-08-12 against a scratch relay; all six patched types byte-identical to the Windows build"
+      "tested": "six hosted worlds on 2026-08-23; guarded runtime activation and host verification passed, every world retained its slot with mod and relay connected"
     }
   ]
 }

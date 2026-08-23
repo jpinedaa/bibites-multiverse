@@ -52,7 +52,7 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.3.5` publishes one executable
+The build creates an add-on archive for each platform. Release `0.3.6` publishes one executable
 Windows setup as the recommended Windows download, and every Windows package carries
 `BibitesMultiverseLauncher.exe` and `multiverse-launcher.exe`. It publishes a complete Linux archive as the
 recommended Linux download; the Linux kit keeps its shell scripts and ships no launcher in this
@@ -326,7 +326,8 @@ the owner's machine rather than on a hosted runner.
 
 Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
 untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is green on `main` today, at mod `0.6.7` recorded on 2026-08-17.
+been staged. It is green for this release at mod `0.6.8`, recorded and exercised on Windows and
+Linux on 2026-08-23.
 
 **Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
 compares three copies of the plugin — the one this tree builds, the one the record names, and the
@@ -441,7 +442,7 @@ serving it. Open it afterwards and press both buttons, because a broken link is 
 link — but there is nothing to rebuild, no host value to set, and no relay outage to schedule.
 
 **The page does say which release that is, and it catches up on its own.** Under the download
-buttons the join card carries a `Latest release v0.3.5` line, so a visitor can tell what the
+buttons the join card carries a `Latest release v0.3.6` line, so a visitor can tell what the
 buttons will hand them. It is not a build-time constant: the archive asks GitHub's
 `/repos/jpinedaa/bibites-multiverse/releases/latest` for `tag_name` once an hour in the
 background and caches the answer in process, so a new release reaches that line within an hour of
@@ -742,9 +743,9 @@ was not: the mod had moved past the recorded build, nobody had run that plugin, 
 failed, and the `consistency` job was red on every pull request including the one that introduced
 CI. It was cleared the only way it can be — the four legs under *Building*, applied once to catch
 up: build the plugin, deploy it to a game, run it, then `release/record-tested-build.sh` and paste
-the block. `docs/support-matrix.md` now records mod `0.6.7`; its evidence separates the latest
-sidecar re-attestation from the plugin test that the unchanged plugin identity still rests on, and
-checks A, B and C pass. **What this leaves behind is a standing step rather than a one-off**: the
+the block. That catch-up recorded mod `0.6.7`; its evidence separated the latest sidecar
+re-attestation from the plugin test that the unchanged plugin identity still rested on, and checks
+A, B and C passed. **What this leaves behind is a standing step rather than a one-off**: the
 release machine's own game holds the third copy gate 3b compares, so refresh it with
 `bibites-mod/deploy.sh` whenever the recorded plugin moves — see *Cutting a release*.
 
@@ -782,7 +783,7 @@ unavailable. It is how the last two releases were published, before the workflow
 3. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 4. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.3.5 && git push origin v0.3.5`. The page's links point into the tag, so the
+   `git tag v0.3.6 && git push origin v0.3.6`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 5. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, the Windows setup, the two stable-named copies, and
@@ -790,14 +791,14 @@ unavailable. It is how the last two releases were published, before the workflow
    optional:** the homepage links them through `/releases/latest/download/`, so a release published
    without them breaks both download buttons, and the version globs below do not match them.
    ```sh
-   gh release create v0.3.5 \
-       release/dist/bibites-multiverse-0.3.5-*.zip \
-       release/dist/bibites-multiverse-0.3.5-*.exe \
+   gh release create v0.3.6 \
+       release/dist/bibites-multiverse-0.3.6-*.zip \
+       release/dist/bibites-multiverse-0.3.6-*.exe \
        release/dist/bibites-multiverse-windows-x64-setup.exe \
        release/dist/bibites-multiverse-linux-x64-complete.zip \
        release/dist/SHA256SUMS \
        --repo jpinedaa/bibites-multiverse --verify-tag --latest \
-       --title "Bibites Multiverse 0.3.5" \
+       --title "Bibites Multiverse 0.3.6" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 6. **Verify what you published**, because nothing else will: `sha256sum -c SHA256SUMS`, each

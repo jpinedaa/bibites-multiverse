@@ -245,9 +245,19 @@ type SlotView struct {
 	// the peer is an older build that does not publish them at all — which is
 	// the case this rig actually runs, and the page renders it as unknown rather
 	// than as the shipped default (which has moved three times).
-	TimeScale               *float64 `json:"timeScale,omitempty"`
-	InboundRatePerSimMinute *float64 `json:"inboundRatePerSimMinute,omitempty"`
-	InboundRateBurst        *float64 `json:"inboundRateBurst,omitempty"`
+	TimeScale                *float64 `json:"timeScale,omitempty"`
+	InboundRatePerSimMinute  *float64 `json:"inboundRatePerSimMinute,omitempty"`
+	InboundRateBurst         *float64 `json:"inboundRateBurst,omitempty"`
+	TargetTimeScale          *float64 `json:"targetTimeScale,omitempty"`
+	AdmissionMode            string   `json:"admissionMode,omitempty"`
+	AdmissionTargetTimeScale *float64 `json:"admissionTargetTimeScale,omitempty"`
+	AdmissionPopulationLimit *int     `json:"admissionPopulationLimit,omitempty"`
+	AdmissionEstimatedLimit  *int     `json:"admissionEstimatedLimit,omitempty"`
+	AdmissionCommitted       *int     `json:"admissionCommitted,omitempty"`
+	AdmissionClosed          *bool    `json:"admissionClosed,omitempty"`
+	AdmissionEnforcing       *bool    `json:"admissionEnforcing,omitempty"`
+	AdmissionSampleCount     *int     `json:"admissionSampleCount,omitempty"`
+	AdmissionRejectedTotal   *int     `json:"admissionRejectedTotal,omitempty"`
 
 	// AchievedTimeScale is what this world's clock ACTUALLY did — simulated
 	// seconds per wall second, measured by the archive over AchievedSpanMs from
@@ -544,6 +554,16 @@ func (a *Archive) StatusView() Status {
 				}
 				v.InboundRatePerSimMinute = si.Stats.InboundRatePerSimMinute
 				v.InboundRateBurst = si.Stats.InboundRateBurst
+				v.TargetTimeScale = si.Stats.TargetTimeScale
+				v.AdmissionMode = si.Stats.AdmissionMode
+				v.AdmissionTargetTimeScale = si.Stats.AdmissionTargetTimeScale
+				v.AdmissionPopulationLimit = si.Stats.AdmissionPopulationLimit
+				v.AdmissionEstimatedLimit = si.Stats.AdmissionEstimatedLimit
+				v.AdmissionCommitted = si.Stats.AdmissionCommitted
+				v.AdmissionClosed = si.Stats.AdmissionClosed
+				v.AdmissionEnforcing = si.Stats.AdmissionEnforcing
+				v.AdmissionSampleCount = si.Stats.AdmissionSampleCount
+				v.AdmissionRejectedTotal = si.Stats.AdmissionRejectedTotal
 				if si.Stats.LastSave != nil {
 					save := *si.Stats.LastSave
 					v.LastSave = &save

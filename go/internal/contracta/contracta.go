@@ -596,16 +596,20 @@ type SaveReceipt struct {
 
 // Heartbeat is HEARTBEAT (contract-a.md §5.2).
 type Heartbeat struct {
-	SessionID      string   `json:"sessionId"`
-	SimTick        *int64   `json:"simTick"`
-	SimulatedTime  *float64 `json:"simulatedTime"`
-	Population     *int     `json:"population"`
-	EggCount       *int     `json:"eggCount,omitempty"`
-	Paused         *bool    `json:"paused"`
-	TimeScale      *float64 `json:"timeScale"`
-	SimulationSize *float64 `json:"simulationSize"`
-	InFlightOut    *int     `json:"inFlightOut,omitempty"`
-	PendingIn      *int     `json:"pendingIn,omitempty"`
+	SessionID     string   `json:"sessionId"`
+	SimTick       *int64   `json:"simTick"`
+	SimulatedTime *float64 `json:"simulatedTime"`
+	Population    *int     `json:"population"`
+	EggCount      *int     `json:"eggCount,omitempty"`
+	Paused        *bool    `json:"paused"`
+	TimeScale     *float64 `json:"timeScale"`
+	// TargetTimeScale is what the game's speed control is asking for. It is
+	// optional for compatibility with older mods and distinct from TimeScale,
+	// which is the applied value after the game's minimum-FPS governor.
+	TargetTimeScale *float64 `json:"targetTimeScale,omitempty"`
+	SimulationSize  *float64 `json:"simulationSize"`
+	InFlightOut     *int     `json:"inFlightOut,omitempty"`
+	PendingIn       *int     `json:"pendingIn,omitempty"`
 	// LastSave is OPTIONAL (§15, A21). A mod that omits it is conformant and the
 	// status page shows that world's save state as unknown.
 	LastSave *SaveReceipt `json:"lastSave,omitempty"`
@@ -640,6 +644,9 @@ func (h *Heartbeat) Validate() error {
 	}
 	if h.TimeScale == nil || !wire.Finite(*h.TimeScale) {
 		return invalid("timeScale is missing or not finite")
+	}
+	if h.TargetTimeScale != nil && (!wire.Finite(*h.TargetTimeScale) || *h.TargetTimeScale < 0) {
+		return invalid("targetTimeScale is negative or not finite")
 	}
 	if h.SimulationSize == nil || !wire.Finite(*h.SimulationSize) || *h.SimulationSize <= 0 {
 		return invalid("simulationSize is missing or not a positive finite number")

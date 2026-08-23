@@ -75,6 +75,12 @@ type Sidecar struct {
 	// ceiling; this is the sidecar's half of the same fact, so a person reading
 	// the sidecar log can tell a wrong token from a mod that never dialled.
 	contractAAuthFailures int
+	// admission owns the pre-custody population gate. admittedSinceHeartbeat
+	// covers successful MIGRATE_IN_ACKs that have left the pending journal but
+	// are not necessarily included in the mod's next population heartbeat yet.
+	admission              admissionController
+	admittedSinceHeartbeat int
+	admissionSaveMu        sync.Mutex
 
 	// Contract B state: the map. A sidecar needs its own slot, its position, and
 	// ONE EFFECTIVE NEIGHBOUR PER EXPORT EDGE (D8, D12, D13, §6.4).
@@ -165,6 +171,9 @@ type rateWindow struct {
 // previous process left behind (D2).
 func New(cfg Config) (*Sidecar, error) {
 	cfg.applyDefaults()
+	if err := validateAdmissionConfig(cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Fault == "" {
 		cfg.Fault = os.Getenv("MULTIVERSE_FAULT")
 	}
@@ -206,11 +215,13 @@ func New(cfg Config) (*Sidecar, error) {
 	s.startedAt = time.Now()
 	s.sent = newSentMeter()
 	s.pace = newPacer(cfg.InboundRatePerSimMinute, cfg.InboundRateBurst)
+	s.admission = newAdmissionController(cfg)
 	// §7.4: peerId is persisted outside the journal. Losing it makes the peer a
 	// stranger that takes a second slot and strands its old one — which is why
 	// §7.5 gives the operator a release and a handover command.
 	s.cfg.PeerID = s.resolvePeerID(cfg.PeerID)
 	s.log = s.cfg.Logger.With("peer", s.cfg.PeerID)
+	s.loadAdmissionState()
 	if s.cfg.PreferredSlot == 0 {
 		s.cfg.PreferredSlot = s.readSlot()
 	}
@@ -614,7 +625,7 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 			s.loseLocked(st, now)
 		}
 
-	case journal.HandoffPending, journal.HandoffRefused:
+	case journal.HandoffPending:
 		// A never-sent or a refused entry. NO CUSTODY HAS MOVED — the frame
 		// reached nobody, or the receiver said in as many words that it took
 		// none — so offering it to a destination is not a second copy of
@@ -631,14 +642,7 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 		}
 		// No custody can have moved, so the entry may be re-routed along the
 		// same axis to the current effective neighbour (§9.2).
-		proof := contractb.ProofNeverSent
-		if st.Handoff == journal.HandoffRefused {
-			proof = st.RerouteProof
-			if proof == "" {
-				proof = contractb.ProofPeerRefused
-			}
-		}
-		if s.rerouteLocked(st, proof, now) {
+		if s.rerouteLocked(st, contractb.ProofNeverSent, now) {
 			sc.bounceAt = time.Time{}
 			sc.nextForward = time.Time{}
 			return
@@ -654,6 +658,70 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 		if now.After(sc.bounceAt) {
 			s.bounceLocked(st, "no deliverable slot on the "+st.Entry.Edge+
 				" axis within bounceTimeoutMs, and no custody was ever taken")
+		}
+
+	case journal.HandoffRefused:
+		proof := st.RerouteProof
+		if proof == "" {
+			proof = contractb.ProofPeerRefused
+		}
+		if proof != contractb.ProofPeerRefused {
+			// A relay-generated NOT_FORWARDED says its bounded destination
+			// transport queue did not accept the frame. It is not the live
+			// destination refusing admission. Preserve the original behavior:
+			// retry that destination while it stays live, and use the ordinary
+			// effective-neighbour reroute only if it goes dark. In particular,
+			// do not start the no-lane bounce clock against a live queue that is
+			// already draining.
+			if s.destLiveLocked(st.Entry.DestSlot) {
+				sc.bounceAt = time.Time{}
+				if now.Before(sc.nextForward) {
+					return
+				}
+				if s.forwardLocked(st, now) {
+					sc.nextForward = now.Add(s.cfg.ForwardRetry)
+				}
+				return
+			}
+			if s.rerouteLocked(st, proof, now) {
+				sc.bounceAt = time.Time{}
+				sc.nextForward = time.Time{}
+				return
+			}
+			if sc.bounceAt.IsZero() {
+				sc.bounceAt = now.Add(s.cfg.BounceTimeout)
+				return
+			}
+			if now.After(sc.bounceAt) {
+				s.bounceLocked(st, "no deliverable slot on the "+st.Entry.Edge+
+					" axis within bounceTimeoutMs, and the relay proved custody never moved")
+			}
+			return
+		}
+		// A live receiver's NACK proves that custody did not move, but it also
+		// proves that sending straight back to that same live receiver is not a
+		// route. Continue the axis walk after it and exclude every world that has
+		// already refused this migration.
+		if s.rerouteLocked(st, proof, now) {
+			sc.bounceAt = time.Time{}
+			sc.nextForward = time.Time{}
+			return
+		}
+		// If every other world is unavailable or has refused, periodically try
+		// the current destination again: a population refusal is transient. The
+		// original bounce deadline remains bounded and is not reset by retries.
+		if sc.bounceAt.IsZero() {
+			sc.bounceAt = now.Add(s.cfg.BounceTimeout)
+		}
+		if now.After(sc.bounceAt) {
+			s.bounceLocked(st, "every deliverable slot on the "+st.Entry.Edge+
+				" axis refused or was unavailable within bounceTimeoutMs")
+			return
+		}
+		if s.destLiveLocked(st.Entry.DestSlot) && !now.Before(sc.nextForward) {
+			if s.forwardLocked(st, now) {
+				sc.nextForward = now.Add(s.cfg.ForwardRetry)
+			}
 		}
 	}
 }
@@ -757,8 +825,33 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 			s.cfg.MaxReroutes))
 		return true
 	}
-	n := s.neighbours[st.Entry.Edge]
-	if n == nil || n.Slot == st.Entry.DestSlot {
+	var dest int
+	if proof == contractb.ProofPeerRefused {
+		me, ok := mapwalk.Find(s.status, s.slot)
+		excluded := make(map[int]bool, len(st.RefusedSlots))
+		for _, slot := range st.RefusedSlots {
+			excluded[slot] = true
+		}
+		if ok {
+			if next, found := mapwalk.WalkAfter(s.status, me, st.Entry.Edge,
+				st.Entry.DestSlot, excluded); found {
+				dest = next.Slot
+			}
+		}
+		// If the refused slot disappeared between the NACK and this status
+		// frame, its position is unknowable. The relay's current effective
+		// neighbour remains safe so long as it is neither the current nor an
+		// already-refused destination.
+		if dest == 0 {
+			if n := s.neighbours[st.Entry.Edge]; n != nil &&
+				n.Slot != st.Entry.DestSlot && !excluded[n.Slot] {
+				dest = n.Slot
+			}
+		}
+	} else if n := s.neighbours[st.Entry.Edge]; n != nil && n.Slot != st.Entry.DestSlot {
+		dest = n.Slot
+	}
+	if dest == 0 {
 		return false
 	}
 	from := st.RerouteFrom
@@ -766,7 +859,6 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		from = st.Entry.DestSlot
 	}
 	count := st.RerouteCount + 1
-	dest := n.Slot
 	at := now.UnixMilli()
 	empty := ""
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
@@ -1260,6 +1352,10 @@ func (s *Sidecar) faultPoint(point string) {
 // AND ABSENCE IS A VALUE: a stat this sidecar does not know is omitted, never
 // defaulted, because a slot that reports nothing is unknown, not empty.
 func (s *Sidecar) statsLocked() contractb.PeerStats {
+	committed, known := s.committedPopulationLocked()
+	admission := s.admission
+	admission.refresh(committed, known)
+	a := admission.snapshot()
 	st := contractb.PeerStats{
 		CustodyDepth:     contractb.IntPtr(s.jr.CountPending(journal.Out) + s.jr.CountPending(journal.In)),
 		PacedDepth:       contractb.IntPtr(s.pacedDepthLocked()),
@@ -1269,14 +1365,32 @@ func (s *Sidecar) statsLocked() contractb.PeerStats {
 		// reading of anything else — and it is what makes pacedDepth readable:
 		// a queue is only deep against the cap it is queued behind. The default
 		// has moved three times, so a reader that assumes one is wrong.
-		InboundRatePerSimMinute: contractb.Float64Ptr(s.cfg.InboundRatePerSimMinute),
-		InboundRateBurst:        contractb.Float64Ptr(s.cfg.InboundRateBurst),
+		InboundRatePerSimMinute:  contractb.Float64Ptr(s.cfg.InboundRatePerSimMinute),
+		InboundRateBurst:         contractb.Float64Ptr(s.cfg.InboundRateBurst),
+		AdmissionMode:            a.Mode,
+		AdmissionTargetTimeScale: contractb.Float64Ptr(a.TargetTimeScale),
+		AdmissionClosed:          contractb.BoolPtr(a.Closed),
+		AdmissionEnforcing:       contractb.BoolPtr(a.Enforcing),
+		AdmissionSampleCount:     contractb.IntPtr(a.SampleCount),
+		AdmissionRejectedTotal:   contractb.IntPtr(a.RejectedTotal),
+	}
+	if a.EffectiveLimit > 0 {
+		st.AdmissionPopulationLimit = contractb.IntPtr(a.EffectiveLimit)
+	}
+	if a.EstimatedLimit > 0 {
+		st.AdmissionEstimatedLimit = contractb.IntPtr(a.EstimatedLimit)
+	}
+	if a.PopulationKnown {
+		st.AdmissionCommitted = contractb.IntPtr(a.Committed)
 	}
 	if s.mod != nil && s.mod.handshaked {
 		if s.mod.haveTimeScale {
 			// Copied from the HEARTBEAT, never computed. 0 is a world standing
 			// still, which is a reading; absent is a world that has not said.
 			st.TimeScale = contractb.Float64Ptr(s.mod.timeScale)
+		}
+		if s.mod.haveTargetTimeScale {
+			st.TargetTimeScale = contractb.Float64Ptr(s.mod.targetTimeScale)
 		}
 		if s.mod.havePopulation {
 			st.Population = contractb.IntPtr(s.mod.population)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -491,6 +492,7 @@ func TestSpeciesSurvivesReplayAndNoUpdateCanTouchIt(t *testing.T) {
 	st, err := j.Apply("m-species", Update{
 		Handoff: HandoffPending, DestSlot: &dest, RerouteCount: &count,
 		RerouteFrom: &from, RerouteProof: &proof, RerouteAtMs: &at,
+		RefusedSlots: []int{2, 5},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -524,6 +526,9 @@ func TestSpeciesSurvivesReplayAndNoUpdateCanTouchIt(t *testing.T) {
 	}
 	if got.Entry.DestSlot != 7 {
 		t.Fatalf("destSlot = %d after replay, want 7", got.Entry.DestSlot)
+	}
+	if !reflect.DeepEqual(got.RefusedSlots, []int{2, 5}) {
+		t.Fatalf("refusedSlots = %v after replay and compaction, want [2 5]", got.RefusedSlots)
 	}
 }
 
