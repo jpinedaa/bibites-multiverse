@@ -80,7 +80,16 @@ The source repair keeps an immutable lineage instance for each recorded name and
 reused name creates another instance instead of replacing an earlier edge. The API and page show
 reused names, unresolved identities, and capacity or cycle guard hits separately. Roll-up format
 3 persists this graph. An archive with format 2 must rebuild the fold from the ordered raw record.
-The production rollout and its live verification are pending.
+
+Public commit `60dac3a` went live on 2026-08-23. The archive rebuilt all `29,846,555` raw records
+into roll-up format 3 in `598.792 s`. The guarded participant outage was 10 minutes 24 seconds,
+which was 24 seconds longer than the maintenance notice estimated. The archive and relay returned
+on the new source with no record gap.
+
+The first live check reported 19,700 lineage instances, 5,269 reused names, and two unresolved
+identity links. Ledger and lineage overflow were zero. Cycle, walk, and node-cap guards were also
+zero. Remaining roots now distinguish seed stock, missing raw ancestry, recorded family roots,
+and genuinely ambiguous evidence. They are not derived cycle cuts.
 
 ## Hosted service
 
@@ -124,7 +133,7 @@ request.
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release, and names which release that is. Neither the links nor the number carry a compiled-in version — the links address `/releases/latest` and the number is resolved from GitHub hourly in the background — so a release reaches the homepage with no deployment, and the page drops the number rather than guess if that lookup fails. A three-step Windows walkthrough sits under those links, with one line for Linux |
-| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The current source makes the Species tab expand vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The pending genealogy repair separates reused names into immutable lineage instances and labels unresolved evidence. |
+| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The Species tab expands vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The genealogy view separates reused names into immutable lineage instances and labels unresolved evidence. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 
