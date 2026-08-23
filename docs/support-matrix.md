@@ -216,9 +216,11 @@ happened on a host whose game or mod is not the one this matrix names. Today's r
 the sidecar half after the control-response pacing change. The full uncached Go and race suites
 passed. Linux and Windows vet passed. Targeted regressions covered fan-in, durable ACK priority,
 reconnects, replacement, fairness, and bounded drain. The Windows and Linux `amd64` sidecar
-cross-builds produced valid PE and static ELF binaries. This was not a hosted deployment or a
-live game run. Operational evidence still rests on the 2026-08-19 public broadcast-world run.
-The unchanged plugin values still rest on the 2026-08-17 test.
+cross-builds produced valid PE and static ELF binaries. On 2026-08-23, the Windows build ran in
+five local worlds and the Linux build ran in six hosted worlds. Every world rejoined its reserved
+slot, reported the mod and relay connected, and retained zero discarded journal bytes. The cloud
+host's installed sidecar matched the candidate hash, and the Windows installation matched its
+published package hash. The unchanged plugin values still rest on the 2026-08-17 test.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -274,8 +276,8 @@ reads. The installers ignore it; the release gates do not.
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
     "sidecarSourceCommit": "93107a6773f49ce3520126e7ffdeac05d78a1f45",
     "sidecarInputsSha256": "10f4458884fc974db09ed03a18ee12c5d4f02ecfd48cc32f0a20d0b7bd2e7284",
-    "testedOn": "2026-08-22",
-    "evidence": "on 2026-08-22 the sidecar and relay source at 93107a6 passed the full uncached Go and race suites, Linux and Windows vet, targeted aggregate-fan-in, durable-ACK priority, reconnect, replacement, fairness, and hard-deadline drain regressions, and CGO-disabled Windows and Linux amd64 sidecar cross-builds with -trimpath and VCS metadata disabled produced valid PE and static ELF binaries; no hosted deployment or live game run used this source, so operational evidence remains the 2026-08-19 public broadcast-world run for the previously recorded sidecar, while the unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-22: hosted relay connectivity, live slot claims or mod traffic, crash replay, compaction, roll-up, archive operation, private-map behavior, and disk-failure paths"
+    "testedOn": "2026-08-23",
+    "evidence": "on 2026-08-22 the sidecar and relay source at 93107a6 passed the full uncached Go and race suites, Linux and Windows vet, targeted aggregate-fan-in, durable-ACK priority, reconnect, replacement, fairness, and hard-deadline drain regressions, and CGO-disabled Windows and Linux amd64 sidecar cross-builds with -trimpath and VCS metadata disabled produced valid PE and static ELF binaries; on 2026-08-23 the published Windows sidecar ran in five local worlds and the Linux sidecar ran in six hosted worlds, all eleven rejoined their reserved slots with mod and relay connected, zero capacity sheds, and zero discarded journal bytes, the installed Windows binary matched the published package hash, the installed cloud binary matched the candidate hash, and one 50-entry durable ACK backlog drained to zero; the unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised in the 2026-08-23 rollout: crash replay, disk failure, private-map behavior, or a forced rollback"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
