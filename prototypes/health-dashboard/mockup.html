@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bibites Multiverse — Health dashboard end-state mockup</title>
+<meta name="description" content="Static information-design mockup for the Bibites Multiverse production health dashboard.">
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #07100d;
+  --surface: #0d1814;
+  --surface-2: #12211b;
+  --surface-3: #172a22;
+  --line: #243e33;
+  --line-soft: rgba(91, 134, 112, .24);
+  --text: #edf7f1;
+  --muted: #98ada3;
+  --dim: #6e8379;
+  --good: #64dda6;
+  --good-soft: rgba(100, 221, 166, .11);
+  --warn: #f0bc56;
+  --warn-soft: rgba(240, 188, 86, .12);
+  --bad: #f07178;
+  --bad-soft: rgba(240, 113, 120, .12);
+  --info: #78bdf2;
+  --info-soft: rgba(120, 189, 242, .11);
+  --unknown: #9ca9b2;
+  --max: 1320px;
+  --shadow: 0 24px 70px rgba(0, 0, 0, .24);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 82% -8%, rgba(61, 151, 112, .16), transparent 30rem),
+    radial-gradient(circle at -5% 30%, rgba(54, 111, 153, .10), transparent 30rem),
+    var(--bg);
+  color: var(--text);
+  font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+button, input { font: inherit; }
+a { color: inherit; }
+.shell { width: min(calc(100% - 40px), var(--max)); margin-inline: auto; }
+.skip {
+  position: fixed;
+  left: 12px;
+  top: -80px;
+  z-index: 100;
+  padding: 9px 13px;
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--bg);
+}
+.skip:focus { top: 12px; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid rgba(76, 117, 97, .3);
+  background: rgba(7, 16, 13, .9);
+  backdrop-filter: blur(18px);
+}
+.nav {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.brand { display: flex; align-items: center; gap: 11px; font-weight: 760; letter-spacing: -.02em; }
+.brand svg { width: 30px; color: var(--good); }
+.context { color: var(--muted); font-size: 13px; }
+.context strong { color: var(--text); font-weight: 650; }
+.navright { display: flex; align-items: center; gap: 14px; }
+.mock-label {
+  border: 1px solid rgba(120, 189, 242, .42);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--info);
+  background: var(--info-soft);
+  font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.fresh { color: var(--muted); font-size: 12px; }
+
+main { padding-bottom: 72px; }
+.hero { padding: 44px 0 20px; }
+.hero-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font: 700 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.scenario-control {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(13, 24, 20, .9);
+}
+.scenario-control button {
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 11px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+.scenario-control button[aria-pressed="true"] { color: var(--text); background: var(--surface-3); }
+.scenario-control button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+
+.condition {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 30px;
+  background: linear-gradient(145deg, rgba(18, 33, 27, .98), rgba(9, 18, 15, .96));
+  box-shadow: var(--shadow);
+}
+.condition::after {
+  content: "";
+  position: absolute;
+  width: 330px;
+  height: 330px;
+  right: -130px;
+  top: -190px;
+  border-radius: 50%;
+  background: var(--condition-glow, var(--warn-soft));
+  filter: blur(4px);
+}
+body[data-tone="good"] .condition { --condition-glow: rgba(100, 221, 166, .15); }
+body[data-tone="bad"] .condition { --condition-glow: rgba(240, 113, 120, .18); }
+.condition-main {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 30px;
+}
+.state-line { display: flex; align-items: center; gap: 13px; }
+.state-dot {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 7px var(--warn-soft);
+}
+body[data-tone="good"] .state-dot { background: var(--good); box-shadow: 0 0 0 7px var(--good-soft); }
+body[data-tone="bad"] .state-dot { background: var(--bad); box-shadow: 0 0 0 7px var(--bad-soft); }
+.condition h1 { margin: 0; font-size: clamp(34px, 5vw, 58px); line-height: 1; letter-spacing: -.05em; }
+.condition-copy { max-width: 760px; margin: 17px 0 0; color: #c2d2ca; font-size: 18px; }
+.condition-meta { margin-top: 14px; color: var(--muted); font-size: 12px; }
+.condition-meta strong { color: var(--text); }
+.confidence {
+  min-width: 200px;
+  border-left: 1px solid var(--line);
+  padding-left: 26px;
+}
+.confidence span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.confidence strong { display: block; margin-top: 5px; font-size: 22px; }
+.confidence p { max-width: 220px; margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.condition-facts {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 26px;
+}
+.fact {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px 15px;
+  background: rgba(7, 16, 13, .46);
+}
+.fact-label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+.fact strong { display: block; margin-top: 4px; font-size: 17px; }
+.fact small { display: block; margin-top: 2px; color: var(--dim); font-size: 11px; }
+
+.section { padding-top: 42px; }
+.section-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+.section-head h2 { margin: 4px 0 0; font-size: 29px; line-height: 1.15; letter-spacing: -.035em; }
+.section-head > p { max-width: 590px; margin: 0; color: var(--muted); text-align: right; font-size: 13px; }
+.card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(13, 24, 20, .92);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .12);
+}
+
+.attention-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, .75fr); gap: 16px; }
+.attention-list { overflow: hidden; }
+.issue {
+  border-top: 1px solid var(--line-soft);
+  border-left: 3px solid var(--warn);
+  padding: 18px 20px 17px;
+}
+.issue:first-child { border-top: 0; }
+.issue.bad { border-left-color: var(--bad); }
+.issue.info { border-left-color: var(--info); }
+.issue summary { list-style: none; cursor: pointer; }
+.issue summary::-webkit-details-marker { display: none; }
+.issue-top { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 15px; align-items: start; }
+.issue-rank { color: var(--muted); font: 700 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.issue-title { font-weight: 720; font-size: 16px; }
+.issue-impact { margin-top: 3px; color: var(--muted); font-size: 13px; }
+.issue-age { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.issue-toggle { color: var(--info); font-size: 12px; }
+.issue-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 14px 0 2px 107px;
+}
+.issue-body div { border-radius: 9px; padding: 11px 12px; background: var(--surface-2); }
+.issue-body span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+.issue-body p { margin: 5px 0 0; color: #cedbd5; font-size: 12px; }
+.empty-attention { padding: 34px; display: flex; gap: 14px; align-items: center; color: #c7d6cf; }
+.empty-attention .state-dot { width: 11px; height: 11px; flex-basis: 11px; }
+
+.maintenance { padding: 21px; }
+.maintenance h3 { margin: 0; font-size: 17px; }
+.maintenance > p { margin: 5px 0 17px; color: var(--muted); font-size: 12px; }
+.maintenance-item { padding: 13px 0; border-top: 1px solid var(--line-soft); }
+.maintenance-item:first-of-type { border-top: 0; }
+.maintenance-item strong { display: block; font-size: 13px; }
+.maintenance-item span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.maintenance-tag { display: inline-flex !important; width: max-content; margin-top: 7px !important; padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--info) !important; }
+
+.domains { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
+.domain { padding: 19px; min-height: 210px; }
+.domain-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.domain h3 { margin: 0; font-size: 15px; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font: 700 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-pill.good { color: var(--good); border-color: rgba(100, 221, 166, .34); }
+.status-pill.warn { color: var(--warn); border-color: rgba(240, 188, 86, .34); }
+.status-pill.bad { color: var(--bad); border-color: rgba(240, 113, 120, .36); }
+.status-pill.info { color: var(--info); border-color: rgba(120, 189, 242, .34); }
+.domain-copy { min-height: 60px; margin: 14px 0 0; color: #c6d5ce; font-size: 13px; }
+.domain-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 18px; }
+.domain-metric { padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.domain-metric span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.domain-metric strong { display: block; margin-top: 3px; font-size: 15px; }
+.domain-confidence { margin-top: 15px; color: var(--dim); font-size: 10px; }
+.domain-confidence b { color: var(--muted); font-weight: 650; }
+
+.trend-card { overflow: hidden; }
+.rangebar { display: flex; justify-content: flex-end; padding: 14px 18px 0; }
+.rangebar .scenario-control { background: var(--bg); }
+.trend-head, .trend-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 110px 120px minmax(180px, 1.4fr) 105px;
+  gap: 16px;
+  align-items: center;
+}
+.trend-head { padding: 13px 20px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+.trend-row { min-height: 80px; padding: 13px 20px; border-top: 1px solid var(--line-soft); }
+.trend-name strong { display: block; font-size: 13px; }
+.trend-name span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.trend-current { font-size: 17px; font-weight: 720; }
+.trend-range { color: var(--muted); font-size: 12px; }
+.spark { width: 100%; height: 38px; }
+.spark .gridline { stroke: rgba(91, 134, 112, .22); stroke-width: 1; }
+.spark polyline { fill: none; stroke: var(--info); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+.spark circle { fill: var(--info); }
+.spark.warn polyline, .spark.warn circle { stroke: var(--warn); fill: var(--warn); }
+.spark.bad polyline, .spark.bad circle { stroke: var(--bad); fill: var(--bad); }
+.decision { font-size: 11px; }
+.decision b { display: block; color: var(--text); }
+.decision span { color: var(--muted); }
+
+.lower-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+.timeline { padding: 8px 21px 16px; }
+.event { position: relative; display: grid; grid-template-columns: 72px 18px 1fr; gap: 10px; min-height: 65px; }
+.event::before { content: ""; position: absolute; left: 80px; top: 21px; bottom: -2px; width: 1px; background: var(--line); }
+.event:last-child::before { display: none; }
+.event time { padding-top: 15px; color: var(--muted); font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.event-dot { position: relative; z-index: 1; width: 8px; height: 8px; margin: 18px 0 0 5px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 5px var(--surface); }
+.event.warn .event-dot { background: var(--warn); }
+.event.bad .event-dot { background: var(--bad); }
+.event.good .event-dot { background: var(--good); }
+.event-copy { padding: 13px 0 12px; border-bottom: 1px solid var(--line-soft); }
+.event:last-child .event-copy { border-bottom: 0; }
+.event-copy strong { display: block; font-size: 13px; }
+.event-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+
+.evidence { padding: 20px; }
+.evidence h3 { margin: 0; font-size: 17px; }
+.evidence > p { margin: 5px 0 17px; color: var(--muted); font-size: 12px; }
+.source { padding: 11px 0; border-top: 1px solid var(--line-soft); }
+.source:first-of-type { border-top: 0; }
+.source-top { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.source-top span { color: var(--muted); }
+.source-bar { height: 4px; margin-top: 7px; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
+.source-bar i { display: block; width: var(--width, 100%); height: 100%; border-radius: inherit; background: var(--good); }
+.source.warn .source-bar i { background: var(--warn); }
+.source.bad .source-bar i { background: var(--bad); }
+.source.info .source-bar i { background: var(--info); }
+.coverage-note { margin-top: 15px; padding: 12px; border-radius: 9px; color: #bbd4e6; background: var(--info-soft); font-size: 11px; }
+
+.details-stack { display: grid; gap: 10px; }
+.drawer { overflow: hidden; }
+.drawer summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 17px 20px;
+  cursor: pointer;
+}
+.drawer summary::-webkit-details-marker { display: none; }
+.drawer summary strong { font-size: 14px; }
+.drawer summary span { color: var(--muted); font-size: 12px; }
+.drawer summary::after { content: "+"; color: var(--info); font-size: 18px; }
+.drawer[open] summary::after { content: "−"; }
+.drawer-body { padding: 0 20px 19px; border-top: 1px solid var(--line-soft); }
+.checks-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-top: 14px; }
+.check-group { padding: 13px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-2); }
+.check-group h4 { margin: 0 0 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+.check-line { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 11px; }
+.check-line:first-of-type { border-top: 0; }
+.check-line i { font-style: normal; color: var(--good); }
+.check-line i.warn { color: var(--warn); }
+.check-line i.bad { color: var(--bad); }
+.coverage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 14px; }
+.coverage-item { padding: 13px; border-radius: 10px; background: var(--surface-2); }
+.coverage-item strong { display: block; font-size: 12px; }
+.coverage-item p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+
+.mock-foot { margin-top: 48px; padding: 22px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.mock-foot .shell { display: flex; justify-content: space-between; gap: 24px; }
+
+@media (max-width: 1080px) {
+  .domains { grid-template-columns: 1fr 1fr; }
+  .attention-layout, .lower-grid { grid-template-columns: 1fr; }
+  .trend-head, .trend-row { grid-template-columns: minmax(150px, 1fr) 90px 110px minmax(150px, 1fr); }
+  .trend-head > :last-child, .trend-row > :last-child { display: none; }
+}
+@media (max-width: 760px) {
+  .shell { width: min(calc(100% - 24px), var(--max)); }
+  .nav { min-height: 60px; }
+  .context, .fresh { display: none; }
+  .hero { padding-top: 26px; }
+  .hero-tools, .section-head { align-items: flex-start; flex-direction: column; }
+  .section-head > p { text-align: left; }
+  .condition { padding: 21px; }
+  .condition-main { grid-template-columns: 1fr; }
+  .confidence { border-left: 0; border-top: 1px solid var(--line); padding: 17px 0 0; }
+  .condition-facts, .domains { grid-template-columns: 1fr 1fr; }
+  .issue-top { grid-template-columns: 70px 1fr; }
+  .issue-age { display: none; }
+  .issue-body { grid-template-columns: 1fr; margin-left: 85px; }
+  .trend-head { display: none; }
+  .trend-row { grid-template-columns: 1fr 80px; gap: 10px; }
+  .trend-range, .spark, .decision { display: none; }
+  .checks-grid, .coverage-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .mock-label { display: none; }
+  .condition-facts, .domains { grid-template-columns: 1fr; }
+  .scenario-control button { padding-inline: 8px; }
+  .issue { padding-inline: 14px; }
+  .issue-top { grid-template-columns: 1fr; gap: 5px; }
+  .issue-body { margin-left: 0; }
+  .mock-foot .shell { flex-direction: column; }
+}
+</style>
+</head>
+<body data-tone="warn">
+<a class="skip" href="#main">Skip to dashboard</a>
+<header class="topbar">
+  <div class="shell nav">
+    <div class="brand">
+      <svg viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
+      <span>Bibites Multiverse</span>
+      <span class="context">/ <strong>Production health</strong></span>
+    </div>
+    <div class="navright"><span class="mock-label">Design mockup · not live</span><span class="fresh">Updated 38 seconds ago</span></div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="shell hero">
+    <div class="hero-tools">
+      <p class="eyebrow">Operator overview</p>
+      <div class="scenario-control" aria-label="Mock dashboard scenario">
+        <button type="button" data-scenario="current" aria-pressed="true">Degraded</button>
+        <button type="button" data-scenario="healthy" aria-pressed="false">Healthy</button>
+        <button type="button" data-scenario="incident" aria-pressed="false">Outage</button>
+      </div>
+    </div>
+    <div class="condition" aria-live="polite">
+      <div class="condition-main">
+        <div>
+          <div class="state-line"><i class="state-dot" aria-hidden="true"></i><h1 data-bind="state">Degraded</h1></div>
+          <p class="condition-copy" data-bind="summary">The service is available. Two worlds are offline, and record-integrity risk is increasing.</p>
+          <p class="condition-meta"><strong data-bind="since">Since 09:41 UTC</strong> · <span data-bind="change">No public outage</span></p>
+        </div>
+        <div class="confidence">
+          <span>Evidence confidence</span>
+          <strong data-bind="confidence">Partial</strong>
+          <p data-bind="confidenceCopy">Four live sources are fresh. External playback and world-host telemetry are absent.</p>
+        </div>
+      </div>
+      <div class="condition-facts">
+        <div class="fact"><span class="fact-label">Public path</span><strong data-bind="publicPath">Serving</strong><small data-bind="publicPathNote">6 of 6 routes answer</small></div>
+        <div class="fact"><span class="fact-label">Permanent record</span><strong data-bind="record">Current</strong><small data-bind="recordNote">Archive subscribed</small></div>
+        <div class="fact"><span class="fact-label">Worlds connected</span><strong data-bind="worlds">17 / 19</strong><small data-bind="worldsNote">2 routed around</small></div>
+        <div class="fact"><span class="fact-label">Next decision</span><strong data-bind="decision">Within 5 hours</strong><small data-bind="decisionNote">Gap-rate window completes</small></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shell section" aria-labelledby="attention-title">
+    <div class="section-head">
+      <div><p class="eyebrow">Decision queue</p><h2 id="attention-title">Needs attention</h2></div>
+      <p>Problems are grouped by operator decision. Monitor names and raw counters stay in the evidence drawer.</p>
+    </div>
+    <div class="attention-layout">
+      <div class="card attention-list" id="attention-list"></div>
+      <aside class="card maintenance" aria-labelledby="maintenance-title">
+        <h3 id="maintenance-title">Maintenance queue</h3>
+        <p>These items do not affect the live service now.</p>
+        <div id="maintenance-list"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="shell section" aria-labelledby="domains-title">
+    <div class="section-head">
+      <div><p class="eyebrow">System view</p><h2 id="domains-title">Four domains</h2></div>
+      <p>Each domain states its condition and the evidence that supports it.</p>
+    </div>
+    <div class="domains" id="domains"></div>
+  </section>
+
+  <section class="shell section" aria-labelledby="trends-title">
+    <div class="section-head">
+      <div><p class="eyebrow">Performance and limits</p><h2 id="trends-title">Signals that change decisions</h2></div>
+      <p>Each row joins a current value, a recent range, a trend, and the limit that changes action.</p>
+    </div>
+    <div class="card trend-card">
+      <div class="rangebar">
+        <span class="mock-label">24-hour mock sample</span>
+      </div>
+      <div class="trend-head"><span>Signal</span><span>Current</span><span>Range</span><span>Trend</span><span>Decision limit</span></div>
+      <div id="trends"></div>
+    </div>
+  </section>
+
+  <section class="shell section" aria-labelledby="changes-title">
+    <div class="section-head">
+      <div><p class="eyebrow">Cause context</p><h2 id="changes-title">What changed</h2></div>
+      <p>Recoveries, warnings, and deployments share one time axis.</p>
+    </div>
+    <div class="lower-grid">
+      <div class="card timeline" id="timeline"></div>
+      <aside class="card evidence" aria-labelledby="evidence-title">
+        <h3 id="evidence-title">Evidence freshness</h3>
+        <p>Freshness belongs to the conclusion that uses each source.</p>
+        <div id="sources"></div>
+        <div class="coverage-note" data-bind="coverageNote">This view cannot prove external playback or world-host pressure.</div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="shell section" aria-labelledby="details-title">
+    <div class="section-head">
+      <div><p class="eyebrow">Supporting evidence</p><h2 id="details-title">Details on demand</h2></div>
+      <p>The operator can inspect implementation detail without carrying it through the first screen.</p>
+    </div>
+    <div class="details-stack">
+      <details class="card drawer">
+        <summary><strong>All monitor results</strong><span data-bind="monitorSummary">19 pass · 3 warning · 1 critical · 1 warming</span></summary>
+        <div class="drawer-body"><div class="checks-grid" id="checks-grid"></div></div>
+      </details>
+      <details class="card drawer">
+        <summary><strong>Coverage and blind spots</strong><span>3 missing sources · 1 stale audit</span></summary>
+        <div class="drawer-body"><div class="coverage-grid">
+          <div class="coverage-item"><strong>World-host performance</strong><p>Measurements remain on the world host. The dashboard does not receive them.</p></div>
+          <div class="coverage-item"><strong>External path probe</strong><p>No off-host probe checks TLS, the API, and video playback.</p></div>
+          <div class="coverage-item"><strong>Connection cause</strong><p>The relay does not record close codes or per-slot session counts.</p></div>
+          <div class="coverage-item"><strong>Continuous profiles</strong><p>No continuous CPU or heap profile exists. This absence does not reduce live-service health.</p></div>
+        </div></div>
+      </details>
+      <details class="card drawer">
+        <summary><strong>Raw counters and per-unit data</strong><span>For incident analysis</span></summary>
+        <div class="drawer-body"><div class="coverage-grid">
+          <div class="coverage-item"><strong>Service-host counters</strong><p>TCP deltas, connection counts, load, and per-unit memory belong here.</p></div>
+          <div class="coverage-item"><strong>Archive counters</strong><p>Ledger totals, roll-up coverage, duplicate totals, and segment counts belong here.</p></div>
+        </div></div>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer class="mock-foot"><div class="shell"><span>Static mock data · no production API calls</span><span>End-state information design for review</span></div></footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var scenarios = {
+    current: {
+      tone: "warn",
+      state: "Degraded",
+      summary: "The service is available. Two worlds are offline, and record-integrity risk is increasing.",
+      since: "Since 09:41 UTC",
+      change: "No public outage",
+      confidence: "Partial",
+      confidenceCopy: "Four live sources are fresh. External playback and world-host telemetry are absent.",
+      publicPath: "Serving", publicPathNote: "6 of 6 routes answer",
+      record: "Current", recordNote: "Archive subscribed",
+      worlds: "17 / 19", worldsNote: "2 routed around",
+      decision: "Within 5 hours", decisionNote: "Gap-rate window completes",
+      coverageNote: "This view cannot prove external playback or world-host pressure.",
+      monitorSummary: "19 pass · 3 warning · 1 critical · 1 warming",
+      attention: [
+        {rank: "Priority 1", tone: "bad", title: "Genome capture is falling behind", impact: "Some organisms can lose genome detail after a world leaves.", age: "17 h 55 m", evidence: "Gaps increased by 22,680. The projected rate is 30,400 per day against a 20,000 limit.", next: "Inspect archive capture delay and the worlds that hold the missing genomes."},
+        {rank: "Priority 2", tone: "warn", title: "Two participant worlds are offline", impact: "Migrations route around two map positions. All effective lanes remain open.", age: "16 h 31 m", evidence: "The map moved between 14 and 17 live worlds. Slots 17 and 23 remain dark.", next: "Contact those participants. Use client logs because the relay has no close code."},
+        {rank: "Priority 3", tone: "warn", title: "Swap pressure is near a warning", impact: "The service runs, but memory pressure can increase latency and restart risk.", age: "10 m", evidence: "Swap is 27.7% used for two checks. Three checks at 25% create a warning.", next: "Read the next five-minute sample. Inspect world-host pressure before a resize decision."}
+      ],
+      maintenance: [
+        {title: "Cost audit is overdue", copy: "The last provider reconciliation is 101 hours old.", tag: "Run daily audit"},
+        {title: "Restart model is obsolete", copy: "The model says critical. The measured replay peak fits in physical memory.", tag: "Replace model"}
+      ],
+      domains: [
+        {title: "Public access", state: "Serving", tone: "good", copy: "The website, map, health page, APIs, and HLS origin answer.", metrics: [["Routes", "6 / 6"], ["Broadcast", "Live"]], confidence: "Partial · no external playback probe"},
+        {title: "Worlds and routing", state: "Degraded", tone: "warn", copy: "Two worlds are dark. Routing skips them without closing a lane.", metrics: [["Worlds", "17 / 19"], ["Closed lanes", "0"]], confidence: "Fresh · relay status is 6 seconds old"},
+        {title: "Archive and record", state: "At risk", tone: "bad", copy: "The archive records now. Genome capture grows faster than its decision limit.", metrics: [["Write lag", "822 records"], ["Cold-copy wait", "0"]], confidence: "Fresh · rate window still warming"},
+        {title: "Capacity and cost", state: "At risk", tone: "warn", copy: "Host capacity is stable. Swap pressure and the stale cost audit need action.", metrics: [["Memory free", "38.7%"], ["Disk used", "69%"]], confidence: "Partial · provider audit is stale"}
+      ],
+      trends: [
+        {name: "Live worlds", note: "Participant availability", current: "17 / 19", range: "14–19", values: [18,18,17,16,15,14,15,15,16,17,16,17], tone: "warn", limit: "Less than 18", action: "Contact participants"},
+        {name: "Memory available", note: "Service host", current: "38.7%", range: "31.7–46.0%", values: [36,39,42,46,40,35,32,34,38,41,39,39], tone: "info", limit: "Less than 20%", action: "Inspect PSI"},
+        {name: "Swap used", note: "Sustained use", current: "27.7%", range: "0–29.6%", values: [0,0,4,12,18,23,25,26,24,26,27,28], tone: "warn", limit: "25% for 15 m", action: "Size memory"},
+        {name: "Disk used", note: "Archive volume", current: "69%", range: "68–69%", values: [68,68,68,68,68,68,68,69,69,69,69,69], tone: "info", limit: "More than 75%", action: "Project days to full"},
+        {name: "Replay time", note: "Last measured start", current: "82.7 s", range: "82.7–87.7 s", values: [88,88,88,88,88,88,83,83,83,83,83,83], tone: "info", limit: "More than 180 s", action: "Announce restart"},
+        {name: "Genome-gap rate", note: "Projected daily increase", current: "30.4k/day", range: "18–33k/day", values: [18,19,21,23,24,26,29,33,31,30,30,30], tone: "bad", limit: "More than 20k/day", action: "Inspect capture"}
+      ],
+      timeline: [
+        {time: "10:42", tone: "good", title: "One participant world recovered", copy: "The live count increased from 16 to 17. Routes recomputed without a closed lane."},
+        {time: "10:31", tone: "warn", title: "Swap reached its second warning sample", copy: "Used swap remained above 25%. One more sample creates a warning."},
+        {time: "09:57", tone: "warn", title: "Genome-gap projection crossed its limit", copy: "The monitor remains in warm-up until its rate window completes."},
+        {time: "03:22", tone: "info", title: "Release v0.3.3 activated", copy: "The archive replay took 82.7 seconds. No automatic service restart followed."}
+      ],
+      sources: [
+        {name: "Map and archive", state: "6 s old", tone: "good", width: 100},
+        {name: "Scheduled monitor", state: "1 m old", tone: "good", width: 96},
+        {name: "Service-host sample", state: "38 s old", tone: "good", width: 100},
+        {name: "Viewer presence", state: "4 s old", tone: "good", width: 100},
+        {name: "Provider cost audit", state: "101 h old", tone: "bad", width: 18}
+      ]
+    },
+    healthy: {
+      tone: "good",
+      state: "Healthy",
+      summary: "The public path, participant worlds, permanent record, and host capacity are healthy.",
+      since: "Stable for 7 days",
+      change: "No active degradation",
+      confidence: "Complete",
+      confidenceCopy: "All required sources are fresh. The external path probe completed 22 seconds ago.",
+      publicPath: "Serving", publicPathNote: "99.99% over 7 days",
+      record: "Current", recordNote: "No integrity backlog",
+      worlds: "19 / 19", worldsNote: "No bypasses",
+      decision: "No action", decisionNote: "Next review in 24 hours",
+      coverageNote: "All required health sources are fresh. Continuous profiles remain optional diagnostic evidence.",
+      monitorSummary: "24 pass · 0 warning · 0 critical",
+      attention: [],
+      maintenance: [
+        {title: "No urgent maintenance", copy: "The next planned review is the daily cost audit.", tag: "Review in 24 h"}
+      ],
+      domains: [
+        {title: "Public access", state: "Healthy", tone: "good", copy: "The external probe reaches the site, APIs, and playable video.", metrics: [["Success", "99.99%"], ["p95 latency", "218 ms"]], confidence: "Complete · external probe is fresh"},
+        {title: "Worlds and routing", state: "Healthy", tone: "good", copy: "Every expected world is live. All routes use direct neighbors.", metrics: [["Worlds", "19 / 19"], ["Bypasses", "0"]], confidence: "Complete · host and relay data agree"},
+        {title: "Archive and record", state: "Healthy", tone: "good", copy: "The archive records now. Roll-up, copy, and integrity rates are inside limits.", metrics: [["Write lag", "0.4 s"], ["Cold-copy wait", "0"]], confidence: "Complete · 24-hour windows are mature"},
+        {title: "Capacity and cost", state: "Healthy", tone: "good", copy: "Memory, disk, replay time, and transfer remain inside their decision limits.", metrics: [["Memory free", "52.1%"], ["Disk used", "62%"]], confidence: "Complete · provider audit is fresh"}
+      ],
+      trends: [
+        {name: "Live worlds", note: "Participant availability", current: "19 / 19", range: "19", values: [19,19,19,19,19,19,19,19,19,19,19,19], tone: "info", limit: "Less than 18", action: "Contact participants"},
+        {name: "Memory available", note: "Service host", current: "52.1%", range: "46–57%", values: [49,51,54,52,50,48,46,49,53,57,54,52], tone: "info", limit: "Less than 20%", action: "Inspect PSI"},
+        {name: "Swap used", note: "Sustained use", current: "3.2%", range: "0–5%", values: [0,0,1,1,2,2,3,5,4,3,3,3], tone: "info", limit: "25% for 15 m", action: "Size memory"},
+        {name: "Disk used", note: "Archive volume", current: "62%", range: "61–62%", values: [61,61,61,61,61,61,62,62,62,62,62,62], tone: "info", limit: "More than 75%", action: "Project days to full"},
+        {name: "Replay time", note: "Last measured start", current: "71.4 s", range: "69–73 s", values: [73,73,73,71,71,71,70,70,69,70,71,71], tone: "info", limit: "More than 180 s", action: "Announce restart"},
+        {name: "Genome-gap rate", note: "Measured daily increase", current: "4.1k/day", range: "2–6k/day", values: [6,5,4,3,2,3,4,5,5,4,4,4], tone: "info", limit: "More than 20k/day", action: "Inspect capture"}
+      ],
+      timeline: [
+        {time: "09:00", tone: "good", title: "Daily evidence review passed", copy: "All health sources and the provider audit were fresh."},
+        {time: "Yesterday", tone: "info", title: "One participant reconnected", copy: "The reconnect completed in 18 seconds without a route bypass."},
+        {time: "7 days", tone: "good", title: "Last service degradation ended", copy: "The health state has remained stable since that recovery."}
+      ],
+      sources: [
+        {name: "External path probe", state: "22 s old", tone: "good", width: 100},
+        {name: "Map and archive", state: "4 s old", tone: "good", width: 100},
+        {name: "Host measurements", state: "31 s old", tone: "good", width: 100},
+        {name: "World-host measurements", state: "2 m old", tone: "good", width: 96},
+        {name: "Provider cost audit", state: "3 h old", tone: "good", width: 88}
+      ]
+    },
+    incident: {
+      tone: "bad",
+      state: "Outage",
+      summary: "The public map answers, but the archive is not subscribed. New migrations are not entering the permanent record.",
+      since: "Since 10:38 UTC",
+      change: "Permanent-record outage",
+      confidence: "High",
+      confidenceCopy: "The external probe, relay, archive, and host sources agree on the failure.",
+      publicPath: "Partly serving", publicPathNote: "Map view is stale",
+      record: "Not recording", recordNote: "Archive unsubscribed",
+      worlds: "19 / 19", worldsNote: "Relay still accepts traffic",
+      decision: "Act now", decisionNote: "Hold placement traffic",
+      coverageNote: "The failure is proven from both on-host and off-host sources.",
+      monitorSummary: "17 pass · 1 warning · 6 critical",
+      attention: [
+        {rank: "Priority 1", tone: "bad", title: "Stop unrecorded placement traffic", impact: "Each new migration can create a permanent gap while the archive is unsubscribed.", age: "4 m", evidence: "The relay accepts worlds. The archive subscription is absent, and record count is flat.", next: "Raise the peer gate. Then restore the archive subscription before traffic resumes."},
+        {rank: "Priority 2", tone: "bad", title: "Archive memory is exhausted", impact: "The archive cannot complete replay and cannot serve a current status view.", age: "6 m", evidence: "Memory pressure is 100%. The archive restarted three times and replay stopped at the same point.", next: "Keep the gate active. Capture the failure record and use the approved recovery plan."}
+      ],
+      maintenance: [
+        {title: "Defer routine work", copy: "Billing and participant maintenance wait until recording returns.", tag: "Incident only"}
+      ],
+      domains: [
+        {title: "Public access", state: "Degraded", tone: "warn", copy: "The site answers, but the map view is stale and video playback is intermittent.", metrics: [["Routes", "4 / 6"], ["p95 latency", "2.8 s"]], confidence: "Complete · external probe is fresh"},
+        {title: "Worlds and routing", state: "At risk", tone: "warn", copy: "All worlds remain connected, but their migrations are not entering the record.", metrics: [["Worlds", "19 / 19"], ["Peer gate", "Open"]], confidence: "Fresh · relay status is current"},
+        {title: "Archive and record", state: "Outage", tone: "bad", copy: "The archive is unsubscribed. The permanent record does not advance.", metrics: [["Write lag", "4 m 12 s"], ["Restarts", "3"]], confidence: "Complete · three sources agree"},
+        {title: "Capacity and cost", state: "Critical", tone: "bad", copy: "Memory pressure prevents replay. Disk and transfer remain inside limits.", metrics: [["Memory free", "1.2%"], ["Swap used", "98%"]], confidence: "Complete · host pressure is fresh"}
+      ],
+      trends: [
+        {name: "Live worlds", note: "Participant availability", current: "19 / 19", range: "18–19", values: [19,19,19,18,19,19,19,19,19,19,19,19], tone: "info", limit: "Less than 18", action: "Contact participants"},
+        {name: "Memory available", note: "Service host", current: "1.2%", range: "1–42%", values: [42,40,38,35,30,24,18,12,8,4,2,1], tone: "bad", limit: "Less than 20%", action: "Keep gate active"},
+        {name: "Swap used", note: "Sustained use", current: "98%", range: "8–98%", values: [8,12,18,25,39,52,68,79,88,94,97,98], tone: "bad", limit: "25% for 15 m", action: "Recover capacity"},
+        {name: "Disk used", note: "Archive volume", current: "70%", range: "69–70%", values: [69,69,69,69,69,69,70,70,70,70,70,70], tone: "info", limit: "More than 75%", action: "Project days to full"},
+        {name: "Record write lag", note: "Permanent record", current: "4 m 12 s", range: "0–4 m", values: [0,0,0,0,0,0,0,1,2,3,4,4.2], tone: "bad", limit: "More than 30 s", action: "Hold traffic"},
+        {name: "Archive restarts", note: "Current incident", current: "3", range: "0–3", values: [0,0,0,0,0,0,0,1,1,2,2,3], tone: "bad", limit: "More than 0", action: "Stop retry loop"}
+      ],
+      timeline: [
+        {time: "10:42", tone: "bad", title: "Third archive restart failed", copy: "Replay stopped at the same memory-pressure point."},
+        {time: "10:40", tone: "bad", title: "Permanent record stopped", copy: "The archive lost its relay subscription. The record count stopped."},
+        {time: "10:38", tone: "warn", title: "Memory pressure crossed its limit", copy: "Available memory fell below 5% and swap use reached 94%."},
+        {time: "10:31", tone: "info", title: "Routine deployment completed", copy: "The event is correlated. It is not yet proven as the cause."}
+      ],
+      sources: [
+        {name: "External path probe", state: "8 s old", tone: "good", width: 100},
+        {name: "Relay status", state: "3 s old", tone: "good", width: 100},
+        {name: "Archive status", state: "Unavailable", tone: "bad", width: 4},
+        {name: "Service-host pressure", state: "21 s old", tone: "good", width: 100},
+        {name: "Deployment events", state: "Current", tone: "good", width: 100}
+      ]
+    }
+  };
+
+  var checkGroups = [
+    {title: "Availability", items: [["Required services", "pass"], ["Public path", "pass"], ["Relay", "pass"], ["Archive", "pass"], ["Subscription", "pass"]]},
+    {title: "Worlds and routing", items: [["World presence", "warning"], ["Lane bypass", "warning"], ["Internal route", "pass"]]},
+    {title: "Record integrity", items: [["Roll-up", "pass"], ["Cold copy", "pass"], ["Duplicates", "warming"], ["Genome gaps", "warning"]]},
+    {title: "Capacity", items: [["Memory model", "critical"], ["Replay time", "pass"], ["Swap", "warning"], ["Disk", "pass"]]},
+    {title: "Cost", items: [["Transfer total", "pass"], ["Transfer rate", "pass"], ["Billing audit", "warning"]]},
+    {title: "Maintenance", items: [["Service errors", "pass"], ["Certificate", "pass"], ["Backup", "pass"], ["Reboot", "pass"]]}
+  ];
+
+  function escapeText(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return {"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"}[char];
+    });
+  }
+
+  function bind(data) {
+    document.querySelectorAll("[data-bind]").forEach(function (node) {
+      var key = node.getAttribute("data-bind");
+      if (Object.prototype.hasOwnProperty.call(data, key)) node.textContent = data[key];
+    });
+  }
+
+  function renderAttention(items) {
+    var target = document.getElementById("attention-list");
+    if (!items.length) {
+      target.innerHTML = '<div class="empty-attention"><i class="state-dot" aria-hidden="true"></i><div><strong>No active operator problem</strong><div class="issue-impact">All required results are inside their decision limits.</div></div></div>';
+      return;
+    }
+    target.innerHTML = items.map(function (item, index) {
+      return '<details class="issue '+escapeText(item.tone)+'" '+(index === 0 ? "open" : "")+'>'+
+        '<summary><div class="issue-top"><span class="issue-rank">'+escapeText(item.rank)+'</span><div><div class="issue-title">'+escapeText(item.title)+'</div><div class="issue-impact">'+escapeText(item.impact)+'</div><span class="issue-toggle">Evidence and next action</span></div><span class="issue-age">'+escapeText(item.age)+'</span></div></summary>'+
+        '<div class="issue-body"><div><span>Evidence</span><p>'+escapeText(item.evidence)+'</p></div><div><span>Next action</span><p>'+escapeText(item.next)+'</p></div></div></details>';
+    }).join("");
+  }
+
+  function renderMaintenance(items) {
+    document.getElementById("maintenance-list").innerHTML = items.map(function (item) {
+      return '<div class="maintenance-item"><strong>'+escapeText(item.title)+'</strong><span>'+escapeText(item.copy)+'</span><span class="maintenance-tag">'+escapeText(item.tag)+'</span></div>';
+    }).join("");
+  }
+
+  function renderDomains(items) {
+    document.getElementById("domains").innerHTML = items.map(function (item) {
+      var metrics = item.metrics.map(function (metric) {
+        return '<div class="domain-metric"><span>'+escapeText(metric[0])+'</span><strong>'+escapeText(metric[1])+'</strong></div>';
+      }).join("");
+      return '<article class="card domain"><div class="domain-top"><h3>'+escapeText(item.title)+'</h3><span class="status-pill '+escapeText(item.tone)+'">'+escapeText(item.state)+'</span></div><p class="domain-copy">'+escapeText(item.copy)+'</p><div class="domain-metrics">'+metrics+'</div><div class="domain-confidence"><b>Evidence:</b> '+escapeText(item.confidence)+'</div></article>';
+    }).join("");
+  }
+
+  function spark(values, tone) {
+    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    if (max === min) max = min + 1;
+    var points = values.map(function (value, index) {
+      var x = index * (220 / (values.length - 1));
+      var y = 34 - ((value - min) / (max - min)) * 28;
+      return x.toFixed(1)+","+y.toFixed(1);
+    }).join(" ");
+    var last = points.split(" ").pop().split(",");
+    return '<svg class="spark '+escapeText(tone)+'" viewBox="0 0 220 40" preserveAspectRatio="none" aria-hidden="true"><path class="gridline" d="M0 34H220 M0 20H220 M0 6H220"/><polyline points="'+points+'"/><circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.7"/></svg>';
+  }
+
+  function renderTrends(items) {
+    document.getElementById("trends").innerHTML = items.map(function (item) {
+      return '<div class="trend-row"><div class="trend-name"><strong>'+escapeText(item.name)+'</strong><span>'+escapeText(item.note)+'</span></div><div class="trend-current">'+escapeText(item.current)+'</div><div class="trend-range">'+escapeText(item.range)+'</div><div>'+spark(item.values, item.tone)+'</div><div class="decision"><b>'+escapeText(item.limit)+'</b><span>'+escapeText(item.action)+'</span></div></div>';
+    }).join("");
+  }
+
+  function renderTimeline(items) {
+    document.getElementById("timeline").innerHTML = items.map(function (item) {
+      return '<div class="event '+escapeText(item.tone)+'"><time>'+escapeText(item.time)+'</time><i class="event-dot" aria-hidden="true"></i><div class="event-copy"><strong>'+escapeText(item.title)+'</strong><span>'+escapeText(item.copy)+'</span></div></div>';
+    }).join("");
+  }
+
+  function renderSources(items) {
+    document.getElementById("sources").innerHTML = items.map(function (item) {
+      return '<div class="source '+escapeText(item.tone)+'"><div class="source-top"><strong>'+escapeText(item.name)+'</strong><span>'+escapeText(item.state)+'</span></div><div class="source-bar"><i style="--width:'+Number(item.width)+'%"></i></div></div>';
+    }).join("");
+  }
+
+  function renderChecks(name) {
+    var groups = checkGroups.map(function (group) {
+      var items = group.items.map(function (item) {
+        var severity = item[1];
+        if (name === "healthy") severity = "pass";
+        if (name === "incident" && ["Required services", "Archive", "Subscription", "Memory model", "Replay time", "Service errors"].indexOf(item[0]) >= 0) severity = "critical";
+        var tone = severity === "critical" ? "bad" : (severity === "warning" || severity === "warming" ? "warn" : "");
+        return '<div class="check-line"><span>'+escapeText(item[0])+'</span><i class="'+tone+'">'+escapeText(severity)+'</i></div>';
+      }).join("");
+      return '<div class="check-group"><h4>'+escapeText(group.title)+'</h4>'+items+'</div>';
+    }).join("");
+    document.getElementById("checks-grid").innerHTML = groups;
+  }
+
+  function selectScenario(name) {
+    var data = scenarios[name];
+    document.body.setAttribute("data-tone", data.tone);
+    bind(data);
+    renderAttention(data.attention);
+    renderMaintenance(data.maintenance);
+    renderDomains(data.domains);
+    renderTrends(data.trends);
+    renderTimeline(data.timeline);
+    renderSources(data.sources);
+    renderChecks(name);
+    document.querySelectorAll("[data-scenario]").forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-scenario") === name ? "true" : "false");
+    });
+  }
+
+  document.querySelectorAll("[data-scenario]").forEach(function (button) {
+    button.addEventListener("click", function () { selectScenario(button.getAttribute("data-scenario")); });
+  });
+  selectScenario("current");
+}());
+</script>
+</body>
+</html>
