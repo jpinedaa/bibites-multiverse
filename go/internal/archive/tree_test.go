@@ -40,6 +40,24 @@ func treeNodes(t *testing.T, view SpeciesTree) map[string]TreeNode {
 	return byKey
 }
 
+func livingTreeNode(t *testing.T, view SpeciesTree, nameKey string) TreeNode {
+	t.Helper()
+	var found *TreeNode
+	for i := range view.Nodes {
+		n := &view.Nodes[i]
+		if n.Alive && n.NameKey == nameKey {
+			if found != nil {
+				t.Fatalf("the view has more than one living lineage instance named %q", nameKey)
+			}
+			found = n
+		}
+	}
+	if found == nil {
+		t.Fatalf("the view has no living lineage instance named %q: %+v", nameKey, view.Nodes)
+	}
+	return *found
+}
+
 // TestTheGenealogyJoinsLivingLineagesAtTheirBranchPoint is the whole derivation
 // on the shape it exists for, and it is the shape the running rig actually has.
 //
@@ -286,15 +304,14 @@ func TestAnIsolatedLivingSpeciesIsDrawnAndLabelled(t *testing.T) {
 		t.Fatalf("ledgerEdges=%d ledgerSpecies=%d; the page states this ratio as the "+
 			"derivation's reach", view.LedgerEdges, view.LedgerSpecies)
 	}
-	// The edge count is a MAINTAINED COUNTER and not a walk, so a correction to a
-	// species' parent must not inflate it: one species, one edge, however many
-	// records name it.
+	// A second parent behind one name is a second lineage instance. The old edge
+	// stays intact and the new instance contributes its own edge.
 	a.mu.Lock()
 	a.observeSpeciesLocked(child(base+9, "Beta", "one", "Other", "ancestor"))
 	a.mu.Unlock()
-	if again := a.SpeciesTreeView(); again.LedgerEdges != 2 {
-		t.Fatalf("ledgerEdges=%d after a correction, want 2 — a replaced parent is not a "+
-			"second edge", again.LedgerEdges)
+	if again := a.SpeciesTreeView(); again.LedgerEdges != 3 || again.SplitNames == 0 {
+		t.Fatalf("ledgerEdges=%d splitNames=%d after a reused name, want 3 and a published split",
+			again.LedgerEdges, again.SplitNames)
 	}
 }
 
@@ -438,8 +455,9 @@ func TestTheRecordsAncestryFloorIsPublishedAndMaintained(t *testing.T) {
 		t.Fatalf("ancestrySinceMs = %d, want %d — a record older than the floor and carrying "+
 			"a parent is the floor", lowered.AncestrySinceMs, base+500)
 	}
-	if byKey := treeNodes(t, lowered); byKey["Gamma two"].Parent != "Beta one" {
-		t.Fatalf("the older record overwrote the newer edge: %+v", byKey["Gamma two"])
+	gamma := livingTreeNode(t, lowered, "Gamma two")
+	if parent := treeNodes(t, lowered)[gamma.Parent]; parent.NameKey != "Beta one" {
+		t.Fatalf("the older record displaced the current lineage instance: %+v", gamma)
 	}
 
 	// ON THE WIRE, because a distinction a client cannot see is not a distinction:
@@ -540,8 +558,9 @@ func TestTheGenealogyIsMaintainedWithoutARescan(t *testing.T) {
 			after.Isolated, after.Roots)
 	}
 	byKey := treeNodes(t, after)
-	if byKey["Gamma two"].Parent != "Alpha nullus" {
-		t.Fatalf("the new edge did not land: %+v", byKey["Gamma two"])
+	gamma := livingTreeNode(t, after, "Gamma two")
+	if byKey[gamma.Parent].NameKey != "Alpha nullus" {
+		t.Fatalf("the new edge did not land: %+v", gamma)
 	}
 	// And a CORRECTION is taken, latest writer wins on the archive's own clock:
 	// a species has one parent species in the game's model, so a second answer
@@ -549,9 +568,11 @@ func TestTheGenealogyIsMaintainedWithoutARescan(t *testing.T) {
 	a.mu.Lock()
 	a.observeSpeciesLocked(child(base+2000, "Gamma", "two", "Beta", "one"))
 	a.mu.Unlock()
-	corrected := treeNodes(t, a.SpeciesTreeView())
-	if corrected["Gamma two"].Parent != "Beta one" {
-		t.Fatalf("a later record did not correct the edge: %+v", corrected["Gamma two"])
+	correctedView := a.SpeciesTreeView()
+	corrected := treeNodes(t, correctedView)
+	gamma = livingTreeNode(t, correctedView, "Gamma two")
+	if corrected[gamma.Parent].NameKey != "Beta one" {
+		t.Fatalf("a later parent claim did not create the current instance: %+v", gamma)
 	}
 	if n := len(a.SpeciesTreeView().Nodes); n != 2 {
 		t.Fatalf("the corrected tree holds %d nodes, want 2: Beta is now Gamma's parent and "+
@@ -595,12 +616,10 @@ func TestTheGenealogySurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestADerivedEdgeCannotLoopTheView is rule 4. The measured ledger holds no cycle
-// across 2 407 species — but the two names an edge is built from are
-// attacker-chosen strings normalized into a key, and "measured clean today" is
-// not an invariant. A view that hung forever on a malformed pair would be a
-// denial of service delivered by a species name.
-func TestADerivedEdgeCannotLoopTheView(t *testing.T) {
+// TestAConflictingNameCannotLoopTheView covers the identity fold and the final
+// walk together. A second parent behind the same name creates a second lineage
+// instance. It does not close an edge back into the first instance.
+func TestAConflictingNameCannotLoopTheView(t *testing.T) {
 	status := contractb.PeerStatus{
 		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
 		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(10, 0,
@@ -626,9 +645,11 @@ func TestADerivedEdgeCannotLoopTheView(t *testing.T) {
 		t.Fatal("SpeciesTreeView did not return on a cyclic derived edge; the guard is the " +
 			"whole reason a derived graph may be walked at all")
 	}
-	if view.CycleGuard == 0 {
-		t.Fatal("the walk met a cycle and did not say so; a guard that fires silently is a " +
-			"guard nobody can trust")
+	if view.CycleGuard != 0 {
+		t.Fatalf("the lineage-instance fold left %d cycle guard hit(s), want none", view.CycleGuard)
+	}
+	if view.SplitNames == 0 {
+		t.Fatal("the conflicting name was not published as separate lineage instances")
 	}
 	// The self-parent never became an edge at all.
 	a.mu.Lock()
@@ -904,17 +925,17 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 	a.mu.Unlock()
 
 	view := a.SpeciesTreeView()
-	byKey := treeNodes(t, view)
+	treeNodes(t, view)
 
 	// The rows, in the order the renderer lays them out: DFS pre-order, busiest
 	// branch first. The array index IS the row.
-	want := []string{"Ghost none", "Alpha nullus", "Beta one", "Gamma two", "Delta four"}
+	want := []string{"Alpha nullus", "Beta one", "Gamma two", "Delta four"}
 	if len(view.Nodes) != len(want) {
 		t.Fatalf("the view holds %d rows, want %d: %+v", len(view.Nodes), len(want), view.Nodes)
 	}
 	for i, key := range want {
-		if view.Nodes[i].Key != key {
-			t.Fatalf("row %d is %q, want %q — the row order is the layout", i, view.Nodes[i].Key, key)
+		if view.Nodes[i].NameKey != key {
+			t.Fatalf("row %d is %q, want %q — the row order is the layout", i, view.Nodes[i].NameKey, key)
 		}
 	}
 
@@ -925,32 +946,26 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 	}{
 		// A living species: from its first recorded crossing, and NO right-hand
 		// end.
-		{"Beta one", base + 1000, 0, false},
+		{"Beta one", base + 5000, 0, false},
 		{"Gamma two", base + 6000, 0, false},
 		{"Delta four", base + 7000, 0, false},
 		// Extinct: first crossing to last, and it stops there.
-		{"Alpha nullus", base + 2000, base + 4000, false},
-		// Never crossed: its earliest dated descendant, and a point rather than a
-		// span, because the record dates nothing else about it.
-		{"Ghost none", base + 2000, base + 2000, true},
+		{"Alpha nullus", base + 4000, base + 4000, false},
 	} {
-		n := byKey[tc.key]
+		n := TreeNode{}
+		for _, candidate := range view.Nodes {
+			if candidate.NameKey == tc.key {
+				n = candidate
+				break
+			}
+		}
 		if n.SpanFromMs != tc.from || n.SpanToMs != tc.to || n.SpanDerived != tc.derived {
 			t.Fatalf("%s spans %d..%d (derived %v), want %d..%d (derived %v)",
 				tc.key, n.SpanFromMs, n.SpanToMs, n.SpanDerived, tc.from, tc.to, tc.derived)
 		}
 	}
 
-	// THE JOIN IS THE CHILD'S OWN START. A parent edge drops at the instant the
-	// record first says the child exists, which is the one x-coordinate on the
-	// drawing that means something — and the page reads it off the child rather
-	// than being told a third number.
-	if byKey["Beta one"].SpanFromMs >= byKey["Alpha nullus"].SpanFromMs {
-		t.Fatal("the fixture no longer has a child whose record predates its parent's; that " +
-			"shape is the reason nothing here is clamped")
-	}
-
-	// THE AXIS. It starts at the OLDEST DRAWN BAR — Beta's, at base+1000 — and ends
+	// THE AXIS. It starts at the OLDEST DRAWN BAR — Alpha's current instance — and ends
 	// now. The record's ancestry floor is half a second older, carried by a species
 	// this picture does not draw, and it does NOT pull the edge back with it: that
 	// clamp existed so the floor could be drawn as a boundary, and it paid for the
@@ -958,10 +973,10 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 	if view.AncestrySinceMs != base+500 {
 		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base+500)
 	}
-	if view.SpanStartMs != base+1000 {
+	if view.SpanStartMs != base+4000 {
 		t.Fatalf("spanStartMs = %d, want the oldest drawn bar at %d — the axis fits the record "+
 			"it draws, and the floor is a caption at the margin rather than empty pixels inside "+
-			"it", view.SpanStartMs, base+1000)
+			"it", view.SpanStartMs, base+4000)
 	}
 	if !(view.AncestrySinceMs < view.SpanStartMs) {
 		t.Fatal("the fixture no longer has a floor older than every drawn bar, which is the " +
@@ -984,9 +999,8 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 	if served.SpanStartMs != view.SpanStartMs || served.SpanEndMs == 0 {
 		t.Fatalf("the axis did not survive the wire: %d..%d", served.SpanStartMs, served.SpanEndMs)
 	}
-	if treeNodes(t, served)["Ghost none"].SpanDerived != true {
-		t.Fatal("the derived flag did not survive the wire; without it the page would draw an " +
-			"inference as a reading")
+	if delta := livingTreeNode(t, served, "Delta four"); delta.AncestryDepth != 1 {
+		t.Fatal("the collapsed parent evidence did not survive the wire")
 	}
 }
 

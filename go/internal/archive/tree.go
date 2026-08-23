@@ -35,19 +35,20 @@ package archive
 // computed. B10 records it. species.go has kept it per species since the tab
 // existed and SHOWED it, one generation deep, as a label.
 //
-// THIS FILE ADDS EXACTLY ONE IDEA: one generation per record, chained. If B's
-// records name A as its parent and C's name B as its, then A → B → C is what
-// the record says, and no step of it was resolved, merged or inferred here. The
-// depth is not theoretical — the running rig's living species sit 39 to 40
-// generations below a common ancestor, and every link of that is a crossing the
-// ledger holds.
+// THIS FILE CHAINS ONE GENERATION PER RECORD. The archive first assigns each
+// crossing to an immutable lineage instance. A lineage instance is a species
+// name on one recorded parent path, not the name by itself. If a later crossing
+// reuses that name on another parent path, it creates another instance and does
+// not rewrite the earlier edge. World bindings, crossing order and the parent
+// names in the record select the path; species_lineage.go owns that fold.
 //
 // WHAT IS STILL NOT A RESOLUTION, said once because §16 A31 is emphatic and
 // right. The archive does not resolve a name against any registry; it cannot,
 // because the registry is inside a game process. An edge here is a claim about
 // WHAT THE RECORD SAYS, which is the only kind of claim this archive ever
-// makes. Two worlds that spell one species differently are one node, under the
-// A34 comparison key, for the reason rule 2 of species.go gives.
+// makes. Two worlds that spell one lineage differently share its A34 comparison
+// key. The same comparison key can label separate nodes when the record places
+// that name in separate families.
 //
 // THE PRUNING, AND WHY IT IS THE WHOLE POINT. The full historical tree is 2 400
 // species on the running rig, almost all of them extinct, and drawing it would
@@ -72,12 +73,12 @@ package archive
 //
 // FOUR RULES, each a decision this file records:
 //
-//  1. NO SCAN, EVER, AND NO NEW STATE THAT GROWS WITH THE RECORD. The edge is
-//     one string per species, set by the same observeSpeciesLocked the tab has
-//     always used — one call site for the replay, one for the live path, no
-//     third view of the same fact (species.go rule 1). The state stays
-//     O(species); the streamed replay holds no record after it has folded it.
-//     This file reads the aggregate and never reads the ledger.
+//  1. NO SCAN, EVER, AND NO UNBOUNDED STATE. The lineage fold runs in the same
+//     observeSpeciesLocked call the tab has always used: one call site for the
+//     replay and one for the live path. It keeps at most speciesLineageMax
+//     immutable instances and publishes LineageOverflow if it refuses more.
+//     The streamed replay holds no record after it folds it. This file reads
+//     the aggregate and never reads the ledger.
 //
 //     IT DOES TOUCH ONE FILE, ONCE PER GENOME HASH, and the exception is worth
 //     naming because rule 1 used to say "no disk at all". The brain shape drawn
@@ -117,15 +118,16 @@ package archive
 //     because the alternative a reader reaches for otherwise is an invented
 //     edge down to the game's first species — and this file fabricates nothing.
 //
-//  4. A DERIVED EDGE IS GUARDED. The measured ledger holds no cycle and no
-//     self-parent across 2 407 species, but the two names an edge is built from
-//     are attacker-chosen strings normalized into a key, and "measured clean
-//     today" is not an invariant. Every walk carries a visited set and a hard
-//     depth cap, every node set a hard bound, and what the guards caught is
-//     PUBLISHED rather than swallowed.
+//  4. A DERIVED EDGE IS GUARDED. Name reuse produced cycles in the old mutable
+//     name graph, and the two names in each claim are attacker-chosen strings.
+//     The lineage fold refuses an edge that would close a cycle and separates
+//     the later name occurrence. Every later walk also has a visited set and a
+//     hard depth cap. Every node set has a hard bound. The view publishes every
+//     guard or capacity hit.
 
 import (
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -149,9 +151,13 @@ const (
 // TreeNode is one node of the reduced genealogy: a living species, or an
 // ancestor kept because living lines part at it.
 type TreeNode struct {
-	// Key is the A34-normalized comparison key, and it is the node's id: Parent
-	// and SpeciesTree.Roots hold keys.
+	// Key is the immutable lineage-instance id. Parent and SpeciesTree.Roots hold
+	// these ids. The first instance of a name can use its NameKey for stability.
 	Key string `json:"key"`
+	// NameKey is the A34-normalized portable name. Key identifies one recorded
+	// lineage instance. They differ only when the same name occurs in more than
+	// one recorded family.
+	NameKey string `json:"nameKey"`
 	// Name is the raw spelling to display, and NameFrom says which side it came
 	// from — which §16 B12 requires of anything that joins these two sources,
 	// because the census's copy is raw (A36) and the ledger's is normalized at
@@ -250,6 +256,11 @@ type TreeNode struct {
 	//	thing the record does know.
 	AncestryKnown bool `json:"ancestryKnown"`
 	AncestryDepth int  `json:"ancestryDepth"`
+	// IdentitySplit says this name occurs in more than one lineage instance.
+	// AncestryUnresolved says the record cannot select a parent instance.
+	IdentitySplit      bool `json:"identitySplit,omitempty"`
+	NameInstances      int  `json:"nameInstances,omitempty"`
+	AncestryUnresolved bool `json:"ancestryUnresolved,omitempty"`
 
 	// The ledger's annotation, the same numbers the index carries, for whichever
 	// nodes have them. An ancestor that never crossed a lane has zeroes here and
@@ -345,10 +356,11 @@ type SpeciesTree struct {
 	CensuslessSlots int   `json:"censuslessSlots"`
 	TruncatedSlots  int   `json:"truncatedSlots"`
 
-	// Alive is how many living species the census offered as leaves. Connected
-	// is how many of them the record joins to at least one other; Isolated is
-	// the rest, and Unrecorded is the subset of those for which the record holds
-	// no ancestry at all. THESE ARE PUBLISHED SEPARATELY AND THAT IS THE POINT:
+	// Alive is how many living lineage rows the census offered as leaves. One
+	// census name can split into several rows when worlds bind it to separate
+	// instances. Connected is how many rows the record joins to at least one
+	// other; Isolated is the rest, and Unrecorded is the subset for which the
+	// record holds no ancestry at all. THESE ARE PUBLISHED SEPARATELY AND THAT IS THE POINT:
 	// the derivation's limit is a number, not a disclaimer, and a reader can see
 	// exactly how much of the map it covers and why the rest is out.
 	Alive      int `json:"alive"`
@@ -365,12 +377,17 @@ type SpeciesTree struct {
 	Ancestors int `json:"ancestors"`
 	Collapsed int `json:"collapsed"`
 
-	// LedgerSpecies is every species the crossing record holds and LedgerEdges
-	// how many of those carry a parent name at all. The ratio is the honest
-	// answer to "how much ancestry does this archive have", and it is a much
-	// bigger tree than the one below — because below is only what is alive.
+	// LedgerSpecies is every normalized species name the crossing record holds.
+	// LedgerEdges is the number of lineage instances with an immutable parent.
+	// The lineage instance graph is much bigger than the reduced tree below,
+	// because the reduced tree contains only the branches that are alive.
 	LedgerSpecies int `json:"ledgerSpecies"`
 	LedgerEdges   int `json:"ledgerEdges"`
+	// LineageInstances counts immutable ancestry nodes. SplitNames counts
+	// normalized names that occur in more than one such node.
+	LineageInstances int `json:"lineageInstances"`
+	SplitNames       int `json:"splitNames,omitempty"`
+	Unresolved       int `json:"unresolved,omitempty"`
 	// AncestrySinceMs is the derivation's FLOOR: the recordedAt of the earliest
 	// crossing this archive holds that named a parent species at all
 	// (species.go's edgeFirstMs). It is the other half of a root's badge — the
@@ -428,6 +445,9 @@ type SpeciesTree struct {
 	// counted more than once. It is carried here because THIS VIEW IS THE SPECIES
 	// LIST NOW and a truncated aggregate a reader cannot see is a wrong answer.
 	LedgerOverflow int `json:"ledgerOverflow,omitempty"`
+	// LineageOverflow counts refused instance insertions after speciesLineageMax.
+	// The tree remains bounded and publishes the loss.
+	LineageOverflow int `json:"lineageOverflow,omitempty"`
 	// LedgerRecords is how many records the whole ledger holds, the same number
 	// the flat index published.
 	LedgerRecords int `json:"ledgerRecords"`
@@ -450,10 +470,14 @@ type SpeciesTree struct {
 
 // treeFacts is what one walk copies out from under the lock about one node.
 type treeFacts struct {
-	crossings int
-	firstMs   int64
-	lastMs    int64
-	genomes   int
+	crossings     int
+	firstMs       int64
+	lastMs        int64
+	genomes       int
+	nameKey       string
+	nameInstances int
+	unresolved    bool
+	recent        []SpeciesCrossing
 	// raw is a spelling for a node the census does not name: the one its
 	// descendants' records carried. "" when only the census names it.
 	raw string
@@ -465,6 +489,13 @@ type treeFacts struct {
 	parent     string
 	genomeHash string
 	genomeAtMs int64
+}
+
+type treeLiving struct {
+	row           SpeciesRow
+	nameKey       string
+	unresolved    bool
+	nameInstances int
 }
 
 // SpeciesTreeView builds the reduced genealogy. It takes the archive's lock
@@ -501,7 +532,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		LedgerSpecies:   idx.LedgerSpecies,
 		LedgerOverflow:  idx.LedgerOverflow,
 		LedgerRecords:   idx.LedgerRecords,
-		Alive:           len(idx.Species),
+		Alive:           0,
 		SpanEndMs:       nowMs,
 		Roots:           []string{},
 		Nodes:           []TreeNode{},
@@ -520,17 +551,6 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		}
 	}
 
-	// aliveOrder is the index's own order — population descending, key ascending
-	// — which becomes the tie-break for everything below, so the drawn tree is
-	// stable between polls.
-	aliveOrder := make([]string, 0, len(idx.Species))
-	aliveRow := make(map[string]*SpeciesRow, len(idx.Species))
-	for i := range idx.Species {
-		row := &idx.Species[i]
-		aliveOrder = append(aliveOrder, row.Key)
-		aliveRow[row.Key] = row
-	}
-
 	// ---- the walk, under the lock, as a copy.
 	//
 	// parentOf is the FULL graph the living set reaches, before any reduction:
@@ -538,12 +558,77 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 	// A·treeWalkMax and is thrown away at the end of this function.
 	parentOf := map[string]string{}
 	facts := map[string]*treeFacts{}
+	aliveOrder := make([]string, 0, len(idx.Species))
+	aliveRow := make(map[string]*treeLiving, len(idx.Species))
 	a.mu.Lock()
 	out.LedgerSpecies = len(a.species.byKey)
+	out.LineageInstances = len(a.species.lineage.byID)
+	out.SplitNames = a.species.lineage.splitNames()
+	out.LineageOverflow = a.species.lineage.overflow
 	// All three are maintained counters, not walks: nothing in this function is
 	// proportional to the size of the aggregate, let alone to the ledger.
-	out.LedgerEdges = a.species.edges
+	out.LedgerEdges = a.species.lineage.edges
 	out.AncestrySinceMs = a.species.edgeFirstMs
+	// Bind every live census row to the newest lineage instance recorded in each
+	// world. Worlds that agree stay one row. Worlds that name separate instances
+	// become separate rows with the same display name.
+	for i := range idx.Species {
+		source := &idx.Species[i]
+		groupOrder := []string{}
+		groups := map[string]*treeLiving{}
+		for _, world := range source.Worlds {
+			inst := a.species.lineage.bound(world.Slot, source.Key)
+			if inst == nil {
+				inst = a.species.lineage.unique(source.Key)
+			}
+			key := source.Key
+			unresolved := false
+			if inst != nil {
+				key = inst.id
+				unresolved = inst.conflict || (!inst.parentKnown && inst.placeholder)
+			} else if len(a.species.lineage.byName[source.Key]) > 1 {
+				key = lineageDigest("live-unresolved", source.Key, strconv.Itoa(world.Slot))
+				unresolved = true
+			} else if a.species.lineage.overflow > 0 && a.species.byKey[source.Key] != nil {
+				// The name aggregate proves this species crossed. If no lineage
+				// instance exists after a lineage-capacity refusal, that is an
+				// unresolved identity and not an absence of ancestry evidence.
+				unresolved = true
+			}
+			living := groups[key]
+			if living == nil {
+				row := *source
+				row.Key = key
+				row.Population, row.Eggs = 0, 0
+				row.Worlds = []SpeciesWorld{}
+				row.Crossings, row.FirstMs, row.LastMs = 0, 0, 0
+				row.LastAgeMs, row.Genomes, row.GenomesAtLeast = nil, 0, false
+				row.Parent, row.Recent = "", nil
+				living = &treeLiving{row: row, nameKey: source.Key,
+					unresolved:    unresolved,
+					nameInstances: len(a.species.lineage.byName[source.Key])}
+				groups[key] = living
+				groupOrder = append(groupOrder, key)
+			}
+			living.row.Population += world.Bibites
+			living.row.Eggs += world.Eggs
+			living.row.Worlds = append(living.row.Worlds, world)
+		}
+		for _, key := range groupOrder {
+			living := groups[key]
+			living.row.Endemic = len(living.row.Worlds) == 1
+			living.row.Everywhere = idx.ReportingSlots >= 2 &&
+				len(living.row.Worlds) == idx.ReportingSlots
+			living.row.SeedStock = excludedWhereverAlive(
+				living.row.Worlds, living.row.ExcludedBy)
+			aliveOrder = append(aliveOrder, key)
+			aliveRow[key] = living
+			if living.unresolved {
+				out.Unresolved++
+			}
+		}
+	}
+	out.Alive = len(aliveOrder)
 	for _, key := range aliveOrder {
 		// visited is PER WALK and is rule 4's real guard: a cycle among extinct
 		// ancestors is met on the second visit and the walk stops there, keeping
@@ -552,7 +637,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		visited := map[string]bool{key: true}
 		cur, depth := key, 0
 		for {
-			e := a.species.byKey[cur]
+			e := a.species.lineage.byID[cur]
 			if e == nil {
 				break
 			}
@@ -568,10 +653,22 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 				f = &treeFacts{}
 				facts[cur] = f
 			}
-			f.crossings, f.firstMs, f.lastMs, f.genomes =
-				e.crossings, e.firstMs, e.lastMs, len(e.genomes)
+			f.crossings, f.firstMs, f.lastMs = e.crossings, e.firstMs, e.lastMs
+			if byName := a.species.byKey[e.nameKey]; byName != nil &&
+				len(a.species.lineage.byName[e.nameKey]) == 1 {
+				// The fingerprint set is grouped by portable name. Do not attach
+				// its combined count to one of several separate instances.
+				f.genomes = len(byName.genomes)
+			}
+			f.raw, f.nameKey = e.name, e.nameKey
+			f.nameInstances = len(a.species.lineage.byName[e.nameKey])
+			f.unresolved = e.conflict || (!e.parentKnown && e.placeholder)
+			f.recent = append([]SpeciesCrossing(nil), e.recent...)
 			f.parent, f.genomeHash, f.genomeAtMs = e.parent, e.genomeHash, e.genomeAtMs
-			p := e.parentKey
+			if !e.parentKnown {
+				break
+			}
+			p := e.parentID
 			if p == "" {
 				break
 			}
@@ -580,10 +677,19 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			// First writer wins, and the walks run in the index's order, so the
 			// spelling shown is the one the most populous living descendant's
 			// record carried.
+			parentRaw := e.parent
+			parentNameKey := e.parentKey
+			if parentInst := a.species.lineage.byID[p]; parentInst != nil {
+				if parentInst.name != "" {
+					parentRaw = parentInst.name
+				}
+				parentNameKey = parentInst.nameKey
+			}
 			if facts[p] == nil {
-				facts[p] = &treeFacts{raw: e.parent}
+				facts[p] = &treeFacts{raw: parentRaw, nameKey: parentNameKey,
+					nameInstances: len(a.species.lineage.byName[parentNameKey])}
 			} else if facts[p].raw == "" {
-				facts[p].raw = e.parent
+				facts[p].raw = parentRaw
 			}
 			if visited[p] {
 				out.CycleGuard++
@@ -682,8 +788,19 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 	for _, k := range ordered {
 		f := facts[k]
 		n := TreeNode{Key: k}
-		if row := aliveRow[k]; row != nil {
+		if f != nil {
+			n.NameKey = f.nameKey
+			n.IdentitySplit = f.nameInstances > 1
+			n.NameInstances = f.nameInstances
+			n.AncestryUnresolved = f.unresolved
+		}
+		if living := aliveRow[k]; living != nil {
+			row := &living.row
 			n.Alive = true
+			n.NameKey = living.nameKey
+			n.IdentitySplit = living.nameInstances > 1
+			n.NameInstances = living.nameInstances
+			n.AncestryUnresolved = living.unresolved || n.AncestryUnresolved
 			// A LIVING NODE'S LABEL IS THE CENSUS'S, raw, exactly as the index
 			// shows it — so a species reads the same on every view.
 			n.Name, n.NameFrom = row.Name, "census"
@@ -697,10 +814,12 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			// node carries its answer. An ancestor is never marked, because it is
 			// alive nowhere and the rule is about where a species lives.
 			n.SeedStock = row.SeedStock
-			n.Recent = row.Recent
-			n.ParentName = row.Parent
-			n.Crossings, n.FirstMs, n.LastMs = row.Crossings, row.FirstMs, row.LastMs
-			n.Genomes = row.Genomes
+			if f != nil {
+				n.Recent = append([]SpeciesCrossing(nil), f.recent...)
+				n.ParentName = f.parent
+				n.Crossings, n.FirstMs, n.LastMs = f.crossings, f.firstMs, f.lastMs
+				n.Genomes = f.genomes
+			}
 		} else {
 			// A NODE NO CENSUS NAMES. Its label is what its descendants' records
 			// carried, and NameFrom says so; when even that is missing the
@@ -713,6 +832,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 				n.Name = k
 			}
 			if f != nil {
+				n.NameKey = f.nameKey
 				n.Crossings, n.FirstMs, n.LastMs = f.crossings, f.firstMs, f.lastMs
 				n.Genomes = f.genomes
 				n.ParentName = f.parent
@@ -947,10 +1067,20 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		if f := facts[out.Nodes[i].Key]; f != nil {
 			hash, atMs = f.genomeHash, f.genomeAtMs
 		}
+		if out.Nodes[i].IdentitySplit {
+			// The durable brain measurement is grouped by portable name and can
+			// belong to another instance. A split instance uses only its own
+			// newest hash while that blob remains available.
+			if b, ok := a.brainFor(hash); ok {
+				out.Nodes[i].Neurons, out.Nodes[i].Synapses = b.Neurons, b.Synapses
+				out.Nodes[i].BrainAtMs = atMs
+			}
+			continue
+		}
 		// PER SPECIES, NOT PER HASH. A species whose latest hash is still being
 		// fetched keeps the newest shape this archive has ever read of it, rather
 		// than losing its ring until the blob lands — see brainForSpecies.
-		if b, at, ok := a.brainForSpecies(out.Nodes[i].Key, hash, atMs); ok {
+		if b, at, ok := a.brainForSpecies(out.Nodes[i].NameKey, hash, atMs); ok {
 			out.Nodes[i].Neurons, out.Nodes[i].Synapses = b.Neurons, b.Synapses
 			out.Nodes[i].BrainAtMs = at
 		}
@@ -967,7 +1097,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		}
 		if n.Isolated {
 			out.Isolated++
-			if !n.AncestryKnown {
+			if !n.AncestryKnown && !n.AncestryUnresolved {
 				out.Unrecorded++
 			}
 		} else {

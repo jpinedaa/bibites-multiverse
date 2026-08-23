@@ -93,6 +93,7 @@ package archive
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,6 +104,9 @@ import (
 	"multiverse/internal/contractb"
 	"multiverse/internal/fsutil"
 )
+
+var errLineageRollupRebuild = errors.New(
+	"archive: roll-up format 2 requires restart-archive.sh --rebuild-rollup before format 3 can start")
 
 const (
 	rollupSidecarName = "rollup.jsonl"
@@ -115,7 +119,11 @@ const (
 	// carries no gap queue at all, so reading one as if it did would silently
 	// empty the fetch queue — which is exactly the shape of failure the version
 	// byte exists to refuse.
-	rollupVersion = 2
+	// 3 adds the lineage-instance fold. Version 2 stored one mutable parent per
+	// normalized name. A reused name could overwrite an older edge and create a
+	// derived ancestry cycle, so version 2 cannot be upgraded without replaying
+	// the ordered migration record.
+	rollupVersion = 3
 	// rollupSaveInterval is how often the fold is flushed, on the same tick loop
 	// the brain sidecar rides.
 	//
@@ -172,6 +180,7 @@ const (
 // are the term the compaction threshold actually tracks.
 const (
 	rollupLiveSpeciesBytes int64 = 704
+	rollupLiveLineageBytes int64 = 512
 	rollupLiveGenomeBytes  int64 = 24
 	rollupLiveLaneBytes    int64 = 128
 	rollupLiveHopBytes     int64 = 15
@@ -197,6 +206,7 @@ const (
 //	     starts. Written on every save, last-writer-wins.
 //	"sp" one species' scalar aggregate, last-writer-wins on the key
 //	"sg" one species' NEW genome fingerprints since the last save, ADDITIVE
+//	"si" one immutable lineage instance, last-writer-wins on the instance id
 //	"sl" the species ledger's own globals, last-writer-wins
 //	"ln" one directed lane's counters, last-writer-wins on (from, to, edge)
 //	"rc" the record counters: total and per type, last-writer-wins
@@ -260,6 +270,17 @@ type rollupLine struct {
 	GenomeHash   string            `json:"gh,omitempty"`
 	GenomeAtMs   int64             `json:"ga,omitempty"`
 
+	// Lineage instance ("si"). K is the instance id. NameKey is the portable
+	// normalized name. ParentID is the immutable parent instance. ParentKnown
+	// distinguishes a recorded root from an unresolved parent placeholder.
+	NameKey         string        `json:"nk,omitempty"`
+	Name            string        `json:"nm,omitempty"`
+	ParentID        string        `json:"pi,omitempty"`
+	ParentKnown     bool          `json:"pkn,omitempty"`
+	Placeholder     bool          `json:"ph,omitempty"`
+	LineageConflict bool          `json:"cf,omitempty"`
+	SeenAt          map[int]int64 `json:"wa,omitempty"`
+
 	// Genome fingerprints ("sg") and brain dedup fingerprints ("bd"). BOTH ARE
 	// DECIMAL STRINGS, not JSON numbers: a 64-bit fingerprint above 2^53 does not
 	// survive a reader that parses numbers as doubles, and this file is meant to
@@ -267,9 +288,10 @@ type rollupLine struct {
 	FP []string `json:"fp,omitempty"`
 
 	// Species ledger globals ("sl").
-	Overflow    int   `json:"ov,omitempty"`
-	Edges       int   `json:"ed,omitempty"`
-	EdgeFirstMs int64 `json:"ef,omitempty"`
+	Overflow        int   `json:"ov,omitempty"`
+	LineageOverflow int   `json:"lo,omitempty"`
+	Edges           int   `json:"ed,omitempty"`
+	EdgeFirstMs     int64 `json:"ef,omitempty"`
 
 	// Lane ("ln").
 	From        int     `json:"fr,omitempty"`
@@ -367,6 +389,24 @@ type rollupSpecies struct {
 	genomeAtMs   int64
 }
 
+type rollupLineage struct {
+	nameKey     string
+	name        string
+	parentKnown bool
+	parentID    string
+	parentKey   string
+	parent      string
+	placeholder bool
+	conflict    bool
+	crossings   int
+	firstMs     int64
+	lastMs      int64
+	recent      []SpeciesCrossing
+	genomeHash  string
+	genomeAtMs  int64
+	seenAt      map[int]int64
+}
+
 type rollupLane struct {
 	total   int
 	firstAt int64
@@ -405,11 +445,13 @@ type rollupState struct {
 	gapsExpired    int
 	dupRefused     int
 
-	species     map[string]*rollupSpecies
-	genomes     map[string][]uint64
-	overflow    int
-	edges       int
-	edgeFirstMs int64
+	species         map[string]*rollupSpecies
+	genomes         map[string][]uint64
+	lineages        map[string]*rollupLineage
+	overflow        int
+	lineageOverflow int
+	edges           int
+	edgeFirstMs     int64
 
 	lanes map[lanePair]*rollupLane
 
@@ -431,15 +473,16 @@ type rollupState struct {
 
 func newRollupState() *rollupState {
 	return &rollupState{
-		species: map[string]*rollupSpecies{},
-		genomes: map[string][]uint64{},
-		lanes:   map[lanePair]*rollupLane{},
-		byType:  map[string]int{},
-		byPeer:  map[string]int{},
-		seen:    map[int64]int{},
-		dedup:   map[int64][]uint64{},
-		gaps:    map[string]*rollupGap{},
-		index:   map[int64]LedgerPos{},
+		species:  map[string]*rollupSpecies{},
+		genomes:  map[string][]uint64{},
+		lineages: map[string]*rollupLineage{},
+		lanes:    map[lanePair]*rollupLane{},
+		byType:   map[string]int{},
+		byPeer:   map[string]int{},
+		seen:     map[int64]int{},
+		dedup:    map[int64][]uint64{},
+		gaps:     map[string]*rollupGap{},
+		index:    map[int64]LedgerPos{},
 	}
 }
 
@@ -485,7 +528,9 @@ func (st *rollupState) lineAtOrBefore(atMs int64) (LedgerPos, bool) {
 // loadRollupState reads the sidecar. It returns (nil, true) when there is no
 // file at all — a new archive, or the first run after this feature existed —
 // and (nil, false) when a file exists and cannot be used, which is a LOSS: the
-// caller keeps the bytes beside a fresh file and rebuilds by a full replay.
+// caller keeps the bytes beside a fresh file and rebuilds by a full replay. A
+// recognized format-2 predecessor returns errLineageRollupRebuild instead. Its
+// missing lineage identity requires the recorded raw-completeness operation.
 func loadRollupState(path string) (*rollupState, bool, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -504,6 +549,14 @@ func loadRollupState(path string) (*rollupState, bool, error) {
 	var head rollupLine
 	if json.Unmarshal(lines[0], &head) != nil || head.R != "h" {
 		return nil, false, nil
+	}
+	if head.V == 2 && rollupVersion == 3 {
+		// Version 2 has a valid durable aggregate, but it has only one mutable
+		// parent per name. An ordinary fallback replay can start after raw
+		// segments retire and silently lose the ordered evidence needed for the
+		// instance graph. The recorded rebuild operation proves raw completeness
+		// and moves the old sidecar before it starts this binary.
+		return nil, false, errLineageRollupRebuild
 	}
 	if head.V != rollupVersion || head.BucketMs != BrainBucketMs {
 		// A DIFFERENT BRAIN BUCKET WIDTH IS A DIFFERENT FILE, for brainsave.go's
@@ -581,8 +634,27 @@ func (st *rollupState) apply(rec rollupLine) {
 			return
 		}
 		st.genomes[rec.K] = append(st.genomes[rec.K], parseFingerprints(rec.FP)...)
+	case "si":
+		if rec.K == "" || rec.NameKey == "" {
+			return
+		}
+		seen := map[int]int64{}
+		for slot, at := range rec.SeenAt {
+			seen[slot] = at
+		}
+		st.lineages[rec.K] = &rollupLineage{
+			nameKey: rec.NameKey, name: rec.Name,
+			parentKnown: rec.ParentKnown, parentID: rec.ParentID,
+			parentKey: rec.ParentKey, parent: rec.Parent,
+			placeholder: rec.Placeholder, conflict: rec.LineageConflict,
+			crossings: rec.Crossings, firstMs: rec.SpFirstMs, lastMs: rec.SpLastMs,
+			recent:     append([]SpeciesCrossing(nil), rec.Recent...),
+			genomeHash: rec.GenomeHash, genomeAtMs: rec.GenomeAtMs,
+			seenAt: seen,
+		}
 	case "sl":
-		st.overflow, st.edges, st.edgeFirstMs = rec.Overflow, rec.Edges, rec.EdgeFirstMs
+		st.overflow, st.lineageOverflow = rec.Overflow, rec.LineageOverflow
+		st.edges, st.edgeFirstMs = rec.Edges, rec.EdgeFirstMs
 	case "ln":
 		st.lanes[lanePair{from: rec.From, to: rec.To, edge: rec.Edge}] = &rollupLane{
 			total: rec.Total, firstAt: rec.LaneFirstMs, lastAt: rec.LaneLastMs,
@@ -683,6 +755,25 @@ func (a *Archive) applyRollupState(st *rollupState) {
 		}
 		a.species.byKey[key] = e
 	}
+	a.species.lineage = newSpeciesLineageLedger()
+	for id, li := range st.lineages {
+		seen := map[int]int64{}
+		for slot, at := range li.seenAt {
+			seen[slot] = at
+		}
+		a.species.lineage.byID[id] = &speciesLineageInstance{
+			id: id, nameKey: li.nameKey, name: li.name,
+			parentKnown: li.parentKnown, parentID: li.parentID,
+			parentKey: li.parentKey, parent: li.parent,
+			placeholder: li.placeholder, conflict: li.conflict,
+			crossings: li.crossings, firstMs: li.firstMs, lastMs: li.lastMs,
+			recent:     append([]SpeciesCrossing(nil), li.recent...),
+			genomeHash: li.genomeHash, genomeAtMs: li.genomeAtMs,
+			seenAt: seen,
+		}
+	}
+	a.species.lineage.overflow = st.lineageOverflow
+	a.species.lineage.rebuildIndexes()
 	a.species.overflow = st.overflow
 	a.species.edges = st.edges
 	a.species.edgeFirstMs = st.edgeFirstMs
@@ -1015,6 +1106,7 @@ func (a *Archive) expireLoadedGapsLocked(now time.Time) (expired, held int) {
 //
 //	species (sp)   observeSpeciesLocked            species.go
 //	genomes (sg)   observeSpeciesLocked            species.go   (new fingerprint only)
+//	lineage (si)   observeSpeciesLocked            species_lineage.go
 //	ledger  (sl)   observeSpeciesLocked            species.go   (overflow/edges/floor)
 //	lanes   (ln)   observeLaneLocked               archive.go
 //	counts  (rc)   countRecordLocked               rollup.go    (all five call sites)
@@ -1028,10 +1120,11 @@ func (a *Archive) expireLoadedGapsLocked(now time.Time) (expired, held int) {
 // they describe; the last two live under brainAgg.mu with theirs, because that
 // aggregate deliberately has its own lock (brainhist.go).
 type rollupDirty struct {
-	species map[string]bool
-	genomes map[string][]uint64
-	lanes   map[lanePair]bool
-	index   map[int64]bool
+	species  map[string]bool
+	genomes  map[string][]uint64
+	lineages map[string]bool
+	lanes    map[lanePair]bool
+	index    map[int64]bool
 	// gapsNew and gapsGone are the queue's two halves, and they CANCEL: a gap
 	// that arrived and was served between two saves appears in both and is
 	// written in neither, which is the ordinary case on a healthy map and is why
@@ -1050,6 +1143,7 @@ func newRollupDirty() rollupDirty {
 	return rollupDirty{
 		species:  map[string]bool{},
 		genomes:  map[string][]uint64{},
+		lineages: map[string]bool{},
 		lanes:    map[lanePair]bool{},
 		index:    map[int64]bool{},
 		gapsNew:  map[string]bool{},
@@ -1059,13 +1153,15 @@ func newRollupDirty() rollupDirty {
 
 func (d *rollupDirty) any() bool {
 	return d.everything || d.ledger || d.counts || d.peers ||
-		len(d.species) > 0 || len(d.genomes) > 0 || len(d.lanes) > 0 ||
+		len(d.species) > 0 || len(d.genomes) > 0 || len(d.lineages) > 0 ||
+		len(d.lanes) > 0 ||
 		len(d.index) > 0 || len(d.gapsNew) > 0 || len(d.gapsGone) > 0
 }
 
 func (d *rollupDirty) clear() {
 	d.species = map[string]bool{}
 	d.genomes = map[string][]uint64{}
+	d.lineages = map[string]bool{}
 	d.lanes = map[lanePair]bool{}
 	d.index = map[int64]bool{}
 	d.gapsNew = map[string]bool{}
@@ -1413,9 +1509,15 @@ func (a *Archive) rollupLines() (lines []rollupLine, live int64, compact bool) {
 			lines = append(lines, rollupLine{R: "sg", K: key, FP: dumpFingerprints(fps)})
 		}
 	}
+	for id := range a.rollupDirty.lineages {
+		if inst := a.species.lineage.byID[id]; inst != nil {
+			lines = append(lines, lineageRollupLine(inst))
+		}
+	}
 	if a.rollupDirty.ledger {
 		lines = append(lines, rollupLine{R: "sl", Overflow: a.species.overflow,
-			Edges: a.species.edges, EdgeFirstMs: a.species.edgeFirstMs})
+			LineageOverflow: a.species.lineage.overflow,
+			Edges:           a.species.edges, EdgeFirstMs: a.species.edgeFirstMs})
 	}
 	for key := range a.rollupDirty.lanes {
 		if l := a.lanes[key]; l != nil {
@@ -1498,8 +1600,12 @@ func (a *Archive) rollupFullState() ([]rollupLine, int64) {
 			lines = append(lines, rollupLine{R: "sg", K: key, FP: dumpFingerprints(fps)})
 		}
 	}
+	for _, inst := range a.species.lineage.byID {
+		lines = append(lines, lineageRollupLine(inst))
+	}
 	lines = append(lines, rollupLine{R: "sl", Overflow: a.species.overflow,
-		Edges: a.species.edges, EdgeFirstMs: a.species.edgeFirstMs})
+		LineageOverflow: a.species.lineage.overflow,
+		Edges:           a.species.edges, EdgeFirstMs: a.species.edgeFirstMs})
 	for key, l := range a.lanes {
 		lines = append(lines, laneRollupLine(key, l))
 	}
@@ -1618,6 +1724,7 @@ func (a *Archive) peersRollupLineLocked() rollupLine {
 
 func (a *Archive) liveBytesLocked() int64 {
 	live := int64(len(a.species.byKey)) * rollupLiveSpeciesBytes
+	live += int64(len(a.species.lineage.byID)) * rollupLiveLineageBytes
 	for _, e := range a.species.byKey {
 		live += int64(len(e.genomes)) * rollupLiveGenomeBytes
 	}
@@ -1648,6 +1755,23 @@ func speciesRollupLine(key string, e *speciesAgg) rollupLine {
 		Recent:       append([]SpeciesCrossing(nil), e.recent...),
 		Parent:       e.parent, ParentKey: e.parentKey, ParentAtMs: e.parentAtMs,
 		GenomeHash: e.genomeHash, GenomeAtMs: e.genomeAtMs,
+	}
+}
+
+func lineageRollupLine(inst *speciesLineageInstance) rollupLine {
+	seen := make(map[int]int64, len(inst.seenAt))
+	for slot, at := range inst.seenAt {
+		seen[slot] = at
+	}
+	return rollupLine{R: "si", K: inst.id,
+		NameKey: inst.nameKey, Name: inst.name,
+		ParentKnown: inst.parentKnown, ParentID: inst.parentID,
+		ParentKey: inst.parentKey, Parent: inst.parent,
+		Placeholder: inst.placeholder, LineageConflict: inst.conflict,
+		Crossings: inst.crossings, SpFirstMs: inst.firstMs, SpLastMs: inst.lastMs,
+		Recent:     append([]SpeciesCrossing(nil), inst.recent...),
+		GenomeHash: inst.genomeHash, GenomeAtMs: inst.genomeAtMs,
+		SeenAt: seen,
 	}
 }
 
