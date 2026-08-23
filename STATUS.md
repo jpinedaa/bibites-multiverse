@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-23 UTC.
 
-Bibites Multiverse `0.3.3` is public. The first announced service period runs from
+Bibites Multiverse `0.3.4` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -58,10 +58,12 @@ The relay refuses a migration before it creates a forwarding record when the bou
 queue is full. It keeps that destination connected.
 
 On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
-healthy, but the mandatory relay-only canary did not meet every gate. Operators therefore withheld
-the cloud-sidecar transaction. The relay correction remains live while the investigation continues.
-Hosted cloud worlds remain on their prior runtime. The current participant release does not include
-the sidecar change.
+healthy, but the mandatory relay-only canary did not meet every gate. Investigation found that the
+affected long-running participants were still using the older sidecar while carrying full durable
+inbound and outbound queues. Release `0.3.4` completes the correction on the participant side: it
+paces both journal-backed payloads and acknowledgements, drains older acknowledgements first, and
+keeps ordinary control traffic responsive. The existing journals remain the custody record and
+must not be cleared.
 
 ### Species genealogy repair
 
@@ -114,7 +116,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.3`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.3) |
+| Release | [`v0.3.4`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.4) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -176,6 +178,11 @@ nothing waits on, which is silent when it fails, and which `MULTIVERSE_NO_UPDATE
 Release `0.3.3` opens the installed graphical launcher after the default Windows setup starts the
 connected game. If Windows cannot open it, the installation stays complete and the world stays
 running. Setup shows the launcher's path for another try.
+Release `0.3.4` fixes migration queues that could appear to block blue portals after a restart or
+traffic burst. The relay paces aggregate migration fan-in per destination, and the participant
+sidecar drains durable acknowledgements and payloads under the published frame budget without
+repeated capacity disconnects. Existing identities, saves, journals, and queued organisms are
+preserved during the update.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
