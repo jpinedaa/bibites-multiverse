@@ -87,6 +87,29 @@ simulation advance faster and it does not erase its durable queue.
 Two exact five-minute cloud closeout intervals kept aggregate migration positive. All six hosted
 sources stayed live and mod-connected. None had every open outbound lane at zero.
 
+### Population-aware portal routing rollout
+
+Release `0.3.6` changes the pre-custody overload path. A live destination that explicitly refuses
+a migration no longer receives the next offer merely because it remains live. The source records
+that refusal durably and continues in the same direction to the next compatible world it has not
+tried. Queue overload and the new population policy both use this custody-safe path; relay queue
+pressure remains a retry to the same destination and is not misclassified as a world refusal.
+
+The population controller ships in `adaptive-shadow`. It measures a per-world capacity estimate
+for ×10 and publishes the limit and open/closed decision, but `enforcing` is false and population
+therefore refuses no organism in this rollout. Fixed and enforcing adaptive modes are available
+for explicit later use. Promotion requires at least 24 hours of stable shadow evidence and the
+other gates in [`docs/population-admission.md`](docs/population-admission.md).
+
+On 2026-08-23, candidate `94a71b2` passed the full uncached Go suite and vet, a release plugin
+build, Windows and Linux cross-build checks, and the three-live-world spillover regression. Five
+Windows worlds and six hosted Linux worlds then activated mod `0.6.8` and the candidate sidecar.
+All eleven retained their reserved slots with mod and relay connected, exposed requested speed and
+non-enforcing shadow state, and reported zero capacity sheds and zero discarded journal bytes.
+The guarded cloud runtime transaction and host verification completed successfully. The race suite
+was not rerun because this WSL image has no CGO compiler; enforcing adaptive mode, forced rollback,
+disk failure, crash replay, and private-map behavior were not exercised in production.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded

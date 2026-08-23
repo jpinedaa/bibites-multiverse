@@ -119,3 +119,7 @@ The enforcement promotion gate is:
   worlds: the first sends east, the second refuses at its fixed population limit, and the third
   spawns the same migration exactly once. The source journal records slot 2 in `refusedSlots` and
   `peer_refused` as the reroute proof.
+- On 2026-08-23, five Windows worlds and six hosted Linux worlds ran the candidate in
+  `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
+  requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds
+  and zero discarded journal bytes. The cloud activation and its host verification completed.

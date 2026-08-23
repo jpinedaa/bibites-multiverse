@@ -326,7 +326,8 @@ the owner's machine rather than on a hosted runner.
 
 Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
 untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is green on `main` today, at mod `0.6.7` recorded on 2026-08-17.
+been staged. It is green for this release at mod `0.6.8`, recorded and exercised on Windows and
+Linux on 2026-08-23.
 
 **Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
 compares three copies of the plugin — the one this tree builds, the one the record names, and the
@@ -742,9 +743,9 @@ was not: the mod had moved past the recorded build, nobody had run that plugin, 
 failed, and the `consistency` job was red on every pull request including the one that introduced
 CI. It was cleared the only way it can be — the four legs under *Building*, applied once to catch
 up: build the plugin, deploy it to a game, run it, then `release/record-tested-build.sh` and paste
-the block. `docs/support-matrix.md` now records mod `0.6.7`; its evidence separates the latest
-sidecar re-attestation from the plugin test that the unchanged plugin identity still rests on, and
-checks A, B and C pass. **What this leaves behind is a standing step rather than a one-off**: the
+the block. That catch-up recorded mod `0.6.7`; its evidence separated the latest sidecar
+re-attestation from the plugin test that the unchanged plugin identity still rested on, and checks
+A, B and C passed. **What this leaves behind is a standing step rather than a one-off**: the
 release machine's own game holds the third copy gate 3b compares, so refresh it with
 `bibites-mod/deploy.sh` whenever the recorded plugin moves — see *Cutting a release*.
 
