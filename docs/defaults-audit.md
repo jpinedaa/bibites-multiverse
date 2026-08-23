@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.4` on **2026-08-23**, against the code and
+strangers. This audit was updated for release `0.3.5` on **2026-08-23**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -39,6 +39,7 @@ facts shape every verdict:
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 | `MULTIVERSE_STARTUP_TIME_SCALE` | The mod | Every world starts at x10 instead of the game's x1 | **PASS** — it is a target the game itself governs down to protect the frame rate, it costs no disk and no network, and a player moves it with the speed slider they already have |
+| `--forward-timeout` | The sidecar | Records an unanswered forwarded organism lost after five wall-clock minutes | **PASS WITH A STATED LOSS** — the deadline bounds a full outbound journal. It does not send or return the organism again |
 | The launcher's update check | The launcher | One anonymous background `GET` per launcher run to the project's own homepage, which can only add a line of text and a button | **PASS** — nothing waits on it, it carries no identity and no version, a failure is silent, and `MULTIVERSE_NO_UPDATE_CHECK` makes no request at all |
 
 A fifth flag belongs beside the first, and this audit adds it rather than leaving it implied:
@@ -306,6 +307,28 @@ game's own x1, on purpose. A value that is not a number in the game's own `0.1`�
 refused with a warning and leaves x1 in place, so a typo cannot pause or stall a world.
 
 **Verdict: PASS.**
+
+## 5b. `--forward-timeout` — unanswered forwarded organisms
+
+**Today.** The default is five wall-clock minutes. `MULTIVERSE_FORWARD_TIMEOUT` or
+`--forward-timeout` can override it. An outbound entry enters `sent` after the sidecar writes it to
+a live relay connection. The destination can already hold the organism at that point.
+
+At the deadline, the sidecar changes the entry to a `lost` tombstone. It increments
+`lostForwardTotal`. It does not send the organism again, and it does not return the organism to its
+origin. A late acknowledgment is good news because it proves that exactly one organism arrived.
+
+**A bare install.** The installer supplies no override, so the sidecar uses five minutes. A
+controlled test filled all 64 outbound journal positions with unanswered `sent` entries. Contract A
+then refused each new export with `JOURNAL_FULL`. At five minutes, all 64 entries became lost and
+export intake reopened. A 24-hour override kept the same intake closed after five minutes.
+
+**The cost.** A slow acknowledgment can arrive after the sidecar records the organism lost. The
+organism does not duplicate because the sidecar sends nothing at the deadline. A longer timeout
+increases the wait and can restore the longer export block that B42 removed.
+
+**Verdict: PASS WITH A STATED LOSS.** Five minutes bounds the local export block. At-most-once
+migration accepts a loss and forbids an automatic resend or return.
 
 ## 6. The launcher's update check
 

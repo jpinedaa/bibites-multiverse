@@ -5,15 +5,13 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-Migration backlogs now drain without repeatedly disconnecting a world at the relay's frame
-limit. The sidecar paces journal-backed migration payloads and durable acknowledgements under the
-limit published by the relay, gives older acknowledgements priority, and keeps ordinary control
-traffic responsive. The relay also paces migration fan-in per destination, so traffic arriving
-from many worlds cannot turn into one destination-side burst.
+Release `@@RELEASE@@` fixes Linux complete-edition upgrades and removals with large install
+records. The Linux `0.3.4` installer sometimes stopped without a useful error while it read that
+record.
 
-These changes address worlds whose portals appeared blocked while their durable inbound and
-outbound queues were full. Queued organisms remain in custody and drain at a bounded rate; the fix
-does not discard or recreate a journal.
+The installer and uninstaller now finish each record lookup and do not end the shell pipe early.
+This prevents exit status `141` during an upgrade or removal. The plugin, sidecar, protocols, and
+supported game builds do not change.
 
 ## Upgrading from an earlier release
 
@@ -22,8 +20,10 @@ does not discard or recreate a journal.
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **Do not clear a full journal.** Its queued migrations are durable custody. After this update,
-  start the world normally and let the queues drain at the bounded rate.
+- **If Linux `0.3.4` stopped during an upgrade, run the `@@RELEASE@@` installer.** Use the same data
+  root. It reuses the existing identity, journal, and managed game copy.
+- **If you want to remove that installation, upgrade it first.** Then run the `@@RELEASE@@`
+  uninstaller. Do not delete the journal or credential because of the old stop.
 
 ## What you need
 

@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-23 UTC.
 
-Bibites Multiverse `0.3.4` is public. The first announced service period runs from
+Bibites Multiverse `0.3.5` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -125,7 +125,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.4`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.4) |
+| Release | [`v0.3.5`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.5) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -192,6 +192,9 @@ traffic burst. The relay paces aggregate migration fan-in per destination, and t
 sidecar drains durable acknowledgements and payloads under the published frame budget without
 repeated capacity disconnects. Existing identities, saves, journals, and queued organisms are
 preserved during the update.
+Release `0.3.5` fixes Linux complete-edition upgrades and removals. The Linux `0.3.4` installer or
+uninstaller sometimes stopped when it read a large install record. Release `0.3.5` changes no game,
+plugin, sidecar, or protocol version.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
