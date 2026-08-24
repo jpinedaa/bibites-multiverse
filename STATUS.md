@@ -180,6 +180,20 @@ bounded hop correlator. Each map cell now shows its fresh effective population l
 gate state. A confirmed spillover stops at the refused boundary with a refusal label, then follows
 a temporary dashed route to the ACK-confirmed world. Standalone rejections still do not animate.
 
+That live-console correction merged as `4ade74e` and passed GitHub checks run `32729843166`.
+A fresh provider snapshot and the service's durable-file backup preceded activation. The guarded
+archive restart replayed in 86 seconds and held the participant gate for 88 seconds; the archive
+subscribed before the gate reopened. The 60-second closeout reported 14 live and five dark slots
+with the relay connected. Installed and running archive/relay hashes matched the staged build, and
+the host verifier passed all 34 checks.
+
+The first post-restart `/api/hops` sample contained 60 confirmed deliveries with an explicit
+receiver-refusal chain. One example went from slot 5 to slot 4 only after slots 6 and 14 refused
+it. This is the evidence the page now renders as stop, refusal, and dashed reroute. At
+`2026-08-24T13:06Z`, slot 9 instead reported `adaptive`, sample count zero, effective limit
+unknown, estimate 10, and enforcement false. Its visible arrivals are therefore correctly marked
+`OPEN · LEARNING`; they are not evidence that a closed enforcing gate was bypassed.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded

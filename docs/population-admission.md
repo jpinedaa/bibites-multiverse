@@ -270,3 +270,11 @@ rollback.
   interval, slot 9 rejected 27 new offers while `/api/hops` reported 148 confirmed deliveries to
   other slots and zero to slot 9. Its `pacedDepth` remained 12, explicitly preserving the older
   accepted backlog rather than treating `CLOSED` as permission to discard custody.
+- The explicit-refusal live-map correction merged as `4ade74e` and passed hosted checks run
+  `32729843166`. A provider snapshot and durable-file backup preceded its guarded production
+  restart. Replay took 86 seconds, the participant gate was raised for 88 seconds, archive
+  subscription preceded reopening, and the 60-second closeout had 14 live and five dark slots.
+  Installed and running hashes matched, and all 34 host checks passed. The first sampled hop feed
+  contained 60 confirmed reroutes with explicit refusal chains, including slot 5 reaching slot 4
+  after slots 6 and 14 refused it. Slot 9 simultaneously published `OPEN · LEARNING` evidence:
+  adaptive mode, zero samples, no effective limit, estimate 10, and enforcement false.
