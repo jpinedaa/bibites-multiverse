@@ -282,12 +282,13 @@ type stubRelay struct {
 	conn     *websocket.Conn
 	ctx      context.Context
 	payloads []contractb.MigrationPayload
+	payload  chan struct{}
 	closeNow int // when >0, close the next connection with this code
 }
 
 func newStubRelay(t *testing.T) *stubRelay {
 	t.Helper()
-	s := &stubRelay{t: t, session: wire.NewUUID()}
+	s := &stubRelay{t: t, session: wire.NewUUID(), payload: make(chan struct{}, 1)}
 	mux := http.NewServeMux()
 	mux.HandleFunc(contractb.ContractBPath, s.serve)
 	s.ts = httptest.NewServer(mux)
@@ -354,6 +355,10 @@ func (s *stubRelay) serve(w http.ResponseWriter, r *http.Request) {
 				s.mu.Lock()
 				s.payloads = append(s.payloads, p)
 				s.mu.Unlock()
+				select {
+				case s.payload <- struct{}{}:
+				default:
+				}
 			}
 		case contractb.TypePing:
 			var ping contractb.Ping

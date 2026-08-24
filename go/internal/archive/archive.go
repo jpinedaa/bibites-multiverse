@@ -828,10 +828,10 @@ func New(cfg Config) (*Archive, error) {
 // lock; the Locked suffix says which lock its callers would need.
 func (a *Archive) replayRawLocked(rec Record, agg bool, now time.Time) {
 	if rec.MigrationID != "" {
-		// Rebuild the key the live path uses, not a lookalike. A NACK dedups on
-		// migrationId+code (§14, B7), so replaying it under migrationId alone
-		// would never match and every re-copied NACK would be recorded a second
-		// time after a restart.
+		// Rebuild the key the live path uses, not a lookalike. A legacy NACK
+		// dedups on migrationId+code (§14, B7). A field-present 4.2 queue refusal
+		// also includes destSlot and rerouteCount (§31, B46). Replaying either
+		// under migrationId alone would record a re-copied NACK after restart.
 		// THE REPLAY ONLY REBUILDS THE WINDOW, not the record (§25, B38). A key
 		// whose record is older than the window is not inserted at all: the live
 		// path would not have refused a copy of it either, and inserting it would

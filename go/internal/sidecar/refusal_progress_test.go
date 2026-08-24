@@ -561,12 +561,168 @@ func TestRefusalDeadlineIsRecheckedAfterForwardPreparation(t *testing.T) {
 	if st.Direction != journal.In || !st.BounceBack || st.Handoff == journal.HandoffSent {
 		t.Fatalf("post-preparation deadline state = %+v, want one safe bounce", st)
 	}
-	time.Sleep(50 * time.Millisecond)
 	stub.mu.Lock()
 	gotPayloads := len(stub.payloads)
 	stub.mu.Unlock()
 	if gotPayloads != 0 {
 		t.Fatalf("relay received %d payloads after the refusal deadline, want 0", gotPayloads)
+	}
+}
+
+// TestStaleNacksCannotDelayPendingAlternate covers the window after an exact
+// refusal selected an alternate but before that alternate is durably sent. A
+// delayed answer for the prior destination is not allowed to move the current
+// scheduler. In particular, retryAfter cannot postpone the valid alternate
+// past the absolute first-refusal deadline.
+func TestStaleNacksCannotDelayPendingAlternate(t *testing.T) {
+	h := newRefusalHarness(t, 3)
+	id := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, id)
+	pending := journalEntry(t, h.side, id)
+	if pending.Handoff != journal.HandoffPending || pending.Entry.DestSlot != 3 {
+		t.Fatalf("exact refusal did not select pending alternate 3: %+v", pending)
+	}
+
+	longRetry := int((2 * h.cfg.BounceTimeout) / time.Millisecond)
+	staleRelay, err := json.Marshal(contractb.MigrationNack{
+		MigrationID: id, DestPeer: "peer-source",
+		Code: contractb.NackNotForwarded, Class: contractb.ClassTransient,
+		Message: "delayed refusal for prior destination", RetryAfterMs: longRetry,
+		NeverForwarded: contractb.BoolPtr(true), RelaySessionID: refusalTestSession,
+		RefusedAttempt: &contractb.MigrationAttempt{DestSlot: 2, RerouteCount: 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.side.onMigrationNack(wire.Envelope{Data: staleRelay})
+
+	stalePeer, err := json.Marshal(contractb.MigrationNack{
+		MigrationID: id, SourcePeer: "peer-b", DestPeer: "peer-source",
+		Code: contractb.NackOverloaded, Class: contractb.ClassTransient,
+		Message: "delayed peer refusal for prior destination", RetryAfterMs: longRetry,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.side.onMigrationNack(wire.Envelope{Data: stalePeer})
+
+	stub := newStubRelay(t)
+	h.side.mu.Lock()
+	h.side.relayConn = openRelayWriter(t, stub)
+	h.side.relayReady = true
+	h.side.sendPace.acked = true
+	h.side.tickOutbound(journalEntry(t, h.side, id), h.clock.Now())
+	h.side.mu.Unlock()
+
+	sent := journalEntry(t, h.side, id)
+	if sent.Handoff != journal.HandoffSent || sent.Entry.DestSlot != 3 || sent.RerouteCount != 1 {
+		t.Fatalf("stale NACK delayed or moved the pending alternate: %+v", sent)
+	}
+	select {
+	case <-stub.payload:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stub relay did not receive the valid pending alternate")
+	}
+	stub.mu.Lock()
+	got := len(stub.payloads)
+	stub.mu.Unlock()
+	if got != 1 {
+		t.Fatalf("relay received %d payloads, want one valid alternate before the deadline", got)
+	}
+}
+
+// TestPre42RefusedReplayEntersAttemptScopedBoundedWalk models the 64-entry cap
+// left by the older migration-wide proof path: refused was durable, but no
+// first-refusal deadline existed. The old record also retained the prior
+// attempt's relay session and send clock. After upgrade and restart, that proof
+// still makes one retry of each recorded destination safe. The retry replaces
+// both stale fields. An exact 4.2 queue refusal then starts the durable
+// distinct-destination chain instead of restoring the wedge.
+func TestPre42RefusedReplayEntersAttemptScopedBoundedWalk(t *testing.T) {
+	h := newRefusalHarness(t, 3)
+	proof := contractb.ProofRelayNeverForwarded
+	const count = 64
+	ids := make([]string, 0, count)
+	staleSentAt := make(map[string]int64, count)
+	for i := 0; i < count; i++ {
+		id := seedRefusalEntry(t, h, 2)
+		ids = append(ids, id)
+		staleSentAt[id] = journalEntry(t, h.side, id).SentAtMs
+		if _, err := h.side.jr.Apply(id, journal.Update{
+			Handoff:      journal.HandoffRefused,
+			RerouteProof: &proof,
+			Note:         "pre-4.2 migration-wide relay proof",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		legacy := journalEntry(t, h.side, id)
+		if legacy.RefusalDeadlineMs != 0 || len(legacy.RefusedSlots) != 0 ||
+			legacy.RelaySessionID != refusalTestSession || legacy.SentAtMs == 0 {
+			t.Fatalf("legacy fixture does not retain the old attempt metadata: %+v", legacy)
+		}
+	}
+	if err := h.side.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Minute)
+
+	reopened, err := New(h.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	setRefusalMap(reopened, 3)
+	const upgradedSession = "ead0c1d4-83c9-418b-9ca2-9979113f4e63"
+	reopened.mu.Lock()
+	reopened.relaySessionID = upgradedSession
+	reopened.mu.Unlock()
+	stub := newStubRelay(t)
+	reopened.mu.Lock()
+	reopened.relayConn = openRelayWriter(t, stub)
+	reopened.relayReady = true
+	reopened.mu.Unlock()
+
+	for i, id := range ids {
+		reopened.mu.Lock()
+		reopened.sendPace.acked = true
+		reopened.tickOutbound(journalEntry(t, reopened, id), h.clock.Now())
+		reopened.mu.Unlock()
+		select {
+		case <-stub.payload:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("upgraded sidecar did not retry legacy entry %d", i)
+		}
+		sent := journalEntry(t, reopened, id)
+		if sent.Handoff != journal.HandoffSent || sent.Entry.DestSlot != 2 ||
+			sent.RerouteCount != 0 || sent.RelaySessionID != upgradedSession ||
+			sent.SentAtMs <= staleSentAt[id] {
+			t.Fatalf("legacy retry %d did not replace the stale attempt metadata: %+v", i, sent)
+		}
+
+		// A second scheduler offer sees the durable sent transition and cannot
+		// enqueue a duplicate of the upgraded retry.
+		reopened.mu.Lock()
+		reopened.tickOutbound(sent, h.clock.Now())
+		reopened.mu.Unlock()
+		stub.mu.Lock()
+		gotPayloads := len(stub.payloads)
+		stub.mu.Unlock()
+		if gotPayloads != i+1 {
+			t.Fatalf("legacy retry %d produced %d total payloads, want %d", i, gotPayloads, i+1)
+		}
+
+		attempt := &contractb.MigrationAttempt{DestSlot: 2, RerouteCount: 0}
+		reopened.onMigrationNack(refusalNackEnvelope(t, id, contractb.NackNotForwarded,
+			upgradedSession, contractb.BoolPtr(false), attempt))
+		bounded := journalEntry(t, reopened, id)
+		if bounded.Handoff != journal.HandoffPending || bounded.Entry.DestSlot != 3 ||
+			bounded.RerouteCount != 1 || bounded.RefusalDeadlineMs == 0 ||
+			!reflect.DeepEqual(bounded.RefusedSlots, []int{2}) {
+			t.Fatalf("exact 4.2 refusal for entry %d did not enter the bounded walk: %+v", i, bounded)
+		}
+	}
+	if got := reopened.jr.CountPending(journal.Out); got != count {
+		t.Fatalf("upgraded pending depth = %d, want all %d entries progressing on alternates", got, count)
 	}
 }
 

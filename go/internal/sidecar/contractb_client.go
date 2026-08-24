@@ -1048,7 +1048,6 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	if nack.RetryAfterMs > 0 {
 		retry = time.Duration(nack.RetryAfterMs) * time.Millisecond
 	}
-	sc.nextForward = now.Add(retry)
 
 	switch {
 	case !relayGenerated && !peerAttempt:
@@ -1071,6 +1070,10 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	case !relayGenerated && contractb.PeerLocalRefusal(nack.Code):
 		// The receiver STATED it took no custody. Re-route: another slot accepts
 		// the same organism.
+		// Apply retryAfter only after sourcePeer proves this NACK belongs to the
+		// current destination. A delayed prior-destination NACK must not postpone
+		// a pending alternate past its absolute refusal deadline.
+		sc.nextForward = now.Add(retry)
 		s.markRefusedLocked(st, contractb.ProofPeerRefused,
 			"peer-local refusal "+nack.Code+" proves no custody moved")
 		if s.rerouteLocked(st, contractb.ProofPeerRefused, now) {
@@ -1152,6 +1155,9 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID):
 		// The relay has forwarded no frame with this migrationId to anyone
 		// during a session that covers the entry's WHOLE LIFE (§5.2).
+		// This proof matches the current session. Only now may retryAfter affect
+		// a no-lane retry of this same proven-safe attempt.
+		sc.nextForward = now.Add(retry)
 		s.markRefusedLocked(st, contractb.ProofRelayNeverForwarded,
 			"relay proof: neverForwarded under the recorded relaySessionId")
 		if s.rerouteLocked(st, contractb.ProofRelayNeverForwarded, now) {

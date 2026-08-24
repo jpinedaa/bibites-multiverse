@@ -24,11 +24,13 @@ func TestCreateSnapshotCannotCommitASecondSend(t *testing.T) {
 
 	created := make(chan struct{})
 	resume := make(chan struct{})
+	handlerDone := make(chan struct{})
 	source.side.mu.Lock()
 	source.side.afterOutboundCreate = func() {
 		close(created)
 		<-resume
 	}
+	source.side.afterOutboundImmediateTick = func() { close(handlerDone) }
 	source.side.mu.Unlock()
 
 	migrationID := source.mod.migrateOut(testEntityID, "E", 0.5)
@@ -51,13 +53,15 @@ func TestCreateSnapshotCannotCommitASecondSend(t *testing.T) {
 		return g.relay.relay.ForwardedCount() == 1
 	})
 	close(resume)
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resumed MIGRATE_OUT handler did not complete its immediate custody tick")
+	}
 
 	waitFor(t, 5*time.Second, "one destination spawn", func() bool {
 		return dest.world.spawnCount(migrationID) == 1
 	})
-	// Give the resumed handler enough time to take Sidecar.mu and execute its
-	// immediate custody tick against the stale Create snapshot.
-	time.Sleep(200 * time.Millisecond)
 
 	if got := g.relay.relay.ForwardedCount(); got != 1 {
 		t.Fatalf("relay accepted %d payload enqueues, want exactly 1", got)

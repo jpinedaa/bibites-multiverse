@@ -784,7 +784,11 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	if !s.hasPendingAckLocked() {
 		s.tickOutbound(st, s.now())
 	}
+	afterImmediateTick := s.afterOutboundImmediateTick
 	s.mu.Unlock()
+	if afterImmediateTick != nil {
+		afterImmediateTick()
+	}
 	return true
 }
 

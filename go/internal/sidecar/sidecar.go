@@ -149,13 +149,14 @@ type Sidecar struct {
 	// genomeServed counts GENOME_REQUESTs answered per requester in the current
 	// minute (contract-b-m4.md §10's rate limit, answering side).
 	genomeServed map[string]*rateWindow
-	// Test-only interleaving hooks. Production leaves both nil. They let a
-	// regression stop at the two custody boundaries that must be deterministic:
-	// after Create returns a clone, and after frame preparation but before the
-	// durable sent transition.
-	afterOutboundCreate func()
-	afterForwardPrepare func()
-	closed              bool
+	// Test-only interleaving hooks. Production leaves them nil. They let a
+	// regression stop at the custody boundaries that must be deterministic:
+	// after Create returns a clone, after the handler's immediate custody tick,
+	// and after frame preparation but before the durable sent transition.
+	afterOutboundCreate        func()
+	afterOutboundImmediateTick func()
+	afterForwardPrepare        func()
+	closed                     bool
 }
 
 type sched struct {

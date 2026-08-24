@@ -1,5 +1,5 @@
 // Package contractb holds Contract B exactly as contracts/contract-b-m4.md
-// specifies it (`contract-b/4.0`): sidecar -> relay -> sidecar, a rectangular
+// specifies it (`contract-b/4.2`): sidecar -> relay -> sidecar, a rectangular
 // map of slots, a read-only AUTHORISED archive subscriber, a JSON envelope, and
 // an opaque bb8 body.
 //
@@ -125,8 +125,7 @@ const (
 	// permanent one can mean what it says.
 	NackPeerOffline = "PEER_OFFLINE"
 	// NackNotForwarded is the relay declining to hand the frame over for a
-	// reason of its own: outbound queue full, write failed before any byte left,
-	// or the relay is draining.
+	// reason of its own: the destination queue is full or the relay is draining.
 	NackNotForwarded       = "NOT_FORWARDED"
 	NackPeerUnknown        = "PEER_UNKNOWN"
 	NackNotAMember         = "NOT_A_MEMBER"
@@ -881,9 +880,9 @@ type Lineage struct {
 
 // Reroute is MIGRATION_PAYLOAD.reroute (§6.6), present exactly when this
 // frame's destSlot is not the one the entry was first journaled with.
-// Informational: the relay does not read it and the receiver does not act on
-// it. It is what lets the archive and the status page say WHY an organism took
-// the lane it took.
+// The relay reads only Count to correlate a queue-full refusal. The receiver
+// does not act on it. The other fields let the archive and status page explain
+// why an organism took the lane it took.
 type Reroute struct {
 	FromSlot int    `json:"fromSlot"`
 	Count    int    `json:"count"`
