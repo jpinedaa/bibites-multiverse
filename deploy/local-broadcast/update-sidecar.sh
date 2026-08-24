@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 windows_helper_source="$here/update-sidecar-windows.ps1"
-expected_windows_helper_sha='70197df322e21649b17cc4b297f1c7c586e32a27ec56d383b9bffb94ead3f921'
+expected_windows_helper_sha='dc3a6f5f2f40a95e4012f05c48cfac5538165a979abb65ced08ad001d9d74dea'
 config_root="${XDG_CONFIG_HOME:-$HOME/.config}/bibites-local-broadcast"
 runtime_root="$HOME/.local/lib/bibites-local-broadcast"
 
@@ -263,7 +263,7 @@ capture_static_manifest() {
     assert_no_unix_symlink_path "$path" || return 1
     assert_no_windows_reparse "$path" || return 1
     acl="$(capture_windows_path_acl "$path")" || return 1
-    [ -n "$acl" ] || { die "Windows returned an empty directory ACL for $label"; return 1; }
+    [ -n "$acl" ] || { die "Windows returned an empty directory ACL seal for $label"; return 1; }
     printf '%s\t%s\n' "$label" "directory-$acl"
   done < <(static_directory_entries)
 }
@@ -272,7 +272,7 @@ assert_static_unchanged() {
   local current
   current="$(capture_static_manifest)" || return 1
   [ "$current" = "$static_baseline" ] || \
-    { die 'A static identity, plugin, script, or OBS configuration hash or ACL changed'; return 1; }
+    { die 'A static identity, plugin, script, or OBS configuration hash or ACL seal changed'; return 1; }
 }
 
 acquire_install_lock() {
@@ -370,7 +370,7 @@ assert_target_acl_unchanged() {
   local current_acl
   current_acl="$(get_windows_acl "$target")" || return 1
   if [ "$current_acl" != "$target_acl" ]; then
-    die 'The installed sidecar ACL does not match the saved preflight ACL'
+    die 'The installed sidecar ACL seal does not match the preflight ACL seal'
     return 1
   fi
 }
@@ -479,7 +479,8 @@ observe_source_flow() {
     return 1
   fi
 
-  say 'observing two non-overlapping five-minute source-flow windows'
+  say 'observing two non-overlapping source-flow windows of at least five minutes' \
+    'with 30-second waits between completed samples'
   in_observation=1
   for index in $(seq 0 $((observation_samples - 1))); do
     if [ "$index" -ne 0 ]; then
@@ -513,12 +514,12 @@ observe_source_flow() {
   say "source-flow cumulative migrations start=${totals[0]} midpoint=${totals[midpoint]} end=${totals[observation_samples - 1]}"
   if ! jq -en --argjson start "${totals[0]}" --argjson end "${totals[midpoint]}" \
       '$end > $start' >/dev/null; then
-    die 'The source made no cumulative migration progress in the first five-minute window'
+    die 'The source made no cumulative migration progress in the first source-flow window'
     return 1
   fi
   if ! jq -en --argjson start "${totals[midpoint]}" \
       --argjson end "${totals[observation_samples - 1]}" '$end > $start' >/dev/null; then
-    die 'The source made no cumulative migration progress in the second five-minute window'
+    die 'The source made no cumulative migration progress in the second source-flow window'
     return 1
   fi
   in_observation=0
@@ -552,9 +553,9 @@ restore_old_executable() {
     return 1
   fi
   if ! atomic_replace_windows "$rollback_stage" "$target"; then say 'rollback replacement failed'; return 1; fi
-  if ! set_windows_acl "$target" "$target_acl"; then say 'rollback ACL restore failed'; return 1; fi
+  if ! set_windows_acl "$target" "$target_acl"; then say 'rollback DACL restore failed'; return 1; fi
   if [ "$(get_windows_acl "$target")" != "$target_acl" ]; then
-    say 'rollback ACL proof failed'
+    say 'the rollback ACL seal does not match'
     return 1
   fi
   if ! metadata="$(read_vcs_metadata "$target")"; then say 'rollback VCS-stamp read failed'; return 1; fi
@@ -749,7 +750,7 @@ main() {
   fi
 
   target_acl="$(get_windows_acl "$target")" || return 1
-  if [ -z "$target_acl" ]; then die 'Windows returned an empty ACL for the installed sidecar'; return 1; fi
+  if [ -z "$target_acl" ]; then die 'Windows returned an empty ACL seal for the installed sidecar'; return 1; fi
   static_baseline="$(capture_static_manifest)" || return 1
   assert_runtime_health "$expected_old_sha" "$expected_old_revision" || return 1
   say "preflight passed for the sealed identity in slot $expected_slot"
@@ -808,7 +809,7 @@ main() {
   atomic_replace_windows "$staged_candidate" "$target" || return 1
   set_windows_acl "$target" "$target_acl" || return 1
   if [ "$(get_windows_acl "$target")" != "$target_acl" ]; then
-    die 'The replacement sidecar does not have the exact saved ACL'
+    die 'The replacement sidecar does not have the exact saved ACL seal'
     return 1
   fi
   if [ "$(sha256sum "$target" | awk '{print $1}')" != "$expected_new_sha" ]; then
