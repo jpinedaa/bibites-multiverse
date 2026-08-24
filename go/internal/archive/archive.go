@@ -345,6 +345,15 @@ type Archive struct {
 	// carry it.
 	hops          []Hop
 	hopsTruncated bool
+	// hopPending and hopEarlyAcks correlate an offered MIGRATION_PAYLOAD with
+	// the receiver's eventual MIGRATION_ACK. The payload is not proof that the
+	// destination spawned the organism: a population admission NACK can follow
+	// it, and the same migrationId can then be offered to another slot. Only the
+	// matched ACK promotes an attempt into hops. Both maps are ephemeral and
+	// bounded in hops.go; the durable ledger remains unchanged.
+	hopPending   map[string]pendingHop
+	hopEarlyAcks map[string]earlyHopAck
+	hopTrimAtMs  int64
 	// species is the LEDGER AGGREGATE behind the species tab: crossings, first
 	// and last sighting, distinct genomes and recent lanes, per species. It is
 	// built once during the replay below and maintained by onMigration, because
@@ -521,25 +530,27 @@ func New(cfg Config) (*Archive, error) {
 		return nil, err
 	}
 	a := &Archive{
-		cfg:         cfg,
-		log:         cfg.Logger.With("archive", cfg.PeerID),
-		ledger:      ledger,
-		genomes:     genomes,
-		metrics:     metrics,
-		deny:        deny,
-		releases:    newReleaseTracker(cfg.HomepageRepo, cfg.Logger),
-		lanes:       map[lanePair]*lane{},
-		simRates:    map[int]*achievedRate{},
-		seen:        newDedupWindow(dedupHint(ledger.HintBytes()), cfg.DedupWindow, time.Now()),
-		pending:     map[string]*fetch{},
-		sentWindow:  map[string]*rateWindow{},
-		inFlight:    map[string]int{},
-		outstanding: map[string]*fetch{},
-		species:     newSpeciesLedger(),
-		brainAgg:    newBrainAgg(),
-		tally:       newRecordTally(),
-		rollupIndex: map[int64]LedgerPos{},
-		rollupDirty: newRollupDirty(),
+		cfg:          cfg,
+		log:          cfg.Logger.With("archive", cfg.PeerID),
+		ledger:       ledger,
+		genomes:      genomes,
+		metrics:      metrics,
+		deny:         deny,
+		releases:     newReleaseTracker(cfg.HomepageRepo, cfg.Logger),
+		lanes:        map[lanePair]*lane{},
+		simRates:     map[int]*achievedRate{},
+		hopPending:   map[string]pendingHop{},
+		hopEarlyAcks: map[string]earlyHopAck{},
+		seen:         newDedupWindow(dedupHint(ledger.HintBytes()), cfg.DedupWindow, time.Now()),
+		pending:      map[string]*fetch{},
+		sentWindow:   map[string]*rateWindow{},
+		inFlight:     map[string]int{},
+		outstanding:  map[string]*fetch{},
+		species:      newSpeciesLedger(),
+		brainAgg:     newBrainAgg(),
+		tally:        newRecordTally(),
+		rollupIndex:  map[int64]LedgerPos{},
+		rollupDirty:  newRollupDirty(),
 	}
 	// THE ROLL-UP STATE IS LOADED BEFORE ONE RECORD IS FOLDED (rollup.go). It is
 	// the durable half of the fold below: with it, the replay reads only what the
@@ -1254,9 +1265,17 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		a.log.Warn("archive: undecodable MIGRATION_PAYLOAD copy", "err", err)
 		return true
 	}
+	// Sanitize before staging the delivery attempt. The temporary feed state and
+	// the durable record must make the same decision about an untrusted species
+	// block, including on a rerouted copy the durable ledger deduplicates below.
+	species, stripped := wire.CarrySpecies(p.Species)
+	receivedAt := time.Now().UnixMilli()
+	a.observeHopAttempt(p, species, receivedAt)
 	if a.markSeen(RecordMigration, p.MigrationID) {
-		// A re-forwarded migration produces a second copy; the archive
-		// deduplicates on migrationId exactly as a sidecar does (§5.1).
+		// A rerouted or (on an old peer) re-forwarded migration produces a second
+		// copy. The durable record deduplicates on migrationId exactly as a
+		// sidecar does (§5.1), but observeHopAttempt above must see every attempt:
+		// its destination can change before one receiver acknowledges delivery.
 		return true
 	}
 	lineage := p.Lineage
@@ -1265,7 +1284,6 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	// recording a malformed one would put a fact in the ledger that no conformant
 	// sidecar could have sent, and refusing to record the migration over a label
 	// would be worse still.
-	species, stripped := wire.CarrySpecies(p.Species)
 	if stripped != "" {
 		a.log.Warn("archive: stripping a malformed species block from a copied envelope; "+
 			"the migration is still recorded",
@@ -1273,7 +1291,7 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	}
 	rec := Record{
 		Type:        RecordMigration,
-		RecordedAt:  time.Now().UnixMilli(),
+		RecordedAt:  receivedAt,
 		MigrationID: p.MigrationID,
 		SourcePeer:  p.SourcePeer,
 		SourceSlot:  p.SourceSlot,
@@ -1308,23 +1326,9 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	at := a.notePositionLocked(off, rotated)
 	a.countRecordLocked(rec, at)
 	a.observeLaneLocked(p.SourceSlot, p.DestSlot, p.ExitEdge, rec.RecordedAt)
-	// The same envelope, kept a second way for a second question. The lane
-	// counter answers HOW FAST; the feed answers WHO, just now (§17, B14). Both
-	// read the copy the archive already has, and neither asks anybody for
-	// anything.
-	a.observeHopLocked(Hop{
-		MigrationID: p.MigrationID,
-		AtMs:        rec.RecordedAt,
-		FromSlot:    p.SourceSlot,
-		ToSlot:      p.DestSlot,
-		ExitEdge:    p.ExitEdge,
-		// The STRIPPED block, not the raw one: a malformed species never reaches
-		// the page, exactly as it never reaches the ledger.
-		Species: species,
-	})
-	// The same envelope, kept a THIRD way for a third question, and it costs one
-	// map lookup. The lane counter answers HOW FAST, the feed answers WHO JUST
-	// NOW, and the aggregate answers HOW OFTEN, EVER — the one question that
+	// The same envelope, kept another way for another question, and it costs one
+	// map lookup. The lane counter answers HOW MANY OFFERS, the ACK-confirmed feed
+	// later answers WHO ARRIVED, and the aggregate answers HOW OFTEN, EVER — the one question that
 	// would otherwise need the whole ledger read back per poll. It folds the
 	// record the archive has just written, so the live path and the startup
 	// replay pass identical input to identical code.
@@ -1400,13 +1404,18 @@ func (a *Archive) onAck(env wire.Envelope) bool {
 	if a.markSeen(RecordAck, ack.MigrationID) {
 		return true
 	}
+	recordedAt := time.Now().UnixMilli()
+	// A MIGRATION_ACK is emitted only after the destination mod's
+	// MIGRATE_IN_ACK. This is the first point at which the archive can honestly
+	// show the creature entering that world.
+	a.confirmHop(ack, recordedAt)
 	// The record is built before the counters so BOTH see the same one: the
 	// per-type and per-peer tallies of rollup.go are folded from the record
 	// itself, exactly as the replay folds it, so the live path and the restart
 	// pass identical input to identical code.
 	rec := Record{
 		Type:        RecordAck,
-		RecordedAt:  time.Now().UnixMilli(),
+		RecordedAt:  recordedAt,
 		MigrationID: ack.MigrationID,
 		SourcePeer:  ack.SourcePeer,
 		DestPeer:    ack.DestPeer,
@@ -1422,6 +1431,10 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 	if contractb.DecodeData(env.Data, &nack) != nil {
 		return true
 	}
+	// Do this even for a ledger-duplicate NACK. A later reroute can receive the
+	// same code from another peer; peer matching in rejectHopAttempt ensures an
+	// old rejection cannot erase the newer destination attempt.
+	a.rejectHopAttempt(nack, time.Now().UnixMilli())
 	if a.markSeen(RecordNack, dedupKey(RecordNack, nack.MigrationID, nack.Code)) {
 		return true
 	}
