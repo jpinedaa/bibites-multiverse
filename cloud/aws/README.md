@@ -500,7 +500,10 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 ```sh
 ./cloud/aws/build-artifacts.sh
 ./cloud/aws/stage-artifacts.sh --runtime-only
-./cloud/aws/update-runtime.sh
+./cloud/aws/update-runtime.sh \
+  --expected-prior-runtime-object 'runtime/<prior-sha256>.tar.gz' \
+  --expected-prior-runtime-sha256 '<prior-sha256>' \
+  --expected-prior-pointer-etag '"<prior-etag>"'
 ./cloud/aws/verify-host.sh
 ```
 
@@ -511,6 +514,16 @@ It does not overwrite an existing save or replace mutable `worlds.json` in S3.
 Activation reapplies the pinned manifest, current credentials, environment files, and unit state.
 If an installed save is missing, the installer restores it from the object named in that manifest.
 Use [Apply a manifest update](#apply-a-manifest-update) for a manifest or save change.
+
+Before authorization, read `runtime/current.json` and its ETag with one authenticated
+`s3api get-object` call.
+Seal the `runtimeFile`, `runtimeSha256`, and `ETag` values from that response.
+Keep the double quotation marks that the S3 API returns around the ETag.
+
+The update command requires all three expected-prior inputs.
+It rejects a malformed value before the first AWS call.
+The runtime object must be `runtime/<prior-sha256>.tar.gz` for the supplied SHA-256 value.
+These inputs identify the approved rollback preimage. They are not credentials.
 
 The checked-in hosted sidecar unit explicitly sets
 `MULTIVERSE_INBOUND_ADMISSION=adaptive` for these six operator-controlled worlds. This is a
@@ -562,10 +575,12 @@ The wrapper polls that command through a bounded terminal-state check.
 The remote transaction waits no more than five minutes for the host runtime lock.
 It holds that lock across the authoritative pointer read, activation, publication, and rollback.
 A second update can wait or return `73`, but it cannot interleave with the first update.
+If the first update changes the pointer, a waiting transaction with the old preimage returns `26`.
 
 Before it stops a service, the transaction completes these checks:
 
 - The instance role and pointer session belong to the expected AWS account.
+- The locked pointer object, SHA-256 value, and ETag match the three expected-prior inputs.
 - The staged bucket and prefix match the selected stack and the live host configuration.
 - The host AWS CLI supports conditional encrypted pointer publication.
 - The candidate and prior runtime archives match their SHA-256 values.
@@ -576,6 +591,8 @@ Before it stops a service, the transaction completes these checks:
 
 The transaction keeps the verified prior archive in a temporary host file during the command.
 Automatic rollback during that command does not depend on a second download of the object.
+If an expected-prior value differs, the transaction returns `26` before it stops a service.
+It does not install a runtime or write the pointer in this state.
 
 If installation fails, the activator stops partial candidate services.
 It keeps the failed runtime and archive below `/opt` with a dated `failed` name.
@@ -602,6 +619,7 @@ The transaction uses these distinct terminal results:
 | `23` | Pointer state is unknown or names a third runtime. The candidate stays active for reconciliation |
 | `24` | Prior-runtime or manifest-configuration recovery failed |
 | `25` | Systems Manager acceptance or final state is unknown; do not retry blindly |
+| `26` | The locked pointer differs from the expected prior object, SHA-256 value, or ETag. No service stopped |
 | `73` | Another runtime transaction held the host lock until the bounded wait ended |
 
 CAUTION: A candidate activation stops and starts every configured game, sidecar, and time-scale

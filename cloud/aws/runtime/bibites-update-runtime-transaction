@@ -2,7 +2,7 @@
 # Serialize one host runtime activation with its guarded bootstrap-pointer update.
 set -euo pipefail
 
-[ "$#" -eq 19 ] || {
+[ "$#" -eq 22 ] || {
   echo 'runtime transaction received the wrong argument count' >&2
   exit 2
 }
@@ -26,6 +26,9 @@ pointer_credential_prefix="${16}"
 relay_private_ip="${17}"
 relay_domain="${18}"
 runtime_root="${19}"
+expected_prior_runtime_object="${20}"
+expected_prior_runtime_sha256="${21}"
+expected_prior_pointer_etag="${22}"
 lock_file="${BIBITES_RUNTIME_LOCK_FILE:-/run/lock/bibites-runtime-update.lock}"
 cloud_conf="${BIBITES_CLOUD_CONF:-/etc/bibites-cloud.conf}"
 
@@ -92,6 +95,15 @@ done
   die 'BepInEx object does not match its digest'
 [ "$manifest_object" = "worlds.$manifest_sha256.json" ] ||
   die 'manifest object does not match its digest'
+valid_key "$expected_prior_runtime_object" ||
+  die 'invalid expected prior runtime object'
+[[ "$expected_prior_runtime_sha256" =~ ^[0-9a-f]{64}$ ]] ||
+  die 'invalid expected prior runtime digest'
+[ "$expected_prior_runtime_object" = \
+    "runtime/$expected_prior_runtime_sha256.tar.gz" ] ||
+  die 'expected prior runtime object does not match its digest'
+[[ "$expected_prior_pointer_etag" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]] ||
+  die 'invalid expected prior pointer ETag'
 valid_parameter "$pointer_credential_prefix" ||
   die 'invalid pointer credential parameter prefix'
 valid_ipv4 "$relay_private_ip" || die 'invalid relay address'
@@ -352,6 +364,22 @@ prior_pointer_etag="$pointer_etag"
 prior_pointer_canonical="$pointer_canonical"
 prior_runtime_object="$(jq -r .runtimeFile <<<"$pointer_document")"
 prior_runtime_sha256="$(jq -r .runtimeSha256 <<<"$pointer_document")"
+# Do not adopt pointer drift as a new rollback baseline. Compare the sealed
+# preimage while this transaction owns the host lock and before activation.
+expected_prior_match=1
+[ "$prior_runtime_object" = "$expected_prior_runtime_object" ] || {
+  echo 'runtime transaction: the locked pointer does not match the expected prior runtime object' >&2
+  expected_prior_match=0
+}
+[ "$prior_runtime_sha256" = "$expected_prior_runtime_sha256" ] || {
+  echo 'runtime transaction: the locked pointer does not match the expected prior runtime SHA-256' >&2
+  expected_prior_match=0
+}
+[ "$prior_pointer_etag" = "$expected_prior_pointer_etag" ] || {
+  echo 'runtime transaction: the locked pointer does not match the expected prior ETag' >&2
+  expected_prior_match=0
+}
+[ "$expected_prior_match" -eq 1 ] || exit 26
 prior_runtime_key="$artifact_prefix/$prior_runtime_object"
 valid_key "$prior_runtime_key" || die 'prior runtime object key is invalid'
 

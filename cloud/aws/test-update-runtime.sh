@@ -18,6 +18,8 @@ runtime_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 game_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 bepinex_sha=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 manifest_sha=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+prior_sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+prior_etag='"11111111111111111111111111111111"'
 pointer_prefix=/bibites/cloud/runtime-pointer/fixture
 raw_secret_canary='RAW-POINTER-SECRET-MUST-NOT-ENTER-SSM'
 
@@ -147,6 +149,10 @@ case "$joined" in
         printf '%s\n' '{"Status":"Failed","ResponseCode":2,
           "StandardOutputContent":"","StandardErrorContent":"transaction preflight rejected"}'
         ;;
+      prior_mismatch)
+        printf '%s\n' '{"Status":"Failed","ResponseCode":26,
+          "StandardOutputContent":"","StandardErrorContent":"expected prior pointer mismatch"}'
+        ;;
       failed_zero)
         printf '%s\n' '{"Status":"Failed","ResponseCode":0,
           "StandardOutputContent":"","StandardErrorContent":"invalid fixture"}'
@@ -181,6 +187,9 @@ chmod 0755 "$fixture_bin/aws"
 run_case() {
   local scenario="$1"
   local selected_pointer_prefix="${BIBITES_TEST_POINTER_PREFIX:-$pointer_prefix}"
+  local selected_prior_sha="${BIBITES_TEST_EXPECTED_PRIOR_SHA256:-$prior_sha}"
+  local selected_prior_object="${BIBITES_TEST_EXPECTED_PRIOR_OBJECT:-runtime/$selected_prior_sha.tar.gz}"
+  local selected_prior_etag="${BIBITES_TEST_EXPECTED_PRIOR_ETAG:-$prior_etag}"
   PATH="$fixture_bin:$PATH" \
     BIBITES_AWS_ACCOUNT_ID=123456789012 \
     BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX="$selected_pointer_prefix" \
@@ -190,7 +199,10 @@ run_case() {
     BIBITES_RELAY_DOMAIN="${BIBITES_TEST_RELAY_DOMAIN:-}" \
     BIBITES_CREDENTIAL_PARAMETER_PREFIX="${BIBITES_TEST_CREDENTIAL_PREFIX:-}" \
     RUNTIME_SHA256="${BIBITES_TEST_AMBIENT_RUNTIME_SHA256:-}" \
-    "$fixture_cloud/update-runtime.sh"
+    "$fixture_cloud/update-runtime.sh" \
+      --expected-prior-runtime-object "$selected_prior_object" \
+      --expected-prior-runtime-sha256 "$selected_prior_sha" \
+      --expected-prior-pointer-etag "$selected_prior_etag"
 }
 
 : >"$aws_log"
@@ -204,6 +216,9 @@ for expected in \
   "runtime-inputs/game/$game_sha.zip" \
   "runtime-inputs/bepinex/$bepinex_sha.zip" \
   "worlds.$manifest_sha.json" \
+  "runtime/$prior_sha.tar.gz" \
+  "$prior_sha" \
+  "${prior_etag//\"/}" \
   "$pointer_prefix"; do
   grep -Fq "$expected" "$command_log" || {
     echo "SSM command omitted pinned transaction argument $expected" >&2
@@ -237,6 +252,17 @@ set -e
   exit 1
 }
 grep -Fq 'transaction preflight rejected' <<<"$preflight_output"
+
+: >"$aws_log"
+set +e
+prior_mismatch_output="$(run_case prior_mismatch 2>&1)"
+prior_mismatch_status=$?
+set -e
+[ "$prior_mismatch_status" -eq 26 ] || {
+  echo "terminal transaction status 26 returned $prior_mismatch_status" >&2
+  exit 1
+}
+grep -Fq 'expected prior pointer mismatch' <<<"$prior_mismatch_output"
 
 for unknown_scenario in unknown_status timed_out send_failure success_bad_response \
   failed_zero failed_signal failed_aws; do
@@ -278,6 +304,45 @@ for invalid_scope in complete missing; do
 done
 
 write_staged_receipt runtime-only
+
+# All expected-prior inputs are required and validated before the first AWS call.
+: >"$aws_log"
+set +e
+missing_prior_output="$(PATH="$fixture_bin:$PATH" \
+  "$fixture_cloud/update-runtime.sh" 2>&1)"
+missing_prior_status=$?
+set -e
+[ "$missing_prior_status" -eq 2 ]
+[ ! -s "$aws_log" ]
+grep -Fq 'Set all three expected-prior inputs' <<<"$missing_prior_output"
+
+for malformed_prior in object sha256 etag relationship; do
+  unset BIBITES_TEST_EXPECTED_PRIOR_OBJECT \
+    BIBITES_TEST_EXPECTED_PRIOR_SHA256 BIBITES_TEST_EXPECTED_PRIOR_ETAG
+  case "$malformed_prior" in
+    object) BIBITES_TEST_EXPECTED_PRIOR_OBJECT='../unsafe-runtime.tar.gz' ;;
+    sha256) BIBITES_TEST_EXPECTED_PRIOR_SHA256=abcd ;;
+    etag) BIBITES_TEST_EXPECTED_PRIOR_ETAG=11111111111111111111111111111111 ;;
+    relationship)
+      BIBITES_TEST_EXPECTED_PRIOR_OBJECT=runtime/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.tar.gz
+      ;;
+  esac
+  : >"$aws_log"
+  set +e
+  malformed_prior_output="$(run_case success 2>&1)"
+  malformed_prior_status=$?
+  set -e
+  [ "$malformed_prior_status" -ne 0 ] || {
+    echo "$malformed_prior expected-prior input passed" >&2
+    exit 1
+  }
+  [ ! -s "$aws_log" ] || {
+    echo "$malformed_prior expected-prior input reached AWS" >&2
+    exit 1
+  }
+done
+unset BIBITES_TEST_EXPECTED_PRIOR_OBJECT \
+  BIBITES_TEST_EXPECTED_PRIOR_SHA256 BIBITES_TEST_EXPECTED_PRIOR_ETAG
 
 # A legacy stack has no RelayDomain parameter. It requires the explicit,
 # validated operator input, while a stack-owned domain rejects disagreement.
