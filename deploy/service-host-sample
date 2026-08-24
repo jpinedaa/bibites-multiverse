@@ -155,35 +155,63 @@ vm_oom_kill="$(vm_field oom_kill)"
 # HTTP aggregates. The status request contributes fixed archive counters. A
 # failed or malformed source becomes an empty object and never stops the host
 # sample.
-traffic_json="$(read_source "$TRAFFIC_DOCUMENT" | jq -c '
-  def number_or_null: if type == "number" then . else null end;
-  (.traffic // {}) as $traffic
+# The override is a deterministic clock seam for the fixture. The production
+# service does not set it.
+sample_epoch="${MV_HOST_SAMPLE_NOW:-$(date -u +%s)}"
+case "$sample_epoch" in
+  ''|*[!0-9]*) printf 'MV_HOST_SAMPLE_NOW must be a nonnegative epoch second\n' >&2; exit 2 ;;
+esac
+sample_at="$(date -u -d "@$sample_epoch" +%FT%TZ)" || exit 1
+
+traffic_json="$(read_source "$TRAFFIC_DOCUMENT" | jq -c --argjson sampleEpoch "$sample_epoch" '
+  def nonnegative_safe_integer_or_null:
+    if type == "number" and (isinfinite | not) and (isnan | not) and
+       . >= 0 and . <= 9007199254740991 and floor == .
+    then floor else null end;
+  def nonnegative_finite_number_or_null:
+    if type == "number" and (isinfinite | not) and (isnan | not) and . >= 0
+    then . else null end;
+  def string_or_null: if type == "string" then . else null end;
+  def canonical_utc_epoch:
+    if type != "string" then null
+    elif (test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$") | not) then null
+    else . as $stamp
+      | (try fromdateiso8601 catch null) as $epoch
+      | if $epoch != null and (try ($epoch | todateiso8601) catch null) == $stamp
+        then $epoch else null end
+    end;
+  . as $document
+  | (.traffic // {}) as $traffic
+  | ($document.asOf | string_or_null) as $asOf
+  | ($asOf | canonical_utc_epoch) as $asOfEpoch
   | if ($traffic | type) != "object" then {}
     else {
+      asOf: $asOf,
       available: ($traffic.available == true),
-      complete: ($traffic.complete == true),
-      windowSeconds: ($traffic.windowSeconds | number_or_null),
-      requests: ($traffic.requests | number_or_null),
-      status1xx: ($traffic.status1xx | number_or_null),
-      status2xx: ($traffic.status2xx | number_or_null),
-      status3xx: ($traffic.status3xx | number_or_null),
-      status4xx: ($traffic.status4xx | number_or_null),
-      status5xx: ($traffic.status5xx | number_or_null),
-      p50Ms: ($traffic.p50Ms | number_or_null),
-      p95Ms: ($traffic.p95Ms | number_or_null),
+      complete: ($traffic.complete == true and $asOfEpoch != null and
+                 $asOfEpoch >= ($sampleEpoch - 30) and $asOfEpoch <= ($sampleEpoch + 30)),
+      windowSeconds: ($traffic.windowSeconds | nonnegative_safe_integer_or_null),
+      requests: ($traffic.requests | nonnegative_safe_integer_or_null),
+      status1xx: ($traffic.status1xx | nonnegative_safe_integer_or_null),
+      status2xx: ($traffic.status2xx | nonnegative_safe_integer_or_null),
+      status3xx: ($traffic.status3xx | nonnegative_safe_integer_or_null),
+      status4xx: ($traffic.status4xx | nonnegative_safe_integer_or_null),
+      status5xx: ($traffic.status5xx | nonnegative_safe_integer_or_null),
+      p50Ms: ($traffic.p50Ms | nonnegative_finite_number_or_null),
+      p95Ms: ($traffic.p95Ms | nonnegative_finite_number_or_null),
       routes: [($traffic.routes // [])[]?
         | select(type == "object")
         | select(.id == "pages" or .id == "api" or .id == "relay" or .id == "stream")
         | {
         id: (if (.id | type) == "string" then .id else null end),
-        requests: (.requests | number_or_null),
-        status1xx: (.status1xx | number_or_null),
-        status2xx: (.status2xx | number_or_null),
-        status3xx: (.status3xx | number_or_null),
-        status4xx: (.status4xx | number_or_null),
-        status5xx: (.status5xx | number_or_null),
-        p50Ms: (.p50Ms | number_or_null),
-        p95Ms: (.p95Ms | number_or_null)
+        requests: (.requests | nonnegative_safe_integer_or_null),
+        status1xx: (.status1xx | nonnegative_safe_integer_or_null),
+        status2xx: (.status2xx | nonnegative_safe_integer_or_null),
+        status3xx: (.status3xx | nonnegative_safe_integer_or_null),
+        status4xx: (.status4xx | nonnegative_safe_integer_or_null),
+        status5xx: (.status5xx | nonnegative_safe_integer_or_null),
+        p50Ms: (.p50Ms | nonnegative_finite_number_or_null),
+        p95Ms: (.p95Ms | nonnegative_finite_number_or_null)
       }]
     }
     end
@@ -306,7 +334,7 @@ units_json="$(
 # ---------------------------------------------------------------- emit
 
 sample="$(jq -nc \
-  --arg at "$(date -u +%FT%TZ)" \
+  --arg at "$sample_at" \
   --arg cpu "$cpu_busy_pct" \
   --arg l1 "$load1" --arg l5 "$load5" --arg l15 "$load15" \
   --arg mt "$mem_total" --arg ma "$mem_avail" \

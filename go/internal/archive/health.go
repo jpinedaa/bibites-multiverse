@@ -26,6 +26,8 @@ const (
 	monitorStaleAfter      = 11 * time.Minute
 	hostCadenceSeconds     = int64(60)
 	hostStaleAfter         = 3 * time.Minute
+	trafficAsOfLayout      = "2006-01-02T15:04:05Z"
+	trafficAsOfTolerance   = 30 * time.Second
 	hostHistorySamples     = 121 // two hours plus both endpoints at one-minute cadence
 	hostHistoryReadMaxByte = int64(1 << 20)
 )
@@ -178,6 +180,7 @@ type rawTrafficRoute struct {
 }
 
 type rawTrafficView struct {
+	AsOf          string            `json:"asOf"`
 	Available     bool              `json:"available"`
 	Complete      bool              `json:"complete"`
 	WindowSeconds *int64            `json:"windowSeconds"`
@@ -595,7 +598,7 @@ func publicHostLatest(sample rawHostSample, previous *rawHostSample) *hostLatest
 		Conntrack: publicHostConntrack{UsedPct: percentage(sample.Conntrack.Count, sample.Conntrack.Max)},
 		Pressure:  publicPressure(sample, previous),
 		VM:        publicVM(sample, previous),
-		Traffic:   publicTraffic(sample.Traffic),
+		Traffic:   publicTraffic(sample.Traffic, sample.parsedAt),
 		Units:     units,
 	}
 }
@@ -610,10 +613,9 @@ var publicTrafficRoutes = []struct {
 	{"stream", "Stream"},
 }
 
-func publicTraffic(raw rawTrafficView) publicTrafficView {
+func publicTraffic(raw rawTrafficView, sampleAt time.Time) publicTrafficView {
 	view := publicTrafficView{
 		Available: raw.Available,
-		Complete:  raw.Complete,
 		Routes:    []publicTrafficRoute{},
 	}
 	if raw.WindowSeconds == nil || *raw.WindowSeconds <= 0 || *raw.WindowSeconds > 3600 {
@@ -622,9 +624,15 @@ func publicTraffic(raw rawTrafficView) publicTrafficView {
 	}
 	window := *raw.WindowSeconds
 	view.WindowSeconds = &window
-	if !raw.Available || !raw.Complete {
+	trafficFresh := false
+	if trafficAt, ok := canonicalTrafficAsOf(raw.AsOf); ok {
+		skew := trafficAt.Sub(sampleAt)
+		trafficFresh = skew >= -trafficAsOfTolerance && skew <= trafficAsOfTolerance
+	}
+	if !trafficFresh || !raw.Available || !raw.Complete {
 		return view
 	}
+	view.Complete = true
 	view.RequestsPerSec = perSecond(raw.Requests, raw.WindowSeconds)
 	view.P50Ms = nonnegativeFloat(raw.P50Ms)
 	view.P95Ms = nonnegativeFloat(raw.P95Ms)
@@ -650,6 +658,14 @@ func publicTraffic(raw rawTrafficView) publicTrafficView {
 		})
 	}
 	return view
+}
+
+func canonicalTrafficAsOf(value string) (time.Time, bool) {
+	parsed, err := time.Parse(trafficAsOfLayout, value)
+	if err != nil || parsed.Format(trafficAsOfLayout) != value {
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func nonnegativeFloat(value *float64) *float64 {
@@ -792,7 +808,7 @@ func publicHostHistory(sample rawHostSample, previous *rawHostSample) hostHistor
 	}
 	pressure := publicPressure(sample, previous)
 	vm := publicVM(sample, previous)
-	traffic := publicTraffic(sample.Traffic)
+	traffic := publicTraffic(sample.Traffic, sample.parsedAt)
 	var archiveRate *float64
 	if previous != nil {
 		_, elapsed := sampleWindow(sample, previous)

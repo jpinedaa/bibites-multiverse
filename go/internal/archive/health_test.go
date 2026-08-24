@@ -131,7 +131,9 @@ func TestHostHealthProjectsPressureTrafficAndArchiveRates(t *testing.T) {
 	path := filepath.Join(dir, "service-host.jsonl")
 	now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
 	first := fmt.Sprintf(`{"at":%q,"pressure":{"cpu":{"someUsec":1000000,"fullUsec":0},"memory":{"someUsec":0,"fullUsec":2000000},"io":{"someUsec":0,"fullUsec":3000000}},"vm":{"swapInPages":10,"swapOutPages":20,"oomKills":1},"archive":{"ledgerRecords":1000}}`, now.Add(-70*time.Second).Format(time.RFC3339))
-	last := fmt.Sprintf(`{"at":%q,"pressure":{"cpu":{"someUsec":7000000,"fullUsec":0},"memory":{"someUsec":0,"fullUsec":3500000},"io":{"someUsec":0,"fullUsec":6000000}},"vm":{"swapInPages":13,"swapOutPages":24,"oomKills":2},"traffic":{"available":true,"complete":true,"windowSeconds":60,"requests":120,"status1xx":0,"status2xx":100,"status3xx":0,"status4xx":14,"status5xx":6,"p50Ms":12.5,"p95Ms":48.25,"clientAddress":"198.51.100.4","routes":[{"id":"pages","requests":60,"status5xx":0,"p50Ms":8,"p95Ms":20},{"id":"api","requests":30,"status5xx":3,"p50Ms":20,"p95Ms":60},{"id":"private-customer-route","requests":30,"status5xx":3,"p50Ms":90,"p95Ms":120}]},"archive":{"ledgerRecords":1120}}`, now.Add(-10*time.Second).Format(time.RFC3339))
+	lastAt := now.Add(-10 * time.Second)
+	trafficAt := lastAt.Add(-5 * time.Second)
+	last := fmt.Sprintf(`{"at":%q,"pressure":{"cpu":{"someUsec":7000000,"fullUsec":0},"memory":{"someUsec":0,"fullUsec":3500000},"io":{"someUsec":0,"fullUsec":6000000}},"vm":{"swapInPages":13,"swapOutPages":24,"oomKills":2},"traffic":{"asOf":%q,"available":true,"complete":true,"windowSeconds":60,"requests":120,"status1xx":0,"status2xx":100,"status3xx":0,"status4xx":14,"status5xx":6,"p50Ms":12.5,"p95Ms":48.25,"clientAddress":"198.51.100.4","routes":[{"id":"pages","requests":60,"status5xx":0,"p50Ms":8,"p95Ms":20},{"id":"api","requests":30,"status5xx":3,"p50Ms":20,"p95Ms":60},{"id":"private-customer-route","requests":30,"status5xx":3,"p50Ms":90,"p95Ms":120}]},"archive":{"ledgerRecords":1120}}`, lastAt.Format(time.RFC3339), trafficAt.Format(time.RFC3339))
 	writeHealthFixture(t, path, first+"\n"+last+"\n")
 
 	view := readHostHealth(path, now)
@@ -173,10 +175,121 @@ func TestHostHealthProjectsPressureTrafficAndArchiveRates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"private-customer-route", "198.51.100.4", "clientAddress", "someUsec", "fullUsec"} {
+	for _, forbidden := range []string{"private-customer-route", "198.51.100.4", "clientAddress", "someUsec", "fullUsec", trafficAt.Format(time.RFC3339)} {
 		if strings.Contains(string(body), forbidden) {
 			t.Fatalf("public health JSON disclosed %q: %s", forbidden, body)
 		}
+	}
+}
+
+func TestTrafficFreshnessAppliesToEveryHistoryPoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "service-host.jsonl")
+	now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+	start := now.Add(-4 * time.Minute)
+	trafficSample := func(at time.Time, asOfField string) string {
+		return fmt.Sprintf(`{"at":%q,"traffic":{%s"available":true,"complete":true,"windowSeconds":60,"requests":120,"status1xx":0,"status2xx":120,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":12.5,"p95Ms":48.25,"routes":[{"id":"pages","requests":120,"status5xx":0,"p50Ms":12.5,"p95Ms":48.25}]}}`,
+			at.Format(time.RFC3339), asOfField)
+	}
+	asOf := func(at time.Time) string {
+		return fmt.Sprintf(`"asOf":%q,`, at.Format(time.RFC3339))
+	}
+	lines := []string{
+		trafficSample(start, asOf(start)),
+		trafficSample(start.Add(time.Minute), asOf(start)), // the producer clock froze
+		trafficSample(start.Add(2*time.Minute), ""),
+		trafficSample(start.Add(3*time.Minute), `"asOf":"not-a-time",`),
+		trafficSample(now, asOf(now.Add(31*time.Second))),
+	}
+	writeHealthFixture(t, path, strings.Join(lines, "\n")+"\n")
+
+	view := readHostHealth(path, now)
+	if view.SampleCount != len(lines) || len(view.History) != len(lines) {
+		t.Fatalf("traffic freshness fixture returned %d/%d points, want %d", view.SampleCount, len(view.History), len(lines))
+	}
+	if view.History[0].RequestsPerSec == nil || *view.History[0].RequestsPerSec != 2 ||
+		view.History[0].HTTPP50Ms == nil || view.History[0].HTTPStatus2xxPct == nil {
+		t.Fatalf("fresh traffic point lost its public metrics: %+v", view.History[0])
+	}
+	hasTrafficMetrics := func(point hostHistoryPoint) bool {
+		return point.RequestsPerSec != nil || point.HTTPP50Ms != nil || point.HTTPP95Ms != nil ||
+			point.HTTPStatus1xxPct != nil || point.HTTPStatus2xxPct != nil ||
+			point.HTTPStatus3xxPct != nil || point.HTTPStatus4xxPct != nil ||
+			point.HTTPServerErrorPct != nil
+	}
+	for i, reason := range []string{"frozen", "missing", "malformed", "future"} {
+		if point := view.History[i+1]; hasTrafficMetrics(point) {
+			t.Errorf("%s traffic timestamp produced history metrics: %+v", reason, point)
+		}
+	}
+	if traffic := view.Latest.Traffic; !traffic.Available || traffic.Complete ||
+		traffic.RequestsPerSec != nil || traffic.P50Ms != nil || traffic.P95Ms != nil ||
+		traffic.Status1xxPct != nil || traffic.Status2xxPct != nil ||
+		traffic.Status3xxPct != nil || traffic.Status4xxPct != nil ||
+		traffic.ServerErrorPct != nil || len(traffic.Routes) != 0 {
+		t.Fatalf("future traffic timestamp produced latest metrics: %+v", traffic)
+	}
+}
+
+func TestTrafficFreshnessRequiresCanonicalTimestampAndThirtySecondTolerance(t *testing.T) {
+	regularSampleAt := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+	leapDaySampleAt := time.Date(2024, 2, 29, 16, 0, 0, 0, time.UTC)
+	window := int64(60)
+	requests := int64(60)
+	p50 := 12.5
+	for _, tc := range []struct {
+		name     string
+		sampleAt time.Time
+		asOf     string
+		complete bool
+	}{
+		{"past boundary", regularSampleAt, regularSampleAt.Add(-30 * time.Second).Format(time.RFC3339), true},
+		{"future boundary", regularSampleAt, regularSampleAt.Add(30 * time.Second).Format(time.RFC3339), true},
+		{"frozen outside", regularSampleAt, regularSampleAt.Add(-31 * time.Second).Format(time.RFC3339), false},
+		{"future outside", regularSampleAt, regularSampleAt.Add(31 * time.Second).Format(time.RFC3339), false},
+		{"missing", regularSampleAt, "", false},
+		{"malformed", regularSampleAt, "not-a-time", false},
+		{"leap second", regularSampleAt, "2026-08-24T15:59:60Z", false},
+		{"February 30", time.Date(2026, 3, 2, 16, 0, 0, 0, time.UTC), "2026-02-30T16:00:00Z", false},
+		{"non-leap February 29", time.Date(2026, 3, 1, 16, 0, 0, 0, time.UTC), "2026-02-29T16:00:00Z", false},
+		{"short fields", regularSampleAt, "2026-8-24T16:00:00Z", false},
+		{"offset", regularSampleAt, "2026-08-24T12:00:00-04:00", false},
+		{"fraction", regularSampleAt, "2026-08-24T16:00:00.000Z", false},
+		{"valid leap day", leapDaySampleAt, "2024-02-29T16:00:00Z", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view := publicTraffic(rawTrafficView{
+				AsOf: tc.asOf, Available: true, Complete: true,
+				WindowSeconds: &window, Requests: &requests, Status2xx: &requests, P50Ms: &p50,
+				Routes: []rawTrafficRoute{{ID: "pages", Requests: &requests, P50Ms: &p50}},
+			}, tc.sampleAt)
+			if view.Complete != tc.complete || (view.RequestsPerSec != nil) != tc.complete ||
+				(view.P50Ms != nil) != tc.complete || (view.Status2xxPct != nil) != tc.complete ||
+				(len(view.Routes) != 0) != tc.complete {
+				t.Fatalf("producer time %q produced %+v, want complete=%t", tc.asOf, view, tc.complete)
+			}
+		})
+	}
+}
+
+func TestHostHealthKeepsSampleWithNullMalformedTrafficIntegers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "service-host.jsonl")
+	sampleAt := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+	sample := fmt.Sprintf(`{"at":%q,"traffic":{"asOf":%q,"available":true,"complete":true,"windowSeconds":null,"requests":null,"status1xx":null,"status2xx":null,"status3xx":9007199254740991,"status4xx":null,"status5xx":null,"p50Ms":null,"p95Ms":4.5,"routes":[{"id":"pages","requests":null,"status5xx":0,"p95Ms":2.5}]}}`,
+		sampleAt.Format(time.RFC3339), sampleAt.Format(time.RFC3339))
+	writeHealthFixture(t, path, sample+"\n")
+
+	view := readHostHealth(path, sampleAt)
+	if !view.Available || view.SampleCount != 1 || len(view.History) != 1 || view.Latest == nil {
+		t.Fatalf("normalized traffic integers dropped the host sample: %+v", view)
+	}
+	traffic := view.Latest.Traffic
+	if traffic.Complete || traffic.RequestsPerSec != nil || traffic.P50Ms != nil ||
+		traffic.P95Ms != nil || traffic.Status3xxPct != nil || len(traffic.Routes) != 0 ||
+		view.History[0].RequestsPerSec != nil || view.History[0].HTTPP95Ms != nil ||
+		view.History[0].HTTPStatus3xxPct != nil {
+		t.Fatalf("normalized malformed traffic produced public metrics: latest=%+v history=%+v", traffic, view.History[0])
 	}
 }
 
@@ -204,7 +317,7 @@ func TestDerivedHealthMetricsRejectResetsAndInvalidWindows(t *testing.T) {
 	traffic := publicTraffic(rawTrafficView{
 		Available: true, Complete: true, WindowSeconds: &badWindow,
 		Requests: &requests, Status5xx: &tooManyErrors,
-	})
+	}, current.parsedAt)
 	if traffic.Complete || traffic.RequestsPerSec != nil || traffic.ServerErrorPct != nil {
 		t.Fatalf("invalid traffic window produced public metrics: %+v", traffic)
 	}

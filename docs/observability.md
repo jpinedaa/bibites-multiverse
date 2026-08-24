@@ -173,6 +173,16 @@ An incomplete window stays available but does not become a rate. The service
 sampler copies complete aggregates into its one-minute record. `/api/health`
 divides counts by the recorded window length.
 
+`asOf` records the time that `viewers-presence.sh` produced each document. It must
+use the exact `YYYY-MM-DDTHH:MM:SSZ` form, with a valid calendar date and UTC whole
+seconds. The sampler carries this timestamp into each host record. It rejects
+impossible dates, leap seconds, offsets, fractions, or fields without a leading zero.
+
+A traffic window is complete only when the producer time differs from the host time
+by 30 seconds or less. This tolerance applies equally to past and future timestamps.
+The API repeats both rules for each history point. It sets `complete` false and omits
+aggregate and route rates, percentiles, and status percentages from invalid points.
+
 The sampler also records the archive ledger count. The API differences adjacent
 counts and divides by elapsed sample time. Missing samples and counter resets
 become gaps, not negative archive rates.
