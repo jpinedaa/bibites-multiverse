@@ -138,6 +138,16 @@ mod-disconnected slot can be narrowed without guessing about custody. Enforcemen
 the 24-hour comparison must use rates on each side of the promotion rather than restart-reset
 aggregate totals.
 
+The same watch exposed an operator-surface defect rather than an admission defect: the live map
+animated copied `MIGRATION_PAYLOAD` offers immediately, before the destination answered. Slot 9
+could therefore be visibly "entered" even while its enforcing gate NACKed every new offer, and the
+map's migration-ID dedup could hide the later accepted reroute. The archive now correlates each
+offer with the destination peer's `MIGRATION_ACK`, which is emitted only after the game accepts the
+spawn. Rejections do not animate, reroutes resolve to the peer that actually ACKs, and the page no
+longer guesses arrivals from payload-derived counters if the hop feed is unavailable. The lane
+rate remains explicitly labelled as migration offers, so routing pressure stays visible beside a
+closed gate without being presented as delivered population.
+
 The service host then activated the archive and relay binaries built from `c321aad`. The guarded
 archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
 The archive subscribed before any placement claim, so the receipt reports a complete record. At

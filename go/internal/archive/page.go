@@ -885,12 +885,13 @@ g.lg:hover .lane{stroke-width:4}
 .lanelbl.closedlbl{fill:var(--dark)}
 .edgebar{stroke:var(--hole);stroke-width:2.5;stroke-linecap:round}
 .wraplbl{font-size:10px;fill:var(--dim)}
-/* ---- a hop: one named creature crossing one lane, right now ----
-   The lane's own label says how FAST it runs. This says WHO just crossed it,
+/* ---- a hop: one named creature delivered through one lane, right now ----
+   The lane's own label says how FAST offers run. This says WHO the receiver
+   acknowledged spawning,
    and it has to win the eye against a field of 420 resident glyphs: it is
    bigger, it is stroked, and it drops a shadow the cell glyphs do not have.
-   Neutral is the colour of a hop whose envelope carried no species block —
-   never a guessed name, and never omitted. */
+   Neutral is the colour of a delivery whose payload carried no species block —
+   never a guessed name, and never omitted. Rejected offers never reach here. */
 .hopg{pointer-events:none}
 .hopbib{stroke:var(--hot);stroke-width:.9;filter:drop-shadow(0 0 5px rgba(255,255,255,.55))}
 .hopbib.neutral{fill:var(--dim)}
@@ -898,7 +899,8 @@ g.lg:hover .lane{stroke-width:4}
 /* The SAME event under reduced motion. The glyph is placed where a travelling
    one would have ended — the far end of the lane, at the edge of the world it
    reached — and it fades there. It never travels, so there is no movement to
-   object to, and the crossing is still shown rather than silently dropped. */
+   object to, and the confirmed delivery is still shown rather than silently
+   dropped. */
 .hopstill{animation:hopstill 1.1s ease-out forwards}
 @keyframes hopstill{0%{opacity:0}16%{opacity:1}60%{opacity:1}100%{opacity:0}}
 .axis{fill:var(--dim);font-size:11px}
@@ -1061,7 +1063,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
 </header>
 <nav class="tabs" id="tabs" role="tablist" aria-label="views">
   <button type="button" class="tab" role="tab" id="tab-map" data-tab="map" aria-controls="p-map" aria-selected="true" tabindex="0">live map
-    <span class="sub">worlds, lanes, crossings</span></button>
+    <span class="sub">worlds, lanes, confirmed deliveries</span></button>
   <button type="button" class="tab" role="tab" id="tab-species" data-tab="species" aria-controls="p-species" aria-selected="false" tabindex="-1">species
     <span class="sub">what is alive, where, and where it came from</span></button>
   <button type="button" class="tab" role="tab" id="tab-settings" data-tab="settings" aria-controls="p-settings" aria-selected="false" tabindex="-1">settings
@@ -1078,7 +1080,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         <span><i class="open"></i><span class="term" data-t="lane">lane open</span></span>
         <span><i class="bypass"></i><span class="term" data-t="bypass">bypass</span></span>
         <span><i class="closed"></i>lane closed</span>
-        <span><i class="bibi hopi"></i><span class="term" data-t="hopfeed">a creature crossing, just now</span></span>
+        <span><i class="bibi hopi"></i><span class="term" data-t="hopfeed">a confirmed delivery, just now</span></span>
         <span><span class="term" data-t="shuttle">two lanes, one each way</span></span>
         <span><span class="term" data-t="wrap">wrap-around</span></span>
         <span><i class="bibi"></i><span class="term" data-t="species">one creature, coloured by species</span></span>
@@ -1293,7 +1295,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
   <code>#map</code>, <code>#species</code>, <code>#settings</code>; <code>#tree</code> was the
   genealogy&rsquo;s own tab before it and the census list became one drawing, and it still lands
   there. JSON:
-  <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
+  <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of receiver-confirmed deliveries,
   bounded in time and in count, and kept out of the durable sample file on purpose),
   <code>/api/species/tree</code> (what is alive, joined to the crossing record and reduced to its
   branch points &mdash; its own endpoint so a derived tree is not written to disk once a minute),
@@ -1346,9 +1348,9 @@ var G = {
  pace:["pace","Two numbers about arrivals into this world: how many are queued waiting to be let in, and the cap they are queued behind. The cap counts per SIMULATED minute of this world — so a world at ×10 gets through its allowance ten times faster in real time, and at the same rate as the world itself experiences it. Queued 0 against any cap is a world keeping up. A queue that never drains means the cap is set too low. A world whose helper program is too old to report its cap shows a ? there: unknown, never the shipped default, which has been changed three times."],
  lost:["lost","A creature that set off for another world and was never heard of again. Travelling between worlds is the one dangerous thing a creature here can do: it is handed over exactly once, and if it does not arrive it is gone — it is not sent again, and it does not come home. The count is per world and it only ever goes up. A world with a rising count has a neighbour that keeps disappearing mid-crossing."],
  bounce:["bounce","A migration that turned back before it was handed to anybody, and returned to the world it started in. It happens when there is nowhere to send the creature, or when the far world refuses it outright — in both cases the far world is known not to have it, so a return cannot make a second copy. Nothing turns back on a guess."],
- migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane carries a number — how many crossings a minute it has been measuring — and when a hop actually happens, that creature itself, drawn in its own species' colour, sets off along the lane and travels to the far world. Nothing else moves on a lane: what you see travelling is always a real creature that really crossed."],
- hopfeed:["hops just now","The last minute of crossings, kept in memory and nowhere else. It is a record of who CROSSED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census, and these come from the migrations the archive was copied on. Never add the two together. A hop whose message carried no species name travels as a plain grey creature — unknown, never guessed."],
- motion:["motion","Whether a crossing TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way a crossing is still drawn and still counted: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
+ migration:["migration / hop","One creature's attempted trip from one world to the next. A lane's number measures migration offers copied to the archive; an offer can still be refused by population admission, so that number is not a delivered count. A creature moves on the map only after the receiving sidecar sends MIGRATION_ACK, which it does after the destination game has acknowledged spawning it. Rejected offers never move. If the same migration is rerouted, its one glyph goes to the world that eventually acknowledges it."],
+ hopfeed:["confirmed deliveries just now","The last minute of deliveries whose receiving game acknowledged the spawn, kept in memory and nowhere else. It is a record of who ARRIVED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census. Rejected admission attempts do not appear here, and a reroute appears only at its eventual acknowledged destination. Never add this feed to the census. A delivery whose message carried no species name travels as a plain grey creature — unreported, never guessed."],
+ motion:["motion","Whether a confirmed delivery TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way the acknowledged delivery is still shown: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
  population:["population","How many living creatures the world holds, as its own game reported it. Each little creature drawn inside a cell is one of them."],
  species:["species","A kind of creature, with a two-part name like 'Cyanea velox'. Every creature in a cell is drawn in its species' colour, and the same species is the same colour in every world, so you can see a kind spreading across the map. Hover one to see how many there are and where else it lives."],
@@ -1534,11 +1536,11 @@ var POSCW=6.92, POSGAP=6, POSW=CW-CPAD-CPAD-SDOTX-SDOTR-POSGAP;
    no peer-chosen text can ever reach the mark or move it. BCW is the nine
    characters of the label at its own size plus the pill's padding. */
 var BCX=CPAD, BCY=1, BCW=66, BCH=12, BCTX=CPAD+7, BCTY=10;
-var mapSig = "", anim = [], reduced = false, prevMig = {}, rafId = 0;
+var mapSig = "", anim = [], reduced = false, rafId = 0;
 /* The hop animation's state (§17, B14). hopLayer sits ABOVE the cells;
    everything else is bounded on purpose and the bounds are named at HOPMS. */
 var hopLayer = null, hopSeen = {}, hopSeenQ = [], hopQ = [], hopsLive = [],
-    nextHopAt = 0, hopsPrimed = false, hopFeedOK = false;
+    nextHopAt = 0, hopsPrimed = false;
 
 /* LSEP is how far a DIRECTED lane sits off its axis centreline.
    Two-way lanes (D17) put two arrows in every gutter, and the choice made here
@@ -2070,7 +2072,7 @@ function laneTitle(l, g){
     }
     if (parts.length) s += "\nskipping "+parts.join(", ");
   }
-  s += "\n"+l.migrations+" migration(s) recorded, "+l.perMinute.toFixed(2)+"/min recently";
+  s += "\n"+l.migrations+" migration offer(s) recorded, "+l.perMinute.toFixed(2)+"/min recently";
   return s;
 }
 
@@ -4881,7 +4883,7 @@ function paintMap(d){
       // The lane's rate is a NUMBER and only a number. It used to also be a
       // stream of ambient dots walking the arrow, and that was wallpaper: it
       // moved constantly, it said nothing the label did not say, and beside the
-      // hop glyphs — which are real, individual creatures — it invited the
+      // delivery glyphs — which are receiver-acknowledged creatures — it invited the
       // reader to count animation as traffic. The dots are gone; the
       // measurement they paced is right here.
       if (!l.open) lab.textContent = "closed: "+l.reason;
@@ -4889,15 +4891,6 @@ function paintMap(d){
         + " · " + rate(l.perMinute) + "/min";
       else lab.textContent = rate(l.perMinute)+"/min";
     }
-    // POLL-DIFFERENCING IS THE FALLBACK, and it is only a fallback. When
-    // /api/hops is answering, that arrival is already travelling the lane as its
-    // own species glyph (§17, B14) and flashing the cell here too would say one
-    // crossing twice. When the feed is unreachable, this is all that is left of
-    // "something arrived" — a pure opacity fade at the destination, which needs
-    // no frame loop and is therefore the same signal under reduced motion.
-    var was = prevMig[key];
-    if (was != null && l.migrations > was && !hopFeedOK) flashCell(l.toSlot);
-    prevMig[key] = l.migrations;
   }
 }
 
@@ -4912,9 +4905,10 @@ function flashCell(slot){
 
 /* ---------------------------------------------------------- the hop animation
    contract-b-m4.md §17, B14 (D19). /api/hops is a bounded feed of the last
-   minute of crossings — lane, endpoints, timestamp and the species block the
-   envelope carried. Every entry the page has not seen before sends THAT
-   SPECIES' OWN GLYPH down that lane, from the source world to the destination.
+   minute of receiver-confirmed deliveries — lane, endpoints, timestamp and the
+   species block the payload carried. Every entry exists only after the matching
+   MIGRATION_ACK, and sends THAT SPECIES' OWN GLYPH down that lane from the
+   source world to the destination that acknowledged spawning it.
 
    Four rules, three inherited and one this loop adds:
 
@@ -4926,8 +4920,9 @@ function flashCell(slot){
      <title> built with createElementNS and through nothing else; see the fenced
      region above, where hopName and buildHopGlyph live for that reason.
 
-     LEDGER, NOT CENSUS. A hop glyph says "this one crossed". The glyphs inside a
-     cell say "these live here". Two facts, two sources, never summed.
+     DELIVERY, NOT CENSUS. A hop glyph says "this receiver acknowledged it".
+     The glyphs inside a cell say "these live here". Two facts, two sources,
+     never summed.
 
      AND BOUNDED, WHICH IS THIS LOOP'S OWN. A dam releasing hundreds of arrivals
      must not put hundreds of creatures on the map: at most HOPMAX travel at
@@ -4969,7 +4964,7 @@ function onHops(f){
     if (hopMarkSeen(hp.migrationId)) continue;
     // Lanes are keyed fromSlot+edge, which is what makes the two directions of a
     // pair two things to animate. A hop whose lane is closed or not drawn — it
-    // crossed, then the map changed — is dropped rather than guessed onto
+    // was acknowledged, then the map changed — is dropped rather than guessed onto
     // another arrow.
     var a = animFor(hp.fromSlot + hp.exitEdge);
     if (!a) continue;
@@ -5048,7 +5043,7 @@ function stepHops(ts, dt){
       if (q.el.parentNode) q.el.parentNode.removeChild(q.el);
       hopsLive.splice(i,1);
       // It ARRIVED. The destination cell says so, which is the same flash the
-      // poll-differencing fallback fires.
+      // reduced-motion form fires.
       flashCell(q.to);
       continue;
     }
@@ -5698,8 +5693,9 @@ async function tickBrains(){
    B14's decision and not an accident: /api/status is what the archive
    serializes verbatim into its durable metrics file once a minute, and a
    per-organism feed does not belong in a file that is never rewritten. A page
-   whose hop endpoint fails keeps its map and every number on it, and falls back
-   to flashing the destination cell when the migration counters move. */
+   whose hop endpoint fails keeps its map and every number on it, but pauses
+   delivery animation: the aggregate migration counters measure offers and
+   cannot honestly identify which destination accepted one. */
 async function tickHops(){
   // Map-only: the glyphs travel the map's own lane paths, and a hidden panel
   // has none to travel. hopsPrimed is reset on the way back in, so returning to
@@ -5708,10 +5704,7 @@ async function tickHops(){
   try {
     var r = await fetch("api/hops", {cache:"no-store"});
     onHops(await r.json());
-    hopFeedOK = true;
-  } catch(e){
-    hopFeedOK = false;
-  }
+  } catch(e){}
 }
 var HISTORY_RANGE = "all", HISTORY_SEQ = 0;
 function setHistoryRange(range){

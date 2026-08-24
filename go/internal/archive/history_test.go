@@ -798,12 +798,19 @@ func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
 	if !strings.Contains(page, " hopfeed:[") {
 		t.Fatal("the glossary never distinguishes who CROSSED from who LIVES here")
 	}
-	// A page that cannot reach the feed falls back to differencing the migration
-	// counters and flashing the destination, and must not do that while the feed
-	// is answering — the same organism would be announced twice.
-	if !strings.Contains(page, "if (was != null && l.migrations > was && !hopFeedOK) flashCell(l.toSlot);") {
-		t.Fatal("the poll-differencing fallback is not gated on an unreachable hop feed; " +
-			"one organism would be drawn twice")
+	// MIGRATION_PAYLOAD counters measure offers, not completed deliveries. If
+	// the delivery feed is unreachable the page must pause animation instead of
+	// turning a rejected population-admission attempt into a false arrival.
+	for _, forbidden := range []string{"prevMig", "hopFeedOK", "l.migrations > was"} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("the page still infers a delivery from offer counters: %q", forbidden)
+		}
+	}
+	for _, want := range []string{"MIGRATION_ACK", "Rejected offers never move",
+		"eventual acknowledged destination"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page does not explain delivery-confirmed motion: missing %q", want)
+		}
 	}
 	// The feed is polled UNCONDITIONALLY. It used to be gated on
 	// prefers-reduced-motion, which meant a reader whose system asks for less
@@ -904,7 +911,7 @@ func TestReducedMotionDegradesRatherThanSuppresses(t *testing.T) {
 // two things moving along one lane, one of them evidence and one of them
 // decoration, drawn at the same size on the same path.
 //
-// WHAT MOVES ON THIS MAP IS NOW ALWAYS A REAL CREATURE THAT REALLY CROSSED.
+// WHAT MOVES ON THIS MAP IS NOW ALWAYS A RECEIVER-ACKNOWLEDGED DELIVERY.
 func TestTheMapHasNoAmbientPulses(t *testing.T) {
 	page := statusPageHTML
 	for _, gone := range []string{
