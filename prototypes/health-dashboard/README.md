@@ -25,15 +25,22 @@ explanatory paragraphs.
 Each layer has a fixed color. Health state uses dots, borders, and missing segments. This rule
 prevents one color from having two meanings.
 
+Each system-map row keeps its four nodes on one line. A narrow viewport scrolls the row
+horizontally. It does not move the last node to a new line.
+
 ## Visual rules
 
-- All time charts use one time range and one aligned time axis.
-- Deployment and restart marks appear on the charts.
+- All full time charts show values on one aligned UTC time axis.
+- Pointer movement selects the nearest sample and shows its exact timestamp and series values.
+- Left and right arrow keys provide the same exact sample inspection.
+- A missing value appears as `not collected` in the sample tooltip.
+- The complete dashboard will align deployment and restart marks with these charts.
 - A gap means unknown data. A gap never means zero.
 - When a rate gives more information, rate charts replace cumulative totals.
 - Thresholds appear as lines or bands.
 - Legends stay next to their charts.
 - Units appear with each value.
+- Every system-map connector explains its source, destination, and measurement state in a tooltip.
 - Every metric, chart, legend, and status mark has a hover and keyboard-focus tooltip.
 - Tables are limited to endpoints, services, and other exact comparisons.
 - Raw fields remain available below each layer, not on the overview.
@@ -68,6 +75,9 @@ organization and visual grammar, but it removes scenarios and static values. It 
 
 The implementation uses the current two-hour host window. The complete design still calls for a
 shared off-host time store. That store is not part of this change.
+
+The host-resource and TCP charts show four UTC time labels. Their crosshair reports the nearest
+stored sample without interpolation.
 
 ## Mockup
 
