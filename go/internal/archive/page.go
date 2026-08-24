@@ -5113,22 +5113,13 @@ function hopAttempt(d, hp, to, refused){
 function hopPlan(hp, d){
   if (!d || !d.haveStatus) return null;
   var refused = [], seen = {}, raw = hp.refusedSlots || [];
+  // Refusals are event evidence, not current status. A slot can connect or
+  // close after this hop's ACK, so only the feed's copied NACK evidence can add
+  // a stopped attempt.
   for (var i=0;i<raw.length;i++){
     var slot = Number(raw[i]);
     if (slot > 0 && slot !== hp.toSlot && !seen[slot]){
       refused.push(slot); seen[slot] = true;
-    }
-  }
-  // Compatibility with a just-upgraded archive or a cross-peer ordering gap:
-  // if the confirmed receiver differs from today's effective lane and the
-  // intervening receiver is visibly enforcing CLOSED, that one blocked stop is
-  // safe to infer from the two live facts. It is never inferred from an offer
-  // counter alone.
-  var lane = hopLane(d, hp.fromSlot, hp.exitEdge);
-  if (!refused.length && lane && lane.open && lane.toSlot !== hp.toSlot){
-    var first = hopSlot(d, lane.toSlot);
-    if (first && first.admissionEnforcing && first.admissionClosed){
-      refused.push(first.slot); seen[first.slot] = true;
     }
   }
   var attempts = [];
