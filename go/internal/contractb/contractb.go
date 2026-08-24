@@ -947,6 +947,9 @@ func (p *MigrationPayload) Validate() error {
 	if p.DestSlot < 1 {
 		return invalid("destSlot %d is not a slot", p.DestSlot)
 	}
+	if p.Reroute != nil && p.Reroute.Count < 1 {
+		return invalid("reroute.count %d is not positive", p.Reroute.Count)
+	}
 	if !contracta.ValidEdge(p.ExitEdge) {
 		// All four values, since D17 (§17, B13). The relay has never ROUTED on this
 		// field — routing is on destSlot — so it is carried for the record and
@@ -1148,14 +1151,22 @@ type Pong struct {
 // Routing is the only part of data the relay decodes (contract-b-m4.md §5). It
 // never touches body.bb8 and never decodes the lineage annex.
 type Routing struct {
+	SourcePeer string `json:"sourcePeer"`
+	DestPeer   string `json:"destPeer"`
+	DestSlot   int    `json:"destSlot"`
+}
+
+// MigrationRouting is the payload-only projection the relay reads since
+// contract-b/4.2. Keeping it separate from Routing prevents an ignorable
+// reroute field on ACK, NACK, or GENOME traffic from changing those handlers.
+type MigrationRouting struct {
 	SourcePeer string          `json:"sourcePeer"`
-	DestPeer   string          `json:"destPeer"`
 	DestSlot   int             `json:"destSlot"`
 	Reroute    *RoutingReroute `json:"reroute,omitempty"`
 }
 
-// RoutingReroute is the one nested field the relay reads from reroute since
-// contract-b/4.2. All other reroute metadata remains opaque to routing.
+// RoutingReroute is the one nested field the relay reads from a migration's
+// reroute block. All other reroute metadata remains opaque to routing.
 type RoutingReroute struct {
 	Count int `json:"count"`
 }

@@ -220,15 +220,17 @@ func TestRelayDrainRefusalCarriesNoAttemptProof(t *testing.T) {
 	id := wire.NewUUID()
 	source.send(contractb.TypeMigrationPayload, attemptPayload(id, "peer-source", res.Slot, 0))
 	nack := waitNack(t, source, id, contractb.NackNotForwarded)
-	if nack.RefusedAttempt != nil {
-		t.Fatalf("relay drain exposed attempt proof %+v; drain must wait/reconnect, not walk destinations",
-			nack.RefusedAttempt)
+	if nack.RefusedAttempt != nil || nack.NeverForwarded != nil || nack.RelaySessionID != "" {
+		t.Fatalf("relay drain exposed non-delivery proof %+v; drain must wait/reconnect, not walk destinations",
+			nack)
 	}
 }
 
 func TestRelayRejectsInvalidAttemptCorrelationInput(t *testing.T) {
 	negative := attemptPayload(wire.NewUUID(), "peer-source", 1, 0)
 	negative.Reroute = &contractb.Reroute{Count: -1}
+	zero := attemptPayload(wire.NewUUID(), "peer-source", 1, 0)
+	zero.Reroute = &contractb.Reroute{}
 	for _, tc := range []struct {
 		name string
 		data any
@@ -236,6 +238,10 @@ func TestRelayRejectsInvalidAttemptCorrelationInput(t *testing.T) {
 		{
 			name: "negative reroute count",
 			data: negative,
+		},
+		{
+			name: "zero reroute count",
+			data: zero,
 		},
 		{
 			name: "malformed reroute count",
@@ -257,5 +263,23 @@ func TestRelayRejectsInvalidAttemptCorrelationInput(t *testing.T) {
 				t.Fatalf("invalid reroute closed %d %q, want 4003 with reason", code, reason)
 			}
 		})
+	}
+}
+
+func TestMigrationRoutingKeepsOtherRerouteFieldsOpaque(t *testing.T) {
+	r := startCredRelay(t, credRelayOptions{})
+	r.mint("peer-source", peercred.GrantPeer)
+	p := r.dial(dialSpec{
+		credentialPeer: "peer-source", claimPeer: "peer-source", sendHandshake: true,
+	})
+	p.wait(contractb.TypeHandshakeAck, 2*time.Second)
+	id := wire.NewUUID()
+	p.send(contractb.TypeMigrationPayload, json.RawMessage(fmt.Sprintf(
+		`{"migrationId":%q,"sourcePeer":"peer-source","destSlot":999,`+
+			`"reroute":{"count":1,"fromSlot":"opaque","proof":[],"atMs":{}}}`,
+		id)))
+	nack := waitNack(t, p, id, contractb.NackSlotVacant)
+	if nack.Code != contractb.NackSlotVacant || p.isClosed() {
+		t.Fatalf("opaque reroute metadata changed routing: nack=%+v closed=%v", nack, p.isClosed())
 	}
 }

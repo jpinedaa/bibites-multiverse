@@ -336,8 +336,8 @@ func TestTransportRefusalProofSafetyMatrix(t *testing.T) {
 			otherSession, &contractb.MigrationAttempt{DestSlot: 2}, false, false},
 		{"contradictory same-attempt receipt", contractb.NackNotForwarded, contractb.BoolPtr(true),
 			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, true, false},
-		{"relay drain has no attempt proof", contractb.NackNotForwarded, contractb.BoolPtr(true),
-			refusalTestSession, nil, false, false},
+		{"relay drain has no proof fields", contractb.NackNotForwarded, nil,
+			"", nil, false, false},
 		{"different relay code", contractb.NackPeerOffline, contractb.BoolPtr(true),
 			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, false, false},
 	}
