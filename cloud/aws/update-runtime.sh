@@ -2,6 +2,71 @@
 # Install one staged, content-addressed runtime without replacing the EC2 host.
 set -euo pipefail
 
+usage() {
+  cat >&2 <<'EOF'
+usage: update-runtime.sh \
+  --expected-prior-runtime-object <runtime-object> \
+  --expected-prior-runtime-sha256 <sha256> \
+  --expected-prior-pointer-etag <quoted-etag>
+EOF
+}
+
+expected_prior_runtime_object=
+expected_prior_runtime_sha256=
+expected_prior_pointer_etag=
+seen_expected_prior_runtime_object=0
+seen_expected_prior_runtime_sha256=0
+seen_expected_prior_pointer_etag=0
+# The operator seals these inputs from one pointer read before authorization.
+# They do not belong to the candidate staging receipt.
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --expected-prior-runtime-object)
+      [ "$seen_expected_prior_runtime_object" -eq 0 ] && [ "$#" -ge 2 ] || {
+        usage
+        exit 2
+      }
+      expected_prior_runtime_object="$2"
+      seen_expected_prior_runtime_object=1
+      shift
+      ;;
+    --expected-prior-runtime-sha256)
+      [ "$seen_expected_prior_runtime_sha256" -eq 0 ] && [ "$#" -ge 2 ] || {
+        usage
+        exit 2
+      }
+      expected_prior_runtime_sha256="$2"
+      seen_expected_prior_runtime_sha256=1
+      shift
+      ;;
+    --expected-prior-pointer-etag)
+      [ "$seen_expected_prior_pointer_etag" -eq 0 ] && [ "$#" -ge 2 ] || {
+        usage
+        exit 2
+      }
+      expected_prior_pointer_etag="$2"
+      seen_expected_prior_pointer_etag=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+  shift
+done
+if [ "$seen_expected_prior_runtime_object" -ne 1 ] ||
+   [ "$seen_expected_prior_runtime_sha256" -ne 1 ] ||
+   [ "$seen_expected_prior_pointer_etag" -ne 1 ]; then
+  echo 'Set all three expected-prior inputs for the runtime update.' >&2
+  usage
+  exit 2
+fi
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
 validation="$repo/cloud/aws/lib/validation.sh"
@@ -54,6 +119,19 @@ done
 }
 [ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
   echo 'MANIFEST_OBJECT does not match the pinned manifest digest' >&2
+  exit 1
+}
+bibites_require_s3_key "$expected_prior_runtime_object" \
+  'expected prior runtime object'
+bibites_require_sha256 "$expected_prior_runtime_sha256" \
+  'expected prior runtime SHA-256'
+[ "$expected_prior_runtime_object" = \
+    "runtime/$expected_prior_runtime_sha256.tar.gz" ] || {
+  echo 'The expected prior runtime object does not match its SHA-256 value.' >&2
+  exit 1
+}
+[[ "$expected_prior_pointer_etag" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]] || {
+  echo 'The expected prior pointer ETag must be one quoted S3 ETag.' >&2
   exit 1
 }
 for object_name in RUNTIME_OBJECT GAME_OBJECT BEPINEX_OBJECT MANIFEST_OBJECT; do
@@ -236,7 +314,7 @@ jq -e --arg instance "$instance" '
 
 read -r -d '' remote_script <<'REMOTE' || true
 set -euo pipefail
-[ "$#" -eq 17 ] || { echo 'runtime update received the wrong argument count' >&2; exit 2; }
+[ "$#" -eq 20 ] || { echo 'runtime update received the wrong argument count' >&2; exit 2; }
 
 aws_region="$1"
 expected_account="$2"
@@ -255,6 +333,9 @@ pointer_credential_prefix="${14}"
 relay_private_ip="${15}"
 relay_domain="${16}"
 runtime_root="${17}"
+expected_prior_runtime_object="${18}"
+expected_prior_runtime_sha256="${19}"
+expected_prior_pointer_etag="${20}"
 runtime_key="$artifact_prefix/$runtime_object"
 
 archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
@@ -283,7 +364,9 @@ set +e
   "$artifact_bucket" "$artifact_prefix" "$runtime_object" "$runtime_sha256" \
   "$game_object" "$game_sha256" "$bepinex_object" "$bepinex_sha256" \
   "$manifest_object" "$manifest_sha256" "$pointer_credential_prefix" \
-  "$relay_private_ip" "$relay_domain" "$runtime_root"
+  "$relay_private_ip" "$relay_domain" "$runtime_root" \
+  "$expected_prior_runtime_object" "$expected_prior_runtime_sha256" \
+  "$expected_prior_pointer_etag"
 transaction_status=$?
 set -e
 exit "$transaction_status"
@@ -307,6 +390,9 @@ remote_arguments=(
   "$relay_private_ip"
   "$relay_domain"
   /opt/bibites-runtime
+  "$expected_prior_runtime_object"
+  "$expected_prior_runtime_sha256"
+  "$expected_prior_pointer_etag"
 )
 encoded="$(printf '%s' "$remote_script" | base64 -w0)"
 printf -v quoted_arguments ' %q' "${remote_arguments[@]}"
@@ -364,7 +450,7 @@ case "$invocation_status" in
   Failed)
     response_code="$(jq -r '.ResponseCode // empty' <<<"$invocation")"
     case "$response_code" in
-      2|20|21|22|23|24|73) exit "$response_code" ;;
+      2|20|21|22|23|24|26|73) exit "$response_code" ;;
       *) unknown_partial ;;
     esac
     ;;

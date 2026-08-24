@@ -29,6 +29,7 @@ access_key_id=ASIAABCDEFGHIJKLMNOP
 secret_access_key=ssssssssssssssssssssssssssssssssssssssss
 session_token=tttttttttttttttttttttttttttttttt
 credential_prefix=/bibites/cloud/runtime-pointer/fixture
+initial_pointer_etag='"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
 third_pointer_sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 game_snapshot="$test_root/game.zip"
 bepinex_snapshot="$test_root/bepinex.zip"
@@ -302,7 +303,7 @@ write_pointer() {
   jq -cn --arg sha "$sha" \
     '{schema:1,runtimeFile:("runtime/" + $sha + ".tar.gz"),runtimeSha256:$sha}' \
     >"$pointer_state"
-  printf '%s\n' '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' >"$etag_state"
+  printf '%s\n' "$initial_pointer_etag" >"$etag_state"
 }
 
 write_cloud_conf() {
@@ -316,6 +317,9 @@ EOF
 
 run_transaction() {
   local label="$1" tree="$2" archive="$3" sha="$4" scenario="$5"
+  local expected_prior_object="${6:-runtime/$prior_sha.tar.gz}"
+  local expected_prior_sha="${7:-$prior_sha}"
+  local expected_prior_etag="${8:-$initial_pointer_etag}"
   env PATH="$mock_bin:$PATH" TX_LABEL="$label" MOCK_SCENARIO="$scenario" \
     MOCK_AWS_LOG="$aws_log" MOCK_OBJECT_STORE="$object_store" \
     MOCK_POINTER_STATE="$pointer_state" MOCK_ETAG_STATE="$etag_state" \
@@ -340,7 +344,8 @@ run_transaction() {
       vol-0123456789abcdef0 fixture-artifacts cloud/v1 \
       "runtime/$sha.tar.gz" "$sha" "$game_object" "$game_sha" \
       "$bepinex_object" "$bepinex_sha" "$manifest_object" "$manifest_sha" \
-      "$credential_prefix" 10.0.0.5 relay.example.test "$runtime_root"
+      "$credential_prefix" 10.0.0.5 relay.example.test "$runtime_root" \
+      "$expected_prior_object" "$expected_prior_sha" "$expected_prior_etag"
 }
 
 wait_for_file() {
@@ -404,18 +409,143 @@ fi
 
 : >"$activation_release"
 wait "$pid_a"
+set +e
 wait "$pid_b"
-[ "$(<"$runtime_root/label")" = B ] || {
-  echo 'serialized transactions did not leave candidate B active' >&2
+stale_b_status=$?
+set -e
+[ "$stale_b_status" -eq 26 ] || {
+  echo "stale serialized transaction returned $stale_b_status instead of 26" >&2
+  cat "$test_root/b.out" >&2
   exit 1
 }
-[ "$(jq -r .runtimeSha256 "$pointer_state")" = "$candidate_b_sha" ] || {
-  echo 'serialized transactions left the host and pointer incoherent' >&2
+[ "$(<"$runtime_root/label")" = A ] || {
+  echo 'a stale serialized transaction changed the active runtime' >&2
+  exit 1
+}
+[ "$(jq -r .runtimeSha256 "$pointer_state")" = "$candidate_a_sha" ] || {
+  echo 'a stale serialized transaction changed the runtime pointer' >&2
   exit 1
 }
 grep -q '^B[[:space:]].*s3api get-object' "$aws_log"
+if grep -Eq '^B-(stop|install)$' "$action_log"; then
+  echo 'a stale serialized transaction reached service mutation' >&2
+  exit 1
+fi
+if grep -q '^B[[:space:]].*s3api put-object --bucket' "$aws_log"; then
+  echo 'a stale serialized transaction attempted pointer publication' >&2
+  exit 1
+fi
+grep -Fq 'locked pointer does not match the expected prior runtime object' \
+  "$test_root/b.out"
 [ "$(grep -c '^MANIFEST_KEY=' "$cloud_conf")" -eq 1 ]
 grep -Fxq 'MANIFEST_KEY=cloud/v1/worlds.json' "$cloud_conf"
+
+# A locked preimage mismatch is status 26. It cannot stop a service, install a
+# runtime, rewrite the host configuration, or publish the pointer.
+for prior_mismatch in object_sha etag; do
+  rm -rf "$runtime_root"
+  cp -a "$prior_tree" "$runtime_root"
+  write_pointer "$prior_sha"
+  write_cloud_conf
+  cp "$pointer_state" "$test_root/$prior_mismatch-pointer-before"
+  cp "$etag_state" "$test_root/$prior_mismatch-etag-before"
+  cp "$cloud_conf" "$test_root/$prior_mismatch-cloud-conf-before"
+  : >"$aws_log"
+  : >"$action_log"
+  rm -f "$candidate_active"
+  case "$prior_mismatch" in
+    object_sha)
+      mismatch_object="runtime/$candidate_a_sha.tar.gz"
+      mismatch_sha="$candidate_a_sha"
+      mismatch_etag="$initial_pointer_etag"
+      ;;
+    etag)
+      mismatch_object="runtime/$prior_sha.tar.gz"
+      mismatch_sha="$prior_sha"
+      mismatch_etag='"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+      ;;
+  esac
+  set +e
+  mismatch_output="$(run_transaction B "$candidate_b_tree" \
+    "$candidate_b_archive" "$candidate_b_sha" normal \
+    "$mismatch_object" "$mismatch_sha" "$mismatch_etag" 2>&1)"
+  mismatch_status=$?
+  set -e
+  [ "$mismatch_status" -eq 26 ] || {
+    echo "$prior_mismatch mismatch returned $mismatch_status instead of 26" >&2
+    echo "$mismatch_output" >&2
+    exit 1
+  }
+  [ "$(<"$runtime_root/label")" = P ]
+  cmp -s "$test_root/$prior_mismatch-pointer-before" "$pointer_state"
+  cmp -s "$test_root/$prior_mismatch-etag-before" "$etag_state"
+  cmp -s "$test_root/$prior_mismatch-cloud-conf-before" "$cloud_conf"
+  [ ! -s "$action_log" ] || {
+    echo "$prior_mismatch mismatch reached service mutation" >&2
+    exit 1
+  }
+  if grep -Fq 's3api put-object --bucket' "$aws_log"; then
+    echo "$prior_mismatch mismatch attempted pointer publication" >&2
+    exit 1
+  fi
+  case "$prior_mismatch" in
+    object_sha)
+      grep -Fq 'expected prior runtime object' <<<"$mismatch_output"
+      grep -Fq 'expected prior runtime SHA-256' <<<"$mismatch_output"
+      ;;
+    etag)
+      grep -Fq 'expected prior ETag' <<<"$mismatch_output"
+      ;;
+  esac
+done
+
+# The remote transaction rejects malformed expected-prior inputs before AWS or
+# service access. The local wrapper applies the same gate before SSM dispatch.
+for malformed_prior in object sha256 etag relationship; do
+  case "$malformed_prior" in
+    object)
+      malformed_object='../unsafe-runtime.tar.gz'
+      malformed_sha="$prior_sha"
+      malformed_etag="$initial_pointer_etag"
+      ;;
+    sha256)
+      malformed_object=runtime/abcd.tar.gz
+      malformed_sha=abcd
+      malformed_etag="$initial_pointer_etag"
+      ;;
+    etag)
+      malformed_object="runtime/$prior_sha.tar.gz"
+      malformed_sha="$prior_sha"
+      malformed_etag=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      ;;
+    relationship)
+      malformed_object="runtime/$candidate_a_sha.tar.gz"
+      malformed_sha="$prior_sha"
+      malformed_etag="$initial_pointer_etag"
+      ;;
+  esac
+  : >"$aws_log"
+  : >"$action_log"
+  set +e
+  malformed_output="$(run_transaction B "$candidate_b_tree" \
+    "$candidate_b_archive" "$candidate_b_sha" normal \
+    "$malformed_object" "$malformed_sha" "$malformed_etag" 2>&1)"
+  malformed_status=$?
+  set -e
+  [ "$malformed_status" -eq 2 ] || {
+    echo "$malformed_prior input returned $malformed_status instead of 2" >&2
+    echo "$malformed_output" >&2
+    exit 1
+  }
+  [ ! -s "$aws_log" ] || {
+    echo "$malformed_prior input reached AWS" >&2
+    exit 1
+  }
+  [ ! -s "$action_log" ] || {
+    echo "$malformed_prior input reached service mutation" >&2
+    exit 1
+  }
+done
 
 # A failed CAS after candidate activation must use the already-retained prior
 # archive. The mock rejects any attempt to fetch that runtime again.
