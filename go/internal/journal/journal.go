@@ -56,12 +56,12 @@ const (
 type Status string
 
 const (
-	// StatusOpen: durably ours, not yet handed on. Outbound means "not yet
-	// accepted by a live peer"; inbound means "not yet delivered to the mod".
+	// StatusOpen: durably ours, not yet handed on. Outbound means "no ambiguous
+	// send is committed"; inbound means "not yet delivered to the mod".
 	StatusOpen Status = "open"
-	// StatusInFlight: handed on and awaiting the answer. Outbound means
-	// MIGRATION_PAYLOAD reached a live peer; inbound means MIGRATE_IN is
-	// with the mod.
+	// StatusInFlight: handed on and awaiting the answer. Outbound means the one
+	// MIGRATION_PAYLOAD enqueue was durably committed; inbound means MIGRATE_IN
+	// is with the mod.
 	StatusInFlight Status = "in_flight"
 	// StatusDone: the chain completed. The record is a tombstone and is kept
 	// for exportRetentionSeconds (contract-a.md §7.2).
@@ -74,8 +74,8 @@ const (
 // Handoff is the durable handoff state of contract-b-m4.md §9.2. It answers the
 // one question a re-route turns on: COULD CUSTODY HAVE MOVED?
 //
-//	pending   journaled, never written to a live relay connection   NO
-//	sent      written to a live relay connection, no answer yet     YES, unknowably
+//	pending   journaled, with no ambiguous send                     NO
+//	sent      committed to one socket enqueue, no answer yet        YES, unknowably
 //	refused   a statement arrived that proves no custody moved      NO
 //	done      MIGRATION_ACK received; becomes a tombstone           it moved, and completed
 //	lost      sent, and no answer came within forwardTimeoutMs      YES, unknowably — and
@@ -87,9 +87,9 @@ const (
 // and a forward that is never answered is a loss.
 //
 // A bounce is a TERMINAL ACTION, not a state: the entry leaves the outbound
-// journal, becomes an inbound delivery into this peer's own mod, and leaves a
-// tombstone behind. It is reachable only from `pending` and `refused`, where no
-// custody can have moved, and from the operator's --release-inflight.
+// set and becomes an inbound delivery into this peer's own mod. It is reachable
+// only from `pending` and `refused`, where no custody can have moved, and from
+// the operator's --release-inflight.
 type Handoff string
 
 // retiredHandoffHeld is the `held` state of the bounded hold, retired by §25's
@@ -213,8 +213,8 @@ type State struct {
 	// because a correctness decision on another machine's clock is what the
 	// session id exists to avoid.
 	ReceiptForwardedAtMs int64 `json:"receiptForwardedAt,omitempty"`
-	// SentAtMs is the wall clock at the FIRST write of this entry to a live relay
-	// connection. It is the only clock an outbound entry carries since §25's B37
+	// SentAtMs is the wall clock at the durable commitment to this entry's FIRST
+	// socket enqueue. It is the only clock an outbound entry carries since §25's B37
 	// removed the hold, and it decides one thing: when an unanswered forward
 	// stops being in flight and is recorded LOST (forwardTimeoutMs, §9.3).
 	//
@@ -233,9 +233,17 @@ type State struct {
 	RerouteProof string `json:"rerouteProof,omitempty"`
 	RerouteAtMs  int64  `json:"rerouteAtMs,omitempty"`
 	// RefusedSlots is the durable set of live destinations that explicitly
-	// declined this migration. It prevents overload spillover from circling
-	// back to a world already tried after a process restart.
+	// declined this migration, either at the receiving sidecar or in the relay's
+	// destination transport queue. It prevents a proven-refusal spillover from
+	// circling back to a world already tried after a process restart.
 	RefusedSlots []int `json:"refusedSlots,omitempty"`
+	// RefusalDeadlineMs is the one bounce deadline started by the first exact
+	// relay NOT_FORWARDED proof for this migration. It is durable and absolute:
+	// a re-route, retry, reconnect, restart or compaction never starts it again.
+	// The deadline applies only while custody provably has not moved. If an
+	// alternate send reaches the relay, HandoffSent wins and this timestamp can
+	// no longer move or return the organism.
+	RefusalDeadlineMs int64 `json:"refusalDeadlineAt,omitempty"`
 
 	seq uint64
 }
@@ -257,8 +265,8 @@ func (s *State) Clone() *State {
 }
 
 // ForwardedUnder reports whether this entry holds a FORWARD_RECEIPT issued under
-// session — that is, whether THIS SENDER'S OWN JOURNAL says the relay wrote this
-// migration's bytes to a socket during that session (contract-b-m4.md §6.12,
+// session — that is, whether THIS SENDER'S OWN JOURNAL says the relay accepted
+// this migration at its attempted-write boundary during that session (contract-b-m4.md §6.12,
 // §22 B26).
 //
 // IT IS EVIDENCE IN EXACTLY ONE DIRECTION. True means the frame WAS forwarded.
@@ -292,15 +300,16 @@ type record struct {
 	CompletedAt *int64    `json:"completedAt,omitempty"`
 	Purge       bool      `json:"purge,omitempty"`
 
-	Handoff        *Handoff `json:"handoff,omitempty"`
-	RelaySessionID *string  `json:"relaySessionId,omitempty"`
-	SentAtMs       *int64   `json:"sentAt,omitempty"`
-	DestSlot       *int     `json:"destSlot,omitempty"`
-	RerouteCount   *int     `json:"rerouteCount,omitempty"`
-	RerouteFrom    *int     `json:"rerouteFrom,omitempty"`
-	RerouteProof   *string  `json:"rerouteProof,omitempty"`
-	RerouteAtMs    *int64   `json:"rerouteAtMs,omitempty"`
-	RefusedSlots   []int    `json:"refusedSlots,omitempty"`
+	Handoff           *Handoff `json:"handoff,omitempty"`
+	RelaySessionID    *string  `json:"relaySessionId,omitempty"`
+	SentAtMs          *int64   `json:"sentAt,omitempty"`
+	DestSlot          *int     `json:"destSlot,omitempty"`
+	RerouteCount      *int     `json:"rerouteCount,omitempty"`
+	RerouteFrom       *int     `json:"rerouteFrom,omitempty"`
+	RerouteProof      *string  `json:"rerouteProof,omitempty"`
+	RerouteAtMs       *int64   `json:"rerouteAtMs,omitempty"`
+	RefusedSlots      []int    `json:"refusedSlots,omitempty"`
+	RefusalDeadlineMs *int64   `json:"refusalDeadlineAt,omitempty"`
 
 	// B26's four. The COUNT is written absolute rather than as an increment,
 	// which is what makes a record idempotent under both of the ways this log is
@@ -628,6 +637,9 @@ func (j *Journal) apply(rec record) {
 		if len(rec.RefusedSlots) > 0 {
 			st.RefusedSlots = append([]int(nil), rec.RefusedSlots...)
 		}
+		if rec.RefusalDeadlineMs != nil {
+			st.RefusalDeadlineMs = *rec.RefusalDeadlineMs
+		}
 		if rec.ForwardReceipts != nil {
 			st.ForwardReceipts = *rec.ForwardReceipts
 		}
@@ -773,6 +785,9 @@ func (j *Journal) compact() error {
 			RerouteCount: intPtr(st.RerouteCount), RerouteFrom: intPtr(st.RerouteFrom),
 			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs),
 			RefusedSlots: append([]int(nil), st.RefusedSlots...)}
+		if st.RefusalDeadlineMs != 0 {
+			status.RefusalDeadlineMs = int64Ptr(st.RefusalDeadlineMs)
+		}
 		if st.Handoff != "" {
 			h := st.Handoff
 			status.Handoff = &h
@@ -1007,12 +1022,13 @@ type Update struct {
 	// DestSlot is the ONE exception to §7.3's no-rewrite rule, and it carries
 	// its own evidence: a re-route under a proof of non-delivery (§9.2). Every
 	// other entry keeps the destination it recorded.
-	DestSlot     *int
-	RerouteCount *int
-	RerouteFrom  *int
-	RerouteProof *string
-	RerouteAtMs  *int64
-	RefusedSlots []int
+	DestSlot          *int
+	RerouteCount      *int
+	RerouteFrom       *int
+	RerouteProof      *string
+	RerouteAtMs       *int64
+	RefusedSlots      []int
+	RefusalDeadlineMs *int64
 	// The FORWARD_RECEIPT block (§6.12, §22 B26). ForwardReceipts is the new
 	// ABSOLUTE count, not a delta; the caller reads the current one and writes
 	// count+1, so a replayed record can never double-count a forward.
@@ -1038,9 +1054,10 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 		Note: u.Note, RelaySessionID: u.RelaySessionID, SentAtMs: u.SentAtMs,
 		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
 		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
-		RefusedSlots:     append([]int(nil), u.RefusedSlots...),
-		ForwardReceipts:  u.ForwardReceipts,
-		ReceiptSessionID: u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
+		RefusedSlots:      append([]int(nil), u.RefusedSlots...),
+		RefusalDeadlineMs: u.RefusalDeadlineMs,
+		ForwardReceipts:   u.ForwardReceipts,
+		ReceiptSessionID:  u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
 		ReceiptForwardedAtMs: u.ReceiptForwardedAtMs}
 	if u.Handoff != "" {
 		h := u.Handoff

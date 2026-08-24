@@ -27,9 +27,12 @@ import (
 // exactly the same way.
 //
 // The rig here is that peer: a journal holding a backlog LARGER THAN THE
-// PUBLISHED CEILING, a live destination to drain it at, and a relay running a
-// ceiling of its own choosing rather than the shipped 50. The bar is the one
-// WP8's churn story needs — the whole backlog arrives, and NOT ONE 4007.
+// PUBLISHED CEILING, two live same-axis destinations, and a relay running a
+// ceiling of its own choosing rather than the shipped 50. The first destination
+// cannot admit the whole burst to its paced transport queue. Exact
+// NOT_FORWARDED proofs move those entries to the second destination. The bar is
+// the one WP8's churn story needs: the whole backlog arrives once, and no 4007
+// occurs.
 func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	// A published ceiling that is NOT the shipped default, so a sidecar that
 	// paced itself against a compiled 50 would fail this test.
@@ -39,9 +42,9 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	const backlog = 64
 
 	rl := startRelayWithLimits(t, contractb.Limits{MaxFramesPerSecond: publishedFrames})
-	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}} {
+	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}, {Col: 2, Row: 0}} {
 		p := pos
-		if _, _, err := rl.relay.ReserveSlot([]string{"peer-a", "peer-b"}[i], &p); err != nil {
+		if _, _, err := rl.relay.ReserveSlot([]string{"peer-a", "peer-b", "peer-c"}[i], &p); err != nil {
 			t.Fatalf("ReserveSlot: %v", err)
 		}
 	}
@@ -57,6 +60,14 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	worldB := newWorld()
 	dialFakeMod(t, fakeModOptions{
 		url: sideB.URL(), world: worldB, heartbeat: 200 * time.Millisecond})
+	cfgC := fastConfig(t, rl, "peer-c")
+	cfgC.StatsInterval = time.Second
+	cfgC.InboundQueueMax = 4 * backlog
+	sideC := startSidecar(t, cfgC)
+	waitSlot(t, sideC, 3)
+	worldC := newWorld()
+	dialFakeMod(t, fakeModOptions{
+		url: sideC.URL(), world: worldC, heartbeat: 200 * time.Millisecond})
 
 	// The peer that was dark: its journal already holds the backlog before its
 	// process exists, which is what a rejoin after hours away looks like.
@@ -100,9 +111,17 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 		t.Fatalf("the drain took %d capacity sheds (close 4007); the whole point of pacing "+
 			"under the published ceiling is that it takes NONE", got)
 	}
-	if got := spawnedOf(worldB, ids); got != len(ids) {
-		t.Fatalf("slot 2 spawned %d of %d organisms; frames are DELAYED by the pacer, never "+
-			"dropped", got, len(ids))
+	spawnedB, spawnedC := spawnedOf(worldB, ids), spawnedOf(worldC, ids)
+	if spawnedB+spawnedC != len(ids) {
+		t.Fatalf("the two destinations spawned %d + %d of %d organisms", spawnedB, spawnedC, len(ids))
+	}
+	if spawnedC == 0 {
+		t.Fatal("the 64-entry burst never filled slot 2's transport queue, so the alternate path was not exercised")
+	}
+	for _, id := range ids {
+		if got := worldB.spawnCount(id) + worldC.spawnCount(id); got != 1 {
+			t.Fatalf("migration %s spawned %d times across the two destinations, want exactly 1", id, got)
+		}
 	}
 	// A drain that finished instantly did not pace. The bucket admits its burst
 	// and then refills at half the published rate, so 64 frames cannot leave
@@ -116,9 +135,9 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 			"ceiling; it is not on the send path")
 	}
 	t.Logf("drained %d journalled organisms in %s under a published %d frames/s "+
-		"(paced %v/s, %d deferrals, 0 sheds)",
+		"(slot 2: %d, slot 3: %d, paced %v/s, %d deferrals, 0 sheds)",
 		backlog, elapsed.Round(time.Millisecond), publishedFrames,
-		sideA.PacedFramesPerSecond(), sideA.PacedDeferrals())
+		spawnedB, spawnedC, sideA.PacedFramesPerSecond(), sideA.PacedDeferrals())
 }
 
 // TestCompletedInboundBurstDrainsWithoutASingleCapacityShed reproduces the

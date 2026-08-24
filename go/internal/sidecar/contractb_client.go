@@ -348,8 +348,8 @@ func (s *Sidecar) dropRelay() {
 	s.neighbours = map[string]*contractb.Neighbour{}
 	s.status = contractb.PeerStatus{}
 	// §8: with the link down the sidecar knows nothing about its neighbours, so
-	// every export edge closes as peer_unreachable. §9.3: the hold clock also
-	// stops, because this sidecar is now blind and never observed anything.
+	// every export edge closes as peer_unreachable. Durable custody deadlines do
+	// not reset on a link change (§9.2, §9.3).
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()
 }
@@ -370,7 +370,7 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 		if contractb.DecodeData(env.Data, &ack) == nil {
 			s.mu.Lock()
 			// §5.2: the session id scopes every non-delivery proof this link can
-			// produce. It is recorded against an entry at the first write, not
+			// produce. It is recorded against an entry at the durable send commit, not
 			// here, but the connection has to know it.
 			s.relaySessionID = ack.RelaySessionID
 			s.mapShape = ack.Map
@@ -926,8 +926,8 @@ func (s *Sidecar) onMigrationAck(env wire.Envelope) bool {
 // Nothing else means nothing else. It sends no answer — there is no answer to a
 // receipt on this wire. It changes no handoff state: an entry that is `sent`
 // stays `sent`, and the receipt is the evidence that the state is right rather
-// than a reason to move it. It never touches the hold clock, the retry cadence,
-// the re-route count or the destination. What it changes is that the fact
+// than a reason to move it. It never touches a deadline, the re-route count or
+// the destination. What it changes is that the fact
 // survives the relay process that produced it, which is the entire point: §5.2's
 // forwarding record is in memory and dies at a restart, and after B26 the
 // sender's own journal is where the fact lives.
@@ -998,13 +998,13 @@ func (s *Sidecar) onForwardReceipt(env wire.Envelope) bool {
 	s.receiptsRecorded++
 	if count > 1 {
 		// §6.12: two receipts under one migrationId means THIS SENDER FORWARDED
-		// TWICE — a retry or a re-route — and never a duplicated organism, because
+		// TWICE — a proof-based re-route, or a pre-B37 retry — and never a duplicated organism, because
 		// the migrationId is preserved and the destination deduplicates (§6.6).
 		s.log.Info("contract B: a second FORWARD_RECEIPT for this migration; this sender has "+
 			"forwarded it more than once",
 			"migrationId", receipt.MigrationID, "forwards", count,
 			"destSlot", receipt.DestSlot, "relaySessionId", receipt.RelaySessionID,
-			"why", "a retry or a re-route; the destination deduplicates on migrationId (§6.6)")
+			"why", "a proof-based re-route or a pre-B37 retry; the destination deduplicates on migrationId (§6.6)")
 		return true
 	}
 	s.log.Debug("contract B: recorded a FORWARD_RECEIPT",
@@ -1014,9 +1014,9 @@ func (s *Sidecar) onForwardReceipt(env wire.Envelope) bool {
 }
 
 // onMigrationNack applies §9.2's evidence table. It is the most load-bearing
-// switch in the sidecar: SILENCE IS NEVER PROOF, and every ambiguity resolves
-// toward holding, because holding costs a delay and re-routing on a bad proof
-// costs a duplicated organism.
+// switch in the sidecar: SILENCE IS NEVER PROOF, and every ambiguity leaves the
+// entry sent. A possible loss is safer than re-routing on a bad proof and
+// duplicating an organism.
 func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	var nack contractb.MigrationNack
 	if err := contractb.DecodeData(env.Data, &nack); err != nil {
@@ -1072,10 +1072,10 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 		// THIS SENDER'S OWN JOURNAL HOLDS THE RELAY'S RECEIPT FOR A FORWARD IN
 		// THAT SAME SESSION. Two statements from the same process about the same
 		// session contradict each other, and this is the one place B26's
-		// direction rule decides an outcome: a receipt can only ever move an
-		// entry TOWARD HOLDING, never toward re-routing.
+		// direction rule decides an outcome: a receipt can only ever leave an
+		// entry SENT, never move it toward re-routing.
 		//
-		// So the proof is refused and the entry holds. It is a strict NARROWING
+		// So the proof is refused and the entry stays sent. It is a strict NARROWING
 		// of what may re-route — nothing that held before now re-routes — so it
 		// cannot introduce a duplication, which is the only failure this whole
 		// mechanism is built to avoid. §9.2 is otherwise untouched in every
@@ -1086,13 +1086,35 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 		// operator who sees this line is looking at the one condition that could
 		// have duplicated an organism if the receipt had not been there.
 		s.log.Error("contract B: a relay-generated neverForwarded CONTRADICTS a FORWARD_RECEIPT "+
-			"this sidecar holds for the same relay session — refusing the proof and HOLDING",
+			"this sidecar holds for the same relay session — refusing the proof and LEAVING SENT",
 			"migrationId", nack.MigrationID, "code", nack.Code,
 			"relaySessionId", nack.RelaySessionID, "receipts", st.ForwardReceipts,
 			"receiptDestSlot", st.ReceiptDestSlot,
 			"meaning", "one of the two statements is wrong and this sender cannot tell which; "+
-				"holding costs a delay and re-routing on a bad proof costs a duplicated organism "+
+				"possible loss is safer than re-routing on a bad proof and duplicating an organism "+
 				"(contract-b-m4.md §9.2, §6.12, §22 B26)")
+		return true
+
+	case relayGenerated && nack.Code == contractb.NackNotForwarded &&
+		nack.ProvesNoCustody(st.RelaySessionID):
+		// A full or draining relay transport queue refused this exact attempt,
+		// and the session-scoped proof says that the migration reached no peer in
+		// this relay process. The receipt-contradiction case above is deliberately
+		// before this one. These three conditions together are the only safe entry
+		// into the bounded transport-refusal walk.
+		//
+		// Persist the refused destination and the FIRST deadline in the same
+		// record that changes sent -> refused. A crash after this fsync can resume
+		// the walk without retrying a known-full destination or starting a fresh
+		// bounce clock. A later alternate send changes the entry back to sent, so
+		// this deadline can never bounce a frame whose custody may have moved.
+		if !s.markTransportRefusedLocked(st, now) {
+			return true
+		}
+		if s.rerouteLocked(st, contractb.ProofRelayNeverForwarded, now) {
+			sc.bounceAt = time.Time{}
+			sc.nextForward = time.Time{}
+		}
 		return true
 
 	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID):
@@ -1116,37 +1138,52 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 		// missing field is a defect or a frame that came from somewhere else.
 		// Treat a missing proof as NO PROOF, and log it.
 		s.log.Error("contract B: a relay-generated MIGRATION_NACK carried no neverForwarded field — "+
-			"treating it as no proof and holding", "migrationId", nack.MigrationID, "code", nack.Code)
+			"treating it as no proof and leaving the entry sent", "migrationId", nack.MigrationID, "code", nack.Code)
 		return true
 
 	case relayGenerated && nack.NeverForwarded != nil && *nack.NeverForwarded &&
 		nack.RelaySessionID != st.RelaySessionID:
 		// The relay restarted; it cannot speak for what the previous process
-		// forwarded, so the sender falls back to holding.
+		// forwarded, so the sender leaves the entry sent.
 		s.log.Warn("contract B: neverForwarded arrived under a DIFFERENT relaySessionId — "+
-			"the relay restarted and cannot speak for this entry; holding",
+			"the relay restarted and cannot speak for this entry; leaving it sent",
 			"migrationId", nack.MigrationID, "nackSession", nack.RelaySessionID,
 			"entrySession", st.RelaySessionID)
 		return true
 	}
-	// Everything else: no proof. The entry keeps its recorded destination and
-	// tickOutbound decides between a re-forward and the bounded hold.
+	// Everything else: no proof. The entry stays sent until an answer or the
+	// forwardTimeoutMs loss deadline.
+	return true
+}
+
+func (s *Sidecar) markTransportRefusedLocked(st *journal.State, now time.Time) bool {
+	refused := appendRefusedSlot(st.RefusedSlots, st.Entry.DestSlot)
+	deadline := st.RefusalDeadlineMs
+	if deadline == 0 {
+		deadline = now.Add(s.cfg.BounceTimeout).UnixMilli()
+	}
+	proof := contractb.ProofRelayNeverForwarded
+	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
+		Handoff:           journal.HandoffRefused,
+		RerouteProof:      &proof,
+		RefusedSlots:      refused,
+		RefusalDeadlineMs: &deadline,
+		Note:              "relay NOT_FORWARDED proof: no custody moved; trying distinct same-axis destinations",
+	}); err != nil {
+		s.log.Error("contract B: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
+		return false
+	}
+	st.Handoff = journal.HandoffRefused
+	st.RerouteProof = proof
+	st.RefusedSlots = refused
+	st.RefusalDeadlineMs = deadline
 	return true
 }
 
 func (s *Sidecar) markRefusedLocked(st *journal.State, proof, note string) {
 	refused := append([]int(nil), st.RefusedSlots...)
 	if proof == contractb.ProofPeerRefused {
-		seen := false
-		for _, slot := range refused {
-			if slot == st.Entry.DestSlot {
-				seen = true
-				break
-			}
-		}
-		if !seen {
-			refused = append(refused, st.Entry.DestSlot)
-		}
+		refused = appendRefusedSlot(refused, st.Entry.DestSlot)
 	}
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
 		Handoff: journal.HandoffRefused, RerouteProof: &proof,
@@ -1157,6 +1194,16 @@ func (s *Sidecar) markRefusedLocked(st *journal.State, proof, note string) {
 	st.Handoff = journal.HandoffRefused
 	st.RerouteProof = proof
 	st.RefusedSlots = refused
+}
+
+func appendRefusedSlot(slots []int, slot int) []int {
+	out := append([]int(nil), slots...)
+	for _, seen := range out {
+		if seen == slot {
+			return out
+		}
+	}
+	return append(out, slot)
 }
 
 // onGenomeRequest answers exactly one GENOME_RESPONSE from the genome cache
@@ -1229,13 +1276,25 @@ func (s *Sidecar) sendRelayReplyLocked(typ string, data any) bool {
 }
 
 func (s *Sidecar) sendRelayClassLocked(typ string, data any, deferred bool) bool {
-	if s.relayConn == nil || !s.relayReady {
+	frame, ok := s.prepareRelayFrameLocked(typ, data, deferred)
+	if !ok {
 		return false
+	}
+	return s.sendPreparedRelayFrameLocked(typ, frame)
+}
+
+// prepareRelayFrameLocked performs every fallible operation that is safe to do
+// before a custody handoff is recorded: connection gating, encoding and pace
+// admission. MIGRATION_PAYLOAD uses this half directly so it can fsync its sent
+// transition before the prepared frame enters the socket writer queue.
+func (s *Sidecar) prepareRelayFrameLocked(typ string, data any, deferred bool) ([]byte, bool) {
+	if s.relayConn == nil || !s.relayReady {
+		return nil, false
 	}
 	frame, err := wire.Encode(wire.ProtocolB, typ, time.Now().UnixMilli(), data)
 	if err != nil {
 		s.log.Error("contract B: encode failed", "type", typ, "err", err)
-		return false
+		return nil, false
 	}
 	// B24's client half (§3.3, §6.2). THE CLOCK HERE IS THE WALL CLOCK AND NOT
 	// s.now(): the ceiling being respected is a real-time meter on a real socket
@@ -1246,6 +1305,16 @@ func (s *Sidecar) sendRelayClassLocked(typ string, data any, deferred bool) bool
 		// DELAYED, NEVER DROPPED. The durable state behind this frame stays
 		// retryable, so the custody scheduler offers it again on the next tick.
 		// This is a drain running at the published rate, not a send failure.
+		return nil, false
+	}
+	return frame, true
+}
+
+// sendPreparedRelayFrameLocked is the physical enqueue half. A migration calls
+// it only after its journal says sent. Therefore, an error here can cost that
+// migration, but it cannot make a restart or later tick send a second copy.
+func (s *Sidecar) sendPreparedRelayFrameLocked(typ string, frame []byte) bool {
+	if s.relayConn == nil {
 		return false
 	}
 	if err := s.relayConn.Send(frame); err != nil {

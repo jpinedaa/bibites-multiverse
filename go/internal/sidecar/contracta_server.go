@@ -767,7 +767,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	// thing this sidecar is no longer allowed to do.
 	//
 	// IT READS THE SIDECAR'S OWN CLOCK, not the wall's. This is the call that
-	// writes `sentAt` for most entries, and forwardTimeoutMs is measured from it
+	// durably writes `sentAt` for most entries before socket enqueue, and forwardTimeoutMs is measured from it
 	// by a scheduler that reads s.now(): a mix of the two makes the deadline
 	// meaningless in either direction.
 	s.mu.Lock()
