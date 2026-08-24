@@ -294,6 +294,7 @@ capture() {
       say "capture_mode=initial-install"
       say "rollback_generation=initial-install"
       say "No installed binary or running service exists. There is no preimage to capture."
+      say "generation_status=initial-install"
       return 0
     fi
     die "the relay and archive are not both running, but an installed binary exists. Nothing was captured or installed"

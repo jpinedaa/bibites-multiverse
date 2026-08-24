@@ -844,6 +844,12 @@ phase_binaries() {
     say "recorded /etc/multiverse/BINARIES.sha256"
   fi
   [ "$installed" = 1 ] && say "NOTE: new binaries do not take effect until the units restart — RESTART-POLICY.md"
+  if [ "$installed" = 0 ] && [ "$skipped" -gt 0 ]; then
+    # These two unindented lines are the terminal evidence for automation.
+    # The capture helper emits the equivalent pair when a replacement exists.
+    printf 'rollback_generation=no-change\n'
+    printf 'generation_status=no-change\n'
+  fi
   return 0
 }
 

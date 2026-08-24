@@ -632,18 +632,26 @@ It also captures the installed `ringstat` when that file exists.
 
 The capture rechecks both service PIDs, both running hashes, and all installed hashes.
 If one value changes, the capture fails and the provisioner installs nothing.
-An empty first installation has no preimage, so it reports `rollback_generation=initial-install`.
+Every successful binary phase emits exactly one rollback generation and one generation status.
+Use these exact terminal pairs:
 
-A successful capture reports this value:
+| Result | `rollback_generation` | `generation_status` |
+|---|---|---|
+| New capture | `sha256-<64 hexadecimal characters>` | `captured` |
+| Existing verified capture | `sha256-<64 hexadecimal characters>` | `already-captured` |
+| Verified dry run | `sha256-<64 hexadecimal characters>` | `dry-run-verified` |
+| Empty first installation | `initial-install` | `initial-install` |
+| All staged artifacts already installed | `no-change` | `no-change` |
 
-```text
-rollback_generation=sha256-<64 hexadecimal characters>
-```
+`initial-install` means that no installed binary or running service exists.
+`no-change` means that the binary phase replaced no installed path.
+Automation must reject a successful phase that has a missing, repeated, or mismatched pair.
 
-Record that exact identifier in the private deployment record.
-The helper writes the owner-only generation to
+Record the exact pair in the private deployment record.
+For a `captured` or `already-captured` result, the owner-only generation exists at
 `/var/lib/multiverse/rollback/binaries/<generation>/`.
-Its `manifest.tsv` and `SHA256SUMS` record the exact captured bytes.
+That generation contains `manifest.tsv` and `SHA256SUMS`, which record the exact captured bytes.
+A `dry-run-verified` result writes no rollback directory or artifact.
 
 Use only a named generation for a restore.
 First, verify the generation without a mutation:
