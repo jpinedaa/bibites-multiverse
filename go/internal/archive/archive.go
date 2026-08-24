@@ -349,8 +349,10 @@ type Archive struct {
 	// the receiver's eventual MIGRATION_ACK. The payload is not proof that the
 	// destination spawned the organism: a population admission NACK can follow
 	// it, and the same migrationId can then be offered to another slot. Only the
-	// matched ACK promotes an attempt into hops. Both maps are ephemeral and
-	// bounded in hops.go; the durable ledger remains unchanged.
+	// matched ACK promotes an attempt into hops. hopPending also carries the
+	// ordered slots that explicitly refused before that ACK so the page can draw
+	// the reroute honestly. Both maps are ephemeral and bounded in hops.go; the
+	// durable ledger remains unchanged.
 	hopPending   map[string]pendingHop
 	hopEarlyAcks map[string]earlyHopAck
 	hopTrimAtMs  int64

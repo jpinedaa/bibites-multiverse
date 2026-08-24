@@ -834,6 +834,23 @@ margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;col
 .cell .chips{fill:var(--dim);font-size:11px}
 .cell .chips .chipv{fill:var(--text)}
 .cell .chips .chipu{fill:var(--warn);font-style:italic}
+.admissionmark .admissionpill{fill:rgba(7,16,13,.88);stroke:var(--line);stroke-width:1.1}
+.admissionmark .admissionlbl{fill:var(--dim);font-size:8.2px;font-weight:700;letter-spacing:.045em}
+.admissionmark.open .admissionpill{stroke:var(--live)}
+.admissionmark.open .admissionlbl{fill:var(--live)}
+.admissionmark.closed .admissionpill{fill:rgba(255,111,125,.10);stroke:var(--dark);stroke-width:1.5}
+.admissionmark.closed .admissionlbl{fill:var(--dark)}
+.admissionmark.learning .admissionpill,.admissionmark.shadow .admissionpill{stroke:var(--warn)}
+.admissionmark.learning .admissionlbl,.admissionmark.shadow .admissionlbl{fill:var(--warn)}
+/* Liveness and admission are independent. A population-closed world remains
+   connected and keeps its green state dot, while the red cell outline and the
+   explicit gate badge say that NEW inbound offers stop at its boundary. */
+.cell.admission-closed .cellbg{stroke:var(--dark);stroke-width:2.4}
+.rejectmark{opacity:0;pointer-events:none}
+.rejectpill{fill:rgba(7,16,13,.94);stroke:var(--dark);stroke-width:1.6}
+.rejectlbl{fill:var(--dark);font-size:9.5px;font-weight:800;letter-spacing:.045em}
+.cell.rejecting .rejectmark{animation:rejectmark 1.15s ease-out}
+@keyframes rejectmark{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
 .cell .statelbl{font-size:11px;letter-spacing:.06em}
 .cell.live .statelbl,.cell.live .statedot{fill:var(--live)}
 .cell.dark .statelbl,.cell.dark .statedot{fill:var(--dark)}
@@ -896,6 +913,12 @@ g.lg:hover .lane{stroke-width:4}
 .hopbib{stroke:var(--hot);stroke-width:.9;filter:drop-shadow(0 0 5px rgba(255,255,255,.55))}
 .hopbib.neutral{fill:var(--dim)}
 .hopring{fill:none;stroke:var(--hot);stroke-width:1.1;opacity:.5}
+.hoproute{fill:none;stroke:var(--warn);stroke-width:2.2;stroke-dasharray:8 6;
+stroke-linecap:round;opacity:.9;pointer-events:none}
+.hoprejected .hopring{stroke:var(--dark);stroke-width:2;opacity:1}
+.hoprejected .hopbib{stroke:var(--dark);filter:drop-shadow(0 0 6px rgba(255,111,125,.8))}
+.hopretry{animation:hopretry .28s ease-out}
+@keyframes hopretry{0%{opacity:0}100%{opacity:1}}
 /* The SAME event under reduced motion. The glyph is placed where a travelling
    one would have ended — the far end of the lane, at the edge of the world it
    reached — and it fades there. It never travels, so there is no movement to
@@ -918,6 +941,10 @@ border-top-style:solid;vertical-align:middle;margin-right:5px}
 .legend i.box.live{border-color:var(--live)}
 .legend i.box.dark{border-color:var(--dark)}
 .legend i.box.hole{border-color:var(--hole);border-style:dashed}
+.legend i.gateopen,.legend i.gateclosed{height:10px;width:18px;border:1.5px solid;
+border-radius:5px;border-top-width:1.5px;vertical-align:-2px}
+.legend i.gateopen{border-color:var(--live)}
+.legend i.gateclosed{border-color:var(--dark);background:rgba(255,111,125,.10)}
 .legend i.bibi{width:12px;height:9px;border:0;background:var(--dim);
 border-radius:62% 38% 38% 62%/50%}
 .legend i.bibi.unc{background:var(--hole)}
@@ -1077,6 +1104,8 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         <span><i class="box live"></i><span class="term" data-t="live">live</span></span>
         <span><i class="box dark"></i><span class="term" data-t="dark">dark</span></span>
         <span><i class="box hole"></i><span class="term" data-t="hole">hole</span></span>
+        <span><i class="gateopen"></i><span class="term" data-t="admissiongate">population gate open</span></span>
+        <span><i class="gateclosed"></i><span class="term" data-t="admissiongate">population gate closed</span></span>
         <span><i class="open"></i><span class="term" data-t="lane">lane open</span></span>
         <span><i class="bypass"></i><span class="term" data-t="bypass">bypass</span></span>
         <span><i class="closed"></i>lane closed</span>
@@ -1141,6 +1170,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         <span class="muted">&rarr;</span>
         <span class="term" data-t="achieved">got</span></th>
       <th class="num"><span class="term" data-t="population">pop</span></th>
+      <th><span class="term" data-t="admissiongate">population gate</span></th>
       <th><span class="term" data-t="census">species</span></th>
       <th class="num"><span class="term" data-t="custodyDepth">custody</span></th>
       <th class="num"><span class="term" data-t="pace">pace</span></th>
@@ -1346,10 +1376,12 @@ var G = {
  speed:["simulation speed","How fast a world is running, as the game itself reports it: ×5 means the game is set to pass five simulated seconds for every real second. It is the speed control inside that copy of the game, and each world has its own — one can be asking for ×100 while its neighbour sits at ×1. A paused world reports ×0. A world at a different speed from its neighbours is not a fault; it only means the two experience the traffic between them at different rates, which is why arrivals are paced on the receiving world's OWN clock and not on the wall clock. This is what the game is TRYING to do; the number after the arrow is what it managed."],
  achieved:["speed actually delivered","The second half of a cell's speed, written ×100 → ~×12: the world is set to run a hundred times real time and is really running about twelve. This one is not reported by anybody — it is measured here, by watching that world's own clock against the wall clock for the last minute, so it is the only figure on this page that says what a world genuinely did. A machine can only run so many worlds so fast: each drawing of the screen advances the simulation by one small step, so however high the speed is set, the real rate is capped by how fast that computer can draw. Setting ×100 on a machine that can deliver ×12 buys nothing, and before this number existed the page said ×100 and looked healthy. The two agreeing means a world is keeping up. It shows nothing at all until it has watched long enough to be sure — just after this program starts, or just after a world comes back — because a rate measured over two seconds would jump about and mean nothing."],
  pace:["pace","Two numbers about arrivals into this world: how many are queued waiting to be let in, and the cap they are queued behind. The cap counts per SIMULATED minute of this world — so a world at ×10 gets through its allowance ten times faster in real time, and at the same rate as the world itself experiences it. Queued 0 against any cap is a world keeping up. A queue that never drains means the cap is set too low. A world whose helper program is too old to report its cap shows a ? there: unknown, never the shipped default, which has been changed three times."],
+ admissiongate:["population gate","The small badge at the top of each world says whether NEW inbound creatures may enter, and prints the effective population limit the helper has calculated right now. OPEN means a new offer can be considered. CLOSED means the world's committed population has reached that limit, so a new offer is refused before this world takes custody. The world stays live and can keep running and exporting while its inbound gate is closed. LEARNING means the adaptive calculator does not have enough valid speed samples yet and fails open. A shadow badge is a forecast only and does not reject."],
+ reroute:["refused and rerouted","A creature first offered to a population-closed world is stopped at that world's boundary: it never enters that game and that world never takes custody. Its source then offers the same migration to the next eligible world in the same direction. The live map waits until some receiver actually acknowledges spawning it, then replays the refused stop and draws the successful alternate route as a dashed warning path. A refusal that never ends in a confirmed delivery is not animated as an arrival."],
  lost:["lost","A creature that set off for another world and was never heard of again. Travelling between worlds is the one dangerous thing a creature here can do: it is handed over exactly once, and if it does not arrive it is gone — it is not sent again, and it does not come home. The count is per world and it only ever goes up. A world with a rising count has a neighbour that keeps disappearing mid-crossing."],
  bounce:["bounce","A migration that turned back before it was handed to anybody, and returned to the world it started in. It happens when there is nowhere to send the creature, or when the far world refuses it outright — in both cases the far world is known not to have it, so a return cannot make a second copy. Nothing turns back on a guess."],
- migration:["migration / hop","One creature's attempted trip from one world to the next. A lane's number measures migration offers copied to the archive; an offer can still be refused by population admission, so that number is not a delivered count. A creature moves on the map only after the receiving sidecar sends MIGRATION_ACK, which it does after the destination game has acknowledged spawning it. Rejected offers never move. If the same migration is rerouted, its one glyph goes to the world that eventually acknowledges it."],
- hopfeed:["confirmed deliveries just now","The last minute of deliveries whose receiving game acknowledged the spawn, kept in memory and nowhere else. It is a record of who ARRIVED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census. Rejected admission attempts do not appear here, and a reroute appears only at its eventual acknowledged destination. Never add this feed to the census. A delivery whose message carried no species name travels as a plain grey creature — unreported, never guessed."],
+ migration:["migration / hop","One creature's attempted trip from one world to the next. A lane's number measures migration offers copied to the archive; an offer can still be refused by population admission, so that number is not a delivered count. A creature moves on the map only after some receiving sidecar sends MIGRATION_ACK, which it does after its game acknowledges spawning it. A rejected offer by itself never animates as an arrival. If that same migration is rerouted and eventually acknowledged, the map replays the refused stop before showing the confirmed alternate route."],
+ hopfeed:["confirmed deliveries just now","The last minute of deliveries whose receiving game acknowledged the spawn, plus the ordered receivers that explicitly refused the same migration first, kept in bounded memory and nowhere else. It is a record of who ARRIVED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census. A standalone rejection never appears as an arrival; a successful reroute replays its refused boundary and ends only at the acknowledged destination. Never add this feed to the census. A delivery whose message carried no species name travels as a plain grey creature — unreported, never guessed."],
  motion:["motion","Whether a confirmed delivery TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way the acknowledged delivery is still shown: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
  population:["population","How many living creatures the world holds, as its own game reported it. Each little creature drawn inside a cell is one of them."],
@@ -1536,6 +1568,11 @@ var POSCW=6.92, POSGAP=6, POSW=CW-CPAD-CPAD-SDOTX-SDOTR-POSGAP;
    no peer-chosen text can ever reach the mark or move it. BCW is the nine
    characters of the label at its own size plus the pill's padding. */
 var BCX=CPAD, BCY=1, BCW=66, BCH=12, BCTX=CPAD+7, BCTY=10;
+/* The population-admission badge shares that top strip. Its left edge starts
+   two units after the optional camera pill ends, and it is right-aligned in the
+   cell. The live effective limit belongs on the MAP, not only in a settings
+   card a reader has to leave the traffic to find. */
+var ACX=84, ACY=1, ACW=114, ACH=13, ACTX=ACX+ACW/2, ACTY=10;
 var mapSig = "", anim = [], reduced = false, rafId = 0;
 /* The hop animation's state (§17, B14). hopLayer sits ABOVE the cells;
    everything else is bounded on purpose and the bounds are named at HOPMS. */
@@ -1858,6 +1895,12 @@ function buildMap(d){
               + '<text class="bcastlbl" x="'+(x+BCTX)+'" y="'+(y+BCTY)+'">ON CAMERA</text>'
               + '</a>'
             : '')
+        + '<g class="admissionmark unknown" id="cadm-'+v.slot+'">'
+        + '<rect class="admissionpill" x="'+(x+ACX)+'" y="'+(y+ACY)+'" width="'+ACW
+        + '" height="'+ACH+'" rx="'+(ACH/2)+'"><title id="cadmtitle-'+v.slot
+        + '"></title></rect>'
+        + '<text class="admissionlbl" id="cadmlbl-'+v.slot+'" text-anchor="middle" x="'
+        + (x+ACTX)+'" y="'+(y+ACTY)+'"></text></g>'
         + '<text class="slotno term" data-t="slot" x="'+(x+CPAD)+'" y="'+(y+30)+'">slot '+v.slot+'</text>'
         // The peer id is CUT TO WHAT FITS here and nowhere else: see posPeer.
         + '<text class="pos" x="'+(x+CPAD)+'" y="'+(y+48)+'">'+pfx
@@ -1877,6 +1920,10 @@ function buildMap(d){
         // the title above is empty — one code path for the DOM, and the safe one.
         + '<text class="chips" id="cchip-'+v.slot+'" x="'+(x+16)+'" y="'+(y+CH-27)+'"></text>'
         + '<text class="note" id="cnote-'+v.slot+'" x="'+(x+16)+'" y="'+(y+CH-11)+'"></text>'
+        + '<g class="rejectmark" id="creject-'+v.slot+'">'
+        + '<rect class="rejectpill" x="'+(x+28)+'" y="'+(y+70)+'" width="144" height="27" rx="8"/>'
+        + '<text class="rejectlbl term" data-t="reroute" id="crejectlbl-'+v.slot
+        + '" text-anchor="middle" x="'+(x+CW/2)+'" y="'+(y+87)+'"></text></g>'
         + '</g>';
     }
   }
@@ -2020,6 +2067,54 @@ function paintChips(v){
   }
 }
 
+/* One interpretation of the admission fields feeds the badge, table and
+   tooltip. The limit is the EFFECTIVE live limit: the smoothed value actually
+   enforced. admissionEstimatedLimit is the newest raw adaptive estimate and is
+   retained in the detail so a reader can see the controller moving without
+   mistaking a proposal for the active ceiling. */
+function admissionView(v){
+  if (!v.statsKnown || !v.admissionMode){
+    return {cls:"unknown", label:"GATE UNKNOWN", detail:"population admission is unknown"};
+  }
+  if (v.admissionMode === "off"){
+    return {cls:"unknown", label:"GATE OFF", detail:"population admission is switched off"};
+  }
+  var samples = v.admissionSampleCount == null ? 0 : v.admissionSampleCount;
+  var limit = v.admissionPopulationLimit;
+  var committed = v.admissionCommitted == null ? "unknown" : v.admissionCommitted;
+  var target = v.admissionTargetTimeScale == null ? "?" : fmtScale(v.admissionTargetTimeScale);
+  if (limit == null){
+    return {cls:"learning", label:"OPEN · LEARNING", detail:
+      "population gate is fail-open while the adaptive limit learns ("+samples+
+      " valid samples, target ×"+target+")"};
+  }
+  var estimate = v.admissionEstimatedLimit == null ? "unknown" : v.admissionEstimatedLimit;
+  var common = "effective population limit "+limit+", committed "+committed+
+    ", newest raw estimate "+estimate+", target ×"+target;
+  if (!v.admissionEnforcing){
+    return {cls:"shadow", label:(v.admissionClosed ? "WOULD CLOSE" : "SHADOW OPEN")+
+      " · "+limit, detail:"shadow only: "+common+"; no offer is rejected"};
+  }
+  return v.admissionClosed
+    ? {cls:"closed", label:"CLOSED · LIMIT "+limit, detail:"population gate CLOSED: "+common+
+        "; new inbound offers are refused before custody"}
+    : {cls:"open", label:"OPEN · LIMIT "+limit, detail:"population gate OPEN: "+common+
+        "; new inbound offers may enter"};
+}
+
+function paintAdmission(v){
+  var badge = document.getElementById("cadm-"+v.slot);
+  var label = document.getElementById("cadmlbl-"+v.slot);
+  var title = document.getElementById("cadmtitle-"+v.slot);
+  var cell = document.getElementById("c-"+v.slot);
+  if (!badge || !label || !cell) return;
+  var a = admissionView(v);
+  badge.setAttribute("class", "admissionmark "+a.cls);
+  label.textContent = a.label;
+  if (title) title.textContent = a.detail;
+  cell.classList.toggle("admission-closed", a.cls === "closed");
+}
+
 function cellTitle(v){
   var s = "slot "+v.slot+" ("+v.position.col+","+v.position.row+")  peer "+v.peerId+"\n"
     + (v.live ? (v.modConnected ? "live" : "connected, but no game attached") : "dark");
@@ -2041,6 +2136,8 @@ function cellTitle(v){
         + (v.admissionPopulationLimit == null ? ", learning"
           : ", limit " + v.admissionPopulationLimit + ", committed "
             + (v.admissionCommitted == null ? "unknown" : v.admissionCommitted))
+        + (v.admissionEstimatedLimit == null ? "" : ", raw estimate "
+            + v.admissionEstimatedLimit)
         + (v.admissionEnforcing ? (v.admissionClosed ? ", CLOSED" : ", enforcing open")
           : (v.admissionClosed ? ", shadow would close" : ", shadow open"));
     }
@@ -2346,7 +2443,7 @@ function hopName(hp){
    nothing here assigns a colour from anything but a hash of the compared
    spelling. It is drawn larger than a resident glyph, stroked and shadowed,
    because it has to win the eye against a field of 420 of them. */
-function buildHopGlyph(name, toSlot){
+function buildHopGlyph(name, toSlot, refusedSlots){
   var g = document.createElementNS(SVGNS, "g");
   g.setAttribute("class", "hopg");
   var ring = document.createElementNS(SVGNS, "circle");
@@ -2361,7 +2458,10 @@ function buildHopGlyph(name, toSlot){
   g.appendChild(u);
   var ttl = document.createElementNS(SVGNS, "title");
   ttl.textContent = (name ? name : "a creature of no reported species")
-    + " — crossing to slot " + toSlot;
+    + ((refusedSlots && refusedSlots.length)
+      ? " — refused by slot " + refusedSlots.join(", slot ") +
+        ", rerouted and confirmed at slot " + toSlot
+      : " — crossing to slot " + toSlot);
   g.appendChild(ttl);
   return g;
 }
@@ -4674,6 +4774,9 @@ function settingsCard(v){
     var admissionLimit = v.admissionPopulationLimit == null
       ? "learning (" + (v.admissionSampleCount || 0) + " samples)"
       : "limit " + v.admissionPopulationLimit + " for ×" + fmtScale(v.admissionTargetTimeScale);
+    if (v.admissionEstimatedLimit != null){
+      admissionLimit += ", latest raw estimate " + v.admissionEstimatedLimit;
+    }
     admission.appendChild(txt(admissionLimit + ", committed " +
       (v.admissionCommitted == null ? "?" : v.admissionCommitted) + ", "));
     admission.appendChild(v.admissionEnforcing
@@ -4844,6 +4947,7 @@ function paintMap(d){
     // built as nodes: see the fenced region above for why.
     var c = paintSpecies(v);
     paintChips(v);
+    paintAdmission(v);
     var ct = document.getElementById("ctitle-"+v.slot);
     if (ct) ct.textContent = cellTitle(v);
     var unit = (c && c.unit) ? c.unit : 1;
@@ -4932,11 +5036,12 @@ function flashCell(slot){
 
    REDUCED MOTION DEGRADES THIS, IT DOES NOT DELETE IT. See stillHop: the same
    creature in the same colour is shown arriving, it just does not walk there. */
-var HOPMS = 1700, HOPMAX = 12, HOPSTAGGER = 130, HOPQMAX = 40, HOPSEENMAX = 800;
+var HOPMS = 1700, HOPTRYMS = 850, HOPREJECTMS = 600,
+    HOPMAX = 12, HOPSTAGGER = 130, HOPQMAX = 40, HOPSEENMAX = 800;
 /* The reduced-motion form is bounded on the same axes: how long one stays up,
    and how many may be up at once. A burst must not stack forty glyphs on one
    cell edge either. */
-var HOPSTILLMS = 1100, HOPSTILLMAX = 8, hopStills = 0;
+var HOPSTILLMS = 1100, HOPSTILLMAX = 8, hopStills = 0, hopRejectTokens = {};
 
 /* A bounded seen-set. A migrationId is animated once, ever, and the feed
    re-serves the same 60 seconds on every poll — so without this the same
@@ -4948,6 +5053,93 @@ function hopMarkSeen(id){
   hopSeenQ.push(id);
   if (hopSeenQ.length > HOPSEENMAX) delete hopSeen[hopSeenQ.shift()];
   return false;
+}
+
+function hopSlot(d, slot){
+  var list = (d && d.slots) || [];
+  for (var i=0;i<list.length;i++) if (list[i].slot === slot) return list[i];
+  return null;
+}
+
+function hopLane(d, from, edge){
+  var list = (d && d.lanes) || [];
+  for (var i=0;i<list.length;i++){
+    if (list[i].fromSlot === from && list[i].edge === edge) return list[i];
+  }
+  return null;
+}
+
+/* The number of map positions from one slot to another in one direction. It is
+   topology, not admission state. A rerouted attempt still starts at the source
+   and keeps the original edge; the rejected receivers are the positions its
+   successful bypass must reach over. */
+function hopSteps(d, fromSlot, toSlot, edge){
+  var from = hopSlot(d, fromSlot), to = hopSlot(d, toSlot);
+  if (!from || !to || !d.map) return 0;
+  var vertical = edge === "N" || edge === "S";
+  if (vertical && from.position.col !== to.position.col) return 0;
+  if (!vertical && from.position.row !== to.position.row) return 0;
+  var size = vertical ? d.map.height : d.map.width;
+  if (size < 2) return 0;
+  var a = vertical ? from.position.row : from.position.col;
+  var b = vertical ? to.position.row : to.position.col;
+  var forward = edge === "E" || edge === "N";
+  var steps = forward ? b-a : a-b;
+  steps = (steps % size + size) % size;
+  return steps;
+}
+
+/* One attempt follows the already drawn lane when that lane names its actual
+   receiver. Otherwise it gets geometry derived from the confirmed endpoint.
+   That second case is the bug fix: an ACK for slot 12 can never again walk an
+   arrow whose endpoint is slot 9 merely because both offers left through 5N. */
+function hopAttempt(d, hp, to, refused){
+  var lane = hopLane(d, hp.fromSlot, hp.exitEdge);
+  var existing = animFor(hp.fromSlot + hp.exitEdge);
+  if (lane && lane.open && lane.toSlot === to && existing){
+    return {a:existing, geom:null, to:to, refused:refused};
+  }
+  var steps = hopSteps(d, hp.fromSlot, to, hp.exitEdge);
+  if (!steps) return null;
+  var byslot = {}, list = d.slots || [];
+  for (var i=0;i<list.length;i++) byslot[list[i].slot] = list[i];
+  var skipped = [];
+  for (i=1;i<steps;i++) skipped.push({});
+  var geom = laneGeom({fromSlot:hp.fromSlot, toSlot:to, edge:hp.exitEdge,
+    open:true, skipped:skipped}, d, byslot);
+  return geom ? {a:null, geom:geom, to:to, refused:refused} : null;
+}
+
+function hopPlan(hp, d){
+  if (!d || !d.haveStatus) return null;
+  var refused = [], seen = {}, raw = hp.refusedSlots || [];
+  for (var i=0;i<raw.length;i++){
+    var slot = Number(raw[i]);
+    if (slot > 0 && slot !== hp.toSlot && !seen[slot]){
+      refused.push(slot); seen[slot] = true;
+    }
+  }
+  // Compatibility with a just-upgraded archive or a cross-peer ordering gap:
+  // if the confirmed receiver differs from today's effective lane and the
+  // intervening receiver is visibly enforcing CLOSED, that one blocked stop is
+  // safe to infer from the two live facts. It is never inferred from an offer
+  // counter alone.
+  var lane = hopLane(d, hp.fromSlot, hp.exitEdge);
+  if (!refused.length && lane && lane.open && lane.toSlot !== hp.toSlot){
+    var first = hopSlot(d, lane.toSlot);
+    if (first && first.admissionEnforcing && first.admissionClosed){
+      refused.push(first.slot); seen[first.slot] = true;
+    }
+  }
+  var attempts = [];
+  for (i=0;i<refused.length;i++){
+    var blocked = hopAttempt(d, hp, refused[i], true);
+    if (blocked) attempts.push(blocked);
+  }
+  var delivered = hopAttempt(d, hp, hp.toSlot, false);
+  if (!delivered) return null;
+  attempts.push(delivered);
+  return {attempts:attempts, refused:refused};
 }
 
 function onHops(f){
@@ -4962,26 +5154,79 @@ function onHops(f){
   for (i=0;i<list.length;i++){
     var hp = list[i];
     if (hopMarkSeen(hp.migrationId)) continue;
-    // Lanes are keyed fromSlot+edge, which is what makes the two directions of a
-    // pair two things to animate. A hop whose lane is closed or not drawn — it
-    // was acknowledged, then the map changed — is dropped rather than guessed onto
-    // another arrow.
-    var a = animFor(hp.fromSlot + hp.exitEdge);
-    if (!a) continue;
+    var plan = hopPlan(hp, lastStatus);
+    if (!plan) continue;
+    var q = {attempts:plan.attempts, refused:plan.refused,
+      name:hopName(hp), to:hp.toSlot};
     // Reduced motion takes the OTHER form of the same event, and takes it here
     // rather than by dropping the hop on the floor. The queue and its cap belong
     // to the travelling form alone: a still glyph is placed at once and has its
     // own bound.
-    if (reduced){ stillHop(a, hopName(hp), hp.toSlot); continue; }
+    if (reduced){ stillHop(q); continue; }
     if (hopQ.length >= HOPQMAX) continue;
-    hopQ.push({a:a, name:hopName(hp), to:hp.toSlot});
+    hopQ.push(q);
   }
+}
+
+function removeHopPaths(q){
+  var owned = q.owned || [];
+  for (var i=0;i<owned.length;i++){
+    if (owned[i].parentNode) owned[i].parentNode.removeChild(owned[i]);
+  }
+  q.owned = [];
+}
+
+/* A virtual reroute is made visible as a dashed route while its confirmed
+   creature uses it. These paths are bounded by HOPMAX and removed with the
+   glyph; they are event evidence, never new permanent topology. */
+function materializeHopAttempt(ap, before){
+  if (ap.a) return {tracks:ap.a.tracks, total:ap.a.total, owned:[]};
+  if (!hopLayer || !ap.geom) return null;
+  var tracks = [], owned = [], total = 0;
+  for (var i=0;i<ap.geom.segs.length;i++){
+    var p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("class", "hoproute");
+    p.setAttribute("d", ap.geom.segs[i].d);
+    hopLayer.insertBefore(p, before || null);
+    var len = p.getTotalLength();
+    tracks.push({el:p, len:len}); total += len; owned.push(p);
+  }
+  return tracks.length ? {tracks:tracks, total:total, owned:owned} : null;
+}
+
+function startHopAttempt(q, index, retry){
+  removeHopPaths(q);
+  var ap = q.attempts[index], a = materializeHopAttempt(ap, q.el);
+  if (!a || !a.total) return false;
+  q.ai = index; q.a = a; q.owned = a.owned; q.ti = 0; q.dist = 0; q.waitUntil = 0;
+  q.speed = a.total / (ap.refused ? HOPTRYMS : HOPMS);
+  q.el.setAttribute("class", retry ? "hopg hopretry" : "hopg");
+  return true;
+}
+
+function rejectCell(slot, next){
+  var g = document.getElementById("c-"+slot);
+  var label = document.getElementById("crejectlbl-"+slot);
+  if (!g || !label) return;
+  var token = (hopRejectTokens[slot] || 0) + 1;
+  hopRejectTokens[slot] = token;
+  label.textContent = "REFUSED · → SLOT " + next;
+  g.classList.remove("rejecting");
+  void g.getBoundingClientRect();
+  g.classList.add("rejecting");
+  setTimeout(function(){
+    if (hopRejectTokens[slot] === token){
+      var current = document.getElementById("c-"+slot);
+      if (current) current.classList.remove("rejecting");
+    }
+  }, 1200);
 }
 
 /* killHops drops every travelling glyph. buildMap throws the whole SVG away, so
    every path a live hop is walking stops existing at that instant. */
 function killHops(){
   for (var i=0;i<hopsLive.length;i++){
+    removeHopPaths(hopsLive[i]);
     if (hopsLive[i].el.parentNode) hopsLive[i].el.parentNode.removeChild(hopsLive[i].el);
   }
   hopsLive = []; hopQ = [];
@@ -4989,11 +5234,14 @@ function killHops(){
 
 function launchHop(q){
   if (!hopLayer) return;
-  var g = buildHopGlyph(q.name, q.to);
+  var g = buildHopGlyph(q.name, q.to, q.refused);
   hopLayer.appendChild(g);
-  // Speed is set from the WHOLE lane's length, so every hop takes about HOPMS
-  // whatever the lane's length — a short hop and a long wrap read as one event.
-  hopsLive.push({el:g, a:q.a, ti:0, dist:0, speed:q.a.total/HOPMS, to:q.to});
+  q.el = g; q.owned = [];
+  if (!startHopAttempt(q, 0, false)){
+    if (g.parentNode) g.parentNode.removeChild(g);
+    return;
+  }
+  hopsLive.push(q);
 }
 
 /* stillHop is the reduced-motion arrival, and it is the whole of this fix's
@@ -5006,23 +5254,45 @@ function launchHop(q){
    deliberate: a bypass and a wrap end somewhere a cell's own coordinates do not
    predict, and the arrow the reader is looking at is the authority for where
    its traffic arrives. */
-function stillHop(a, name, to){
+function stillHop(q){
   if (!hopLayer || hopStills >= HOPSTILLMAX) return;
+  var g = buildHopGlyph(q.name, q.to, q.refused);
+  hopLayer.appendChild(g);
+  q.el = g; q.owned = [];
+  if (!startHopAttempt(q, q.attempts.length-1, !!q.refused.length)){
+    if (g.parentNode) g.parentNode.removeChild(g);
+    return;
+  }
+  var a = q.a;
   var tr = a.tracks.length ? a.tracks[a.tracks.length-1] : null;
-  if (!tr) return;
+  if (!tr){ removeHopPaths(q); if (g.parentNode) g.parentNode.removeChild(g); return; }
   var pt = tr.el.getPointAtLength(tr.len);
-  var g = buildHopGlyph(name, to);
   g.setAttribute("class", "hopg hopstill");
   g.setAttribute("transform", "translate("+pt.x.toFixed(1)+","+pt.y.toFixed(1)+")");
-  hopLayer.appendChild(g);
+  for (var i=0;i<q.refused.length;i++){
+    rejectCell(q.refused[i], i+1 < q.refused.length ? q.refused[i+1] : q.to);
+  }
   hopStills++;
   setTimeout(function(){
     hopStills--;
+    removeHopPaths(q);
     if (g.parentNode) g.parentNode.removeChild(g);
   }, HOPSTILLMS);
   // The destination cell says so too, with the same fade the travelling form
   // fires on arrival.
-  flashCell(to);
+  flashCell(q.to);
+}
+
+function placeHop(q, tr, dist){
+  var pt = tr.el.getPointAtLength(dist);
+  var ahead = Math.min(dist + 2, tr.len);
+  var behind = Math.max(0, dist - 2);
+  var nx = tr.el.getPointAtLength(ahead === dist ? behind : ahead);
+  var ang = ahead === dist
+    ? Math.atan2(pt.y - nx.y, pt.x - nx.x) * 180 / Math.PI
+    : Math.atan2(nx.y - pt.y, nx.x - pt.x) * 180 / Math.PI;
+  q.el.setAttribute("transform", "translate(" + pt.x.toFixed(1) + "," + pt.y.toFixed(1)
+    + ") rotate(" + ang.toFixed(1) + ")");
 }
 
 /* stepHops advances every travelling glyph one frame, along its lane's own
@@ -5036,10 +5306,29 @@ function stepHops(ts, dt){
   }
   for (var i=hopsLive.length-1;i>=0;i--){
     var q = hopsLive[i];
+    if (q.waitUntil){
+      if (ts < q.waitUntil) continue;
+      if (!startHopAttempt(q, q.ai+1, true)){
+        removeHopPaths(q);
+        if (q.el.parentNode) q.el.parentNode.removeChild(q.el);
+        hopsLive.splice(i,1);
+      }
+      continue;
+    }
     q.dist += q.speed*dt;
     var tr = q.a.tracks[q.ti];
     while (tr && q.dist > tr.len){ q.dist -= tr.len; q.ti++; tr = q.a.tracks[q.ti]; }
     if (!tr){
+      var ap = q.attempts[q.ai];
+      if (ap.refused && q.ai+1 < q.attempts.length){
+        var last = q.a.tracks[q.a.tracks.length-1];
+        placeHop(q, last, last.len);
+        rejectCell(ap.to, q.attempts[q.ai+1].to);
+        q.el.setAttribute("class", "hopg hoprejected");
+        q.waitUntil = ts + HOPREJECTMS;
+        continue;
+      }
+      removeHopPaths(q);
       if (q.el.parentNode) q.el.parentNode.removeChild(q.el);
       hopsLive.splice(i,1);
       // It ARRIVED. The destination cell says so, which is the same flash the
@@ -5047,11 +5336,7 @@ function stepHops(ts, dt){
       flashCell(q.to);
       continue;
     }
-    var pt = tr.el.getPointAtLength(q.dist);
-    var nx = tr.el.getPointAtLength(Math.min(q.dist + 2, tr.len));
-    var ang = Math.atan2(nx.y - pt.y, nx.x - pt.x) * 180 / Math.PI;
-    q.el.setAttribute("transform", "translate(" + pt.x.toFixed(1) + "," + pt.y.toFixed(1)
-      + ") rotate(" + ang.toFixed(1) + ")");
+    placeHop(q, tr, q.dist);
   }
 }
 
@@ -5521,6 +5806,10 @@ function renderMap(d){
     var dep = paceDepthText(v), cap = paceRateText(v);
     var pace = (dep === "?" ? '<span class="unknown">?</span>' : dep) + "/"
       + (cap === "?" ? '<span class="unknown">?</span>' : cap);
+    var adm = admissionView(v);
+    var admClass = adm.cls === "open" ? "ok" : adm.cls === "closed" ? "bad" : "unknown";
+    var admission = '<span class="'+admClass+'" title="'+esc(adm.detail)+'">'
+      + esc(adm.label) + '</span>';
     // The same badge the settings card carries, on the same fact, beside the
     // WHOLE peer id — this table is one of the three places the map cell's cut
     // id can be read in full. It is a constant string: nothing a peer chose
@@ -5533,12 +5822,13 @@ function renderMap(d){
       + "<td>"+esc(v.peerId)+bcast+"</td><td>"+state+"</td>"
       + '<td class="num">'+speed+'</td>'
       + '<td class="num">'+num(v.population)+'</td>'
+      + '<td>'+admission+'</td>'
       + '<td class="spx" id="wsp-'+v.slot+'"></td>'
       + '<td class="num">'+num(v.custodyDepth)+'</td>'
       + '<td class="num">'+pace+'</td>'
       + '<td class="num">'+num(v.lostForwardTotal)+'</td>'
       + "<td>"+save+"</td><td>"+note+"</td></tr>";
-  }).join("") || '<tr><td colspan="12" class="muted">no slots reserved yet</td></tr>';
+  }).join("") || '<tr><td colspan="13" class="muted">no slots reserved yet</td></tr>';
   for (var si=0; si<d.slots.length; si++) paintSpeciesCell(d.slots[si]);
 
   var tt = d.totals;

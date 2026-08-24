@@ -145,12 +145,24 @@ load, sample count, closed/enforcing state, and rejection total.
 
 The live map deliberately distinguishes an **offer** from a **delivery**. A lane's numeric rate and
 recorded migration count come from copied `MIGRATION_PAYLOAD` offers, so they can continue rising
-beside a closed admission gate. The moving creature and destination flash come from `/api/hops`,
-which correlates that offer with the receiving peer's `MIGRATION_ACK`; that ACK is sent only after
-the destination game acknowledges the spawn. An admission NACK therefore produces no moving
-creature. If the same migration ID spills onward, one glyph appears only at the eventual
-ACK-confirmed destination. If `/api/hops` is unavailable, the page pauses delivery animation
-instead of guessing an arrival from the offer counters.
+beside a closed admission gate. Every world cell separately publishes the fresh effective
+population limit and one of `OPEN`, `CLOSED`, `OPEN · LEARNING`, shadow, off, or unknown. The cell
+keeps its live state while the admission outline turns closed: network liveness and permission for
+a new inbound organism are different facts.
+
+The moving creature and destination flash come from `/api/hops`, which correlates an offer with the
+receiving peer's `MIGRATION_ACK`; that ACK is sent only after the destination game acknowledges the
+spawn. The bounded correlator now also carries the ordered slots that explicitly NACKed that same
+migration before its final ACK. The page replays a confirmed spillover as two evidence-backed
+events: the glyph reaches the refused world's boundary and shows `REFUSED → SLOT n`, then the same
+glyph restarts at its source and follows a temporary dashed bypass to the world that actually
+acknowledged it. It never flashes the refused cell as an arrival.
+
+A standalone admission NACK still produces no moving creature. Rejected attempts are replayed only
+when that same migration later has a confirmed delivery, so the animation cannot turn routing
+pressure into a population claim. If `/api/hops` is unavailable, the page pauses delivery animation
+instead of guessing an arrival from the offer counters. The refusal chain is ephemeral and bounded
+with the hop correlation; it is not added to `metrics.jsonl` or to the permanent migration ledger.
 
 `CLOSED` applies to **new offers**. It does not revoke custody the world already accepted before
 the gate closed, because discarding those journal entries would lose organisms after handoff. Read
@@ -223,6 +235,10 @@ rollback.
   to the next peer, and require exactly one live-map hop at the peer that ACKs. A second regression
   observes that ACK before the rerouted payload copy and requires peer matching to keep it off the
   rejected destination.
+- The confirmed-hop feed retains multiple receiver refusals in attempt order and ignores a delayed
+  NACK from an earlier receiver after a later attempt is current. Page regressions require every
+  map cell to repaint its effective limit and gate state, require the refusal marker and derived
+  final route, and prohibit attaching the confirmed destination to the original lane geometry.
 - `TestSixtyFourTransportRefusalsUseTheAlternateThenBounceOnce` starts with 64 outbound entries.
   It proves two same-axis queues refused each entry, then verifies one bounce per migration. A
   valid local acknowledgment clears total custody below the 64-entry cap.

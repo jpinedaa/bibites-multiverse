@@ -73,6 +73,10 @@ func TestHopFeedWaitsForDeliveryAndFollowsReroute(t *testing.T) {
 		t.Fatalf("the feed animated the rejected destination instead of the accepted one: %+v",
 			got[0])
 	}
+	if len(got[0].RefusedSlots) != 1 || got[0].RefusedSlots[0] != 2 {
+		t.Fatalf("the confirmed reroute lost its rejected destination chain: %+v",
+			got[0].RefusedSlots)
+	}
 	if got[0].Species == nil || got[0].Species.SpecificName != "copedylanus" {
 		t.Fatalf("the acknowledged delivery lost its carried species: %+v", got[0].Species)
 	}
@@ -83,6 +87,58 @@ func TestHopFeedWaitsForDeliveryAndFollowsReroute(t *testing.T) {
 	}))
 	if got := a.HopFeedView().Hops; len(got) != 1 {
 		t.Fatalf("a duplicate ACK produced %d deliveries, want 1", len(got))
+	}
+}
+
+// TestHopFeedCarriesMultipleRefusalsInAttemptOrder gives the renderer the
+// complete bounded story it needs: each offer is blocked at its own receiver,
+// and only the final receiver produces the delivery. A delayed NACK from an old
+// receiver must not append a duplicate or disturb the current attempt.
+func TestHopFeedCarriesMultipleRefusalsInAttemptOrder(t *testing.T) {
+	status := contractb.PeerStatus{
+		Map: contractb.MapShape{Width: 4, Height: 1}, SlotCount: 4,
+		Slots: []contractb.SlotInfo{
+			slot4(1, 0, 0, true, nil), slot4(2, 1, 0, true, nil),
+			slot4(3, 2, 0, true, nil), slot4(4, 3, 0, true, nil),
+		},
+	}
+	for i := range status.Slots {
+		status.Slots[i].PeerID = "peer-" + itoa(i+1)
+	}
+	a := newViewFixture(t, status, time.Second)
+	p := contractb.MigrationPayload{
+		MigrationID: "migration-twice-rerouted", SourcePeer: "peer-1", SourceSlot: 1,
+		DestSlot: 2, ExitEdge: contracta.EdgeE,
+	}
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	a.onNack(hopEnvelope(t, contractb.TypeMigrationNack, contractb.MigrationNack{
+		MigrationID: p.MigrationID, SourcePeer: "peer-2", DestPeer: "peer-1",
+		Code: contractb.NackOverloaded,
+	}))
+	p.DestSlot = 3
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	a.onNack(hopEnvelope(t, contractb.TypeMigrationNack, contractb.MigrationNack{
+		MigrationID: p.MigrationID, SourcePeer: "peer-3", DestPeer: "peer-1",
+		Code: contractb.NackOverloaded,
+	}))
+	p.DestSlot = 4
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	// This belongs to the old slot-2 attempt. It cannot mutate slot 4's current
+	// binding or add slot 2 to the chain again.
+	a.onNack(hopEnvelope(t, contractb.TypeMigrationNack, contractb.MigrationNack{
+		MigrationID: p.MigrationID, SourcePeer: "peer-2", DestPeer: "peer-1",
+		Code: contractb.NackOverloaded,
+	}))
+	a.onAck(hopEnvelope(t, contractb.TypeMigrationAck, contractb.MigrationAck{
+		MigrationID: p.MigrationID, SourcePeer: "peer-4", DestPeer: "peer-1",
+	}))
+	got := a.HopFeedView().Hops
+	if len(got) != 1 || got[0].ToSlot != 4 {
+		t.Fatalf("the final delivery is %+v, want one delivery to slot 4", got)
+	}
+	if len(got[0].RefusedSlots) != 2 || got[0].RefusedSlots[0] != 2 ||
+		got[0].RefusedSlots[1] != 3 {
+		t.Fatalf("refusal chain = %v, want [2 3]", got[0].RefusedSlots)
 	}
 }
 
@@ -168,6 +224,24 @@ func TestHopCorrelationStateIsBounded(t *testing.T) {
 	}
 	if got := len(a.hopEarlyAcks); got > hopEarlyAckMax {
 		t.Fatalf("early-ACK correlation grew to %d, above cap %d", got, hopEarlyAckMax)
+	}
+	// The map count bound is not enough if one hostile migration ID alternates
+	// otherwise valid receiver bindings forever. Its per-entry refusal slice is
+	// independently capped and reports the cut.
+	for i := 0; i < hopRefusedMax+5; i++ {
+		dest := 1 + i%2
+		a.observeHopAttempt(contractb.MigrationPayload{
+			MigrationID: "refusal-chain", SourceSlot: 9, DestSlot: dest,
+			ExitEdge: contracta.EdgeE,
+		}, nil, now+int64(i))
+		a.rejectHopAttempt(contractb.MigrationNack{
+			MigrationID: "refusal-chain", SourcePeer: status.Slots[dest-1].PeerID,
+		}, now+int64(i))
+	}
+	pending := a.hopPending["refusal-chain"].hop
+	if len(pending.RefusedSlots) != hopRefusedMax || !pending.RefusalsTruncated {
+		t.Fatalf("refusal chain has %d entries / truncated %v, want bounded %d / true",
+			len(pending.RefusedSlots), pending.RefusalsTruncated, hopRefusedMax)
 	}
 }
 
