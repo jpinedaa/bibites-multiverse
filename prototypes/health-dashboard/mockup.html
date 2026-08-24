@@ -175,7 +175,7 @@ body[data-scenario="archive"] .storage-node .node-dot { background: var(--bad); 
 .flow-map { min-width: 1060px; padding: 16px; }
 .flow-row {
   display: grid;
-  grid-template-columns: 116px 1fr 150px 1fr 150px 1fr 150px;
+  grid-template-columns: 116px 150px minmax(80px, 1fr) 150px minmax(80px, 1fr) 150px minmax(80px, 1fr) 150px;
   align-items: center;
   gap: 10px;
 }
@@ -592,7 +592,8 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
           <div class="node app-node"><div class="node-top"><strong>Relay</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="relaySessions">19</span> sessions</span></div>
           <div class="flow-link data"><span class="flow-value" data-bind="archiveInput">14.8 rec/s</span></div>
           <div class="node archive-node"><div class="node-top"><strong>Archive</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="ledgerRecords">61.4 M</span> records</span></div>
-          <div class="flow-link data"><span class="flow-value" data-bind="copyRate">2.4 GB/h</span></div>
+          <div class="flow-link data"><span class="flow-value">durable ledger</span></div>
+          <div class="node storage-node"><div class="node-top"><strong>Local volume</strong><i class="node-dot"></i></div><span class="node-value">69% used · +18 GB/d</span></div>
         </div>
         <div class="flow-row">
           <span class="lane-label">Public traffic</span>
@@ -601,7 +602,8 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
           <div class="node cloud-node"><div class="node-top"><strong>Nginx + TLS</strong><i class="node-dot"></i></div><span class="node-value">6 routes · 0.18% 5xx</span></div>
           <div class="flow-link"><span class="flow-value">API + WebSocket</span></div>
           <div class="node app-node"><div class="node-top"><strong>Map + stream</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="viewers">2</span> viewers · HLS live</span></div>
-          <div class="flow-link cloud"><span class="flow-value">off-host copy</span></div>
+          <div class="flow-link cloud"><span class="flow-value">viewer signal</span></div>
+          <div class="node app-node"><div class="node-top"><strong>Audience</strong><i class="node-dot"></i></div><span class="node-value"><span data-bind="viewers">2</span> HLS sessions</span></div>
         </div>
         <div class="flow-row">
           <span class="lane-label">Infrastructure</span>
@@ -611,6 +613,7 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
           <div class="flow-link data"><span class="flow-value">ledger + metrics</span></div>
           <div class="node storage-node"><div class="node-top"><strong>Local volume</strong><i class="node-dot"></i></div><span class="node-value">69% used · +18 GB/d</span></div>
           <div class="flow-link data"><span class="flow-value">verified segments</span></div>
+          <div class="node storage-node"><div class="node-top"><strong>Cold storage</strong><i class="node-dot"></i></div><span class="node-value">148 verified segments</span></div>
         </div>
       </div>
     </div>
@@ -793,6 +796,7 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
             <g class="scenario-series compute"><polyline class="line bad-line" points="42,146 82,139 122,131 162,121 202,110 242,98 282,87 322,73 362,62 402,51 442,44 482,40 522,36 562,39 602,35 642,38 682,34 746,37"/><polyline class="line data-line" points="42,127 82,119 122,108 162,96 202,84 242,72 282,58 322,46 362,35 402,29 442,26 482,23 522,21 562,24 602,20 642,23 682,19 746,22"/></g>
             <g class="scenario-series archive"><polyline class="line compute-line" points="42,146 82,144 122,140 162,142 202,136 242,132 282,129 322,124 362,121 402,118 442,115 482,111 522,106 562,109 602,105 642,108 682,104 746,107"/><polyline class="line data-line" points="42,127 82,124 122,120 162,121 202,115 242,111 282,106 322,101 362,97 402,94 442,89 482,85 522,79 562,82 602,78 642,81 682,77 746,80"/></g>
             <path class="event-mark" d="M520 18V210"/><text class="event-label" x="525" y="29">deploy</text>
+            <text class="axis" x="42" y="218">06:00</text><text class="axis" x="263" y="218">08:00</text><text class="axis" x="497" y="218">10:00</text><text class="axis" x="712" y="218">12:00</text>
           </svg>
         </div>
       </article>
@@ -1081,9 +1085,11 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
     "Browsers": "Public clients that request pages, APIs, and video through the front door.",
     "Nginx + TLS": "The public front door that terminates TLS and routes HTTP and WebSocket traffic.",
     "Map + stream": "The public map application and the HLS broadcast origin.",
+    "Audience": "Recent HLS requests that show viewer presence, not playback quality.",
     "Service host": "The Lightsail instance that runs nginx, relay, archive, and stream services.",
     "Lightsail": "The cloud instance, network allowance, burst capacity, and public address.",
-    "Local volume": "The attached storage that holds the ledger, genomes, metrics, and roll-up files."
+    "Local volume": "The attached storage that holds the ledger, genomes, metrics, and roll-up files.",
+    "Cold storage": "Verified compressed ledger segments stored away from the service host."
   };
 
   var cardTips = {
@@ -1201,10 +1207,10 @@ body[data-scenario="archive"] .pipe-link.stalled::after { border-left-color: var
     var flowTips = [
       "Current network traffic from participant worlds to the relay.",
       "Current migration-record rate from the relay to the archive.",
-      "Current cold-copy transfer rate from the archive.",
+      "Durable ledger writes from the archive to the local volume.",
       "External p95 latency from public clients to nginx.",
       "Application traffic from nginx to API and WebSocket services.",
-      "Video and data traffic that leaves the service host.",
+      "Recent HLS requests that report viewer presence.",
       "Service control and resource accounting through systemd.",
       "Ledger and metric writes to the local volume.",
       "Verified ledger segments copied to off-host storage."

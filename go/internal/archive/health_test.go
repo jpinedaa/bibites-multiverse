@@ -181,6 +181,7 @@ func TestProductionHealthPageAndAPIAreSelfContained(t *testing.T) {
 		"Automated service checks", "not collected", "not centralized", "not installed",
 		`get("/api/health")`, `get("/api/status")`, `get("/api/viewers")`,
 		`data-tooltip=`, `role="tooltip"`, "pointerover", "focusin",
+		"formatChartTime", "chart-readout", "onpointermove", `event.key==="ArrowLeft"`,
 	} {
 		if !strings.Contains(healthPageHTML, want) {
 			t.Fatalf("health page is missing %q", want)
@@ -212,6 +213,33 @@ func TestProductionHealthPageAndAPIAreSelfContained(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), tc.contentType) || !strings.Contains(string(body), tc.contains) {
 			t.Errorf("GET %s = status %d type %q", tc.path, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
+}
+
+func TestProductionHealthMapAndChartsStayInteractive(t *testing.T) {
+	const eightTrackMap = "grid-template-columns:116px 150px minmax(80px,1fr) 150px minmax(80px,1fr) 150px minmax(80px,1fr) 150px"
+	if !strings.Contains(healthPageHTML, eightTrackMap) {
+		t.Fatal("system-map rows do not define one track for each of their eight items")
+	}
+
+	flowPattern := regexp.MustCompile(`<div class="flow(?: [^"]*)?"[^>]*>`)
+	flows := flowPattern.FindAllString(healthPageHTML, -1)
+	if len(flows) != 9 {
+		t.Fatalf("health page has %d system-map connectors, want 9", len(flows))
+	}
+	for _, flow := range flows {
+		if !strings.Contains(flow, `data-tooltip="`) {
+			t.Errorf("system-map connector has no tooltip: %s", flow)
+		}
+	}
+
+	for _, want := range []string{
+		`y="203"`, `>UTC</text>`, "formatChartTimestamp", "chart-cursor",
+		"not collected", `event.key==="ArrowRight"`, `event.key==="Home"`,
+	} {
+		if !strings.Contains(healthPageHTML, want) {
+			t.Errorf("interactive charts are missing %q", want)
 		}
 	}
 }
