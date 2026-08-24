@@ -782,9 +782,11 @@ every check still passing.
 
 ### What a deployment leaves on the host
 
-Each binary deployment captures the exact running service generation before it replaces an
-installed path. The capture has a content-addressed identifier of the form `sha256-<digest>`.
-The deployment output reports that identifier for the private deployment record.
+If a binary deployment replaces an installed path, it first captures the exact running service
+generation. The capture has a content-addressed identifier of the form `sha256-<digest>`.
+The deployment output reports one rollback result for the private deployment record.
+[`RESTART-POLICY.md`](RESTART-POLICY.md#binary-preimages-and-explicit-restore) defines each exact
+`rollback_generation` and `generation_status` pair.
 
 The helper writes the capture to `/var/lib/multiverse/rollback/binaries/<generation>/`.
 The directory contains the running relay and archive executables, an optional installed
@@ -815,8 +817,8 @@ Keep on the host:
   indistinguishable from a fresh one. It happened on 2026-08-17 — the phase reported `already
   current` for all three binaries and installed nothing, truthfully, about the wrong files. The
   phase now verifies `SHA256SUMS` before it compares anything, prints the staged and installed
-  checksum for each artifact, and says loudly when it installed nothing. Pin what a run must
-  install and it refuses instead:
+  checksum for each artifact, and reports `no-change` when it installs nothing. Pin what a run
+  must install and it refuses instead:
 
   ```sh
   sudo provision.sh --only binaries \

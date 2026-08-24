@@ -119,6 +119,10 @@ generation_from() {
   sed -n 's/^rollback_generation=//p' | tail -1
 }
 
+evidence_from() {
+  grep -E '^(rollback_generation|generation_status)='
+}
+
 echo
 echo "== active and installed generations can differ"
 new_fixture split
@@ -138,6 +142,14 @@ assert_true "manifest records the installed relay hash" \
   grep -Fxq $'installed_relay_sha256\t'"$installed_relay_sha" "$generation_dir/manifest.tsv"
 assert_eq "generation directory is owner-only" 700 "$(stat -c '%a' "$generation_dir")"
 assert_eq "rollback artifact is owner-only" 600 "$(stat -c '%a' "$generation_dir/multiverse-relay")"
+assert_eq "a new capture emits one complete evidence pair" \
+  "rollback_generation=$generation"$'\n''generation_status=captured' \
+  "$(printf '%s\n' "$out" | evidence_from)"
+
+out="$(run_generation capture --bin-dir "$BIN" --store "$STORE" --proc-root "$PROC")"
+assert_eq "an existing capture emits one complete evidence pair" \
+  "rollback_generation=$generation"$'\n''generation_status=already-captured' \
+  "$(printf '%s\n' "$out" | evidence_from)"
 
 echo
 echo "== the normal installed and running generation"
@@ -202,16 +214,15 @@ echo "== dry-run proves the preimage and writes nothing"
 new_fixture dry-run
 relay_sha="$(sha256sum "$FIXTURE/running-relay" | awk '{print $1}')"
 out="$(run_generation capture --dry-run --bin-dir "$BIN" --store "$STORE" --proc-root "$PROC")"
+generation="$(printf '%s\n' "$out" | generation_from)"
 if printf '%s\n' "$out" | grep -Fq "running_relay_pid=101 sha256=$relay_sha"; then
   ok "dry-run output proves the running relay hash"
 else
   bad "dry-run output proves the running relay hash"
 fi
-if printf '%s\n' "$out" | grep -Fq 'generation_status=dry-run-verified'; then
-  ok "dry-run completes both PID and hash rechecks"
-else
-  bad "dry-run completes both PID and hash rechecks"
-fi
+assert_eq "dry-run completes both rechecks and emits one evidence pair" \
+  "rollback_generation=$generation"$'\n''generation_status=dry-run-verified' \
+  "$(printf '%s\n' "$out" | evidence_from)"
 assert_true "dry-run does not create the rollback store" test ! -e "$STORE"
 
 echo
@@ -312,11 +323,12 @@ mkdir -p "$BIN" "$PROC"
 RELAY_PID=0
 ARCHIVE_PID=0
 out="$(run_generation capture --bin-dir "$BIN" --store "$STORE" --proc-root "$PROC")"
-if printf '%s\n' "$out" | grep -Fq 'rollback_generation=initial-install'; then
-  ok "empty first install reports that no preimage exists"
-else
-  bad "empty first install reports that no preimage exists"
-fi
+initial_evidence="$(printf '%s\n' "$out" | evidence_from)"
+assert_eq "empty first install emits one complete terminal evidence pair" \
+  $'rollback_generation=initial-install\ngeneration_status=initial-install' \
+  "$initial_evidence"
+assert_eq "initial-install status is the terminal output" \
+  generation_status=initial-install "$(printf '%s\n' "$out" | tail -1)"
 assert_true "initial install does not create a rollback store" test ! -e "$STORE"
 
 echo

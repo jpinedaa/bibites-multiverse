@@ -134,6 +134,39 @@ else
 fi
 
 echo
+echo "== a no-change phase emits terminal rollback evidence"
+
+noop_prefix="$TMP/noop-prefix"
+noop_stage="$TMP/noop-stage"
+mkdir -p "$noop_prefix/bin" "$noop_stage"
+printf 'current relay\n' >"$noop_stage/relay-linux-amd64"
+printf 'current archive\n' >"$noop_stage/archive-linux-amd64"
+cp "$noop_stage/relay-linux-amd64" "$noop_prefix/bin/multiverse-relay"
+cp "$noop_stage/archive-linux-amd64" "$noop_prefix/bin/multiverse-archive"
+printf 'MV_STAGE_DIR=%s\nMV_PREFIX=%s\nMV_STATE=%s\nMV_DOMAIN=multiverse.test\n' \
+  "$noop_stage" "$noop_prefix" "$TMP/noop-state" >"$TMP/noop.env"
+
+if out="$(PATH="$TMP/fakebin:$PATH" "$PROVISION" --env-file "$TMP/noop.env" \
+    --only binaries --dry-run 2>&1)"; then
+  evidence="$(printf '%s\n' "$out" \
+    | grep -E '^(rollback_generation|generation_status)=')"
+  if [ "$evidence" = $'rollback_generation=no-change\ngeneration_status=no-change' ]; then
+    ok "a successful no-change phase emits one complete evidence pair"
+  else
+    bad "a successful no-change phase emits one complete evidence pair"
+  fi
+  if [ "$(printf '%s\n' "$out" | tail -2)" = \
+       $'rollback_generation=no-change\ngeneration_status=no-change' ]; then
+    ok "the no-change evidence is terminal"
+  else
+    bad "the no-change evidence is terminal"
+  fi
+else
+  bad "a successful no-change phase emits one complete evidence pair"
+  bad "the no-change evidence is terminal"
+fi
+
+echo
 echo "== capture failure occurs before every binary replacement"
 
 fail_kit="$TMP/fail-kit"
