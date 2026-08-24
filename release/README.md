@@ -326,8 +326,10 @@ the owner's machine rather than on a hosted runner.
 
 Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
 untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is green for this release at mod `0.6.8`, recorded and exercised on Windows and
-Linux on 2026-08-23.
+been staged. It is green for this release at mod `0.6.8`, recorded on 2026-08-24. The candidate
+sidecar passed the full Go and race suites and every shipped cross-build. Its production rollout
+follows this release. The unchanged plugin rebuilt byte-identically and matches the plugin
+installed in the release machine's tested game.
 
 **Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
 compares three copies of the plugin — the one this tree builds, the one the record names, and the
