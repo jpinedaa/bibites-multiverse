@@ -148,6 +148,21 @@ longer guesses arrivals from payload-derived counters if the hop feed is unavail
 rate remains explicitly labelled as migration offers, so routing pressure stays visible beside a
 closed gate without being presented as delivered population.
 
+That correction merged and deployed on 2026-08-24 as `3617390`; hosted checks run `32681067865`
+completed successfully. A fresh provider snapshot and local durable-file backup preceded the
+guarded restart. The archive replayed in 97 seconds, the peer gate held the participant outage to
+104 seconds, and the relay log proved the archive subscribed before any placement claim. At the
+60-second closeout the original 15 live and four dark slots were present and the relay was
+connected. The public page carried the confirmed-delivery wording and the bounded hop endpoint
+was active.
+
+The production regression interval then separated the two signals directly. During 15 seconds,
+slot 9's enforcing closed gate increased `admissionRejectedTotal` by 27, `/api/hops` contained 148
+new ACK-confirmed deliveries elsewhere, and none targeted slot 9. Its `pacedDepth` stayed at 12:
+those are arrivals accepted before the population gate closed, and they remain in custody until
+delivered. A later animation into a closed world can therefore still be correct, but only for that
+already-accepted backlog; the rejected new offers no longer animate.
+
 The service host then activated the archive and relay binaries built from `c321aad`. The guarded
 archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
 The archive subscribed before any placement claim, so the receipt reports a complete record. At
