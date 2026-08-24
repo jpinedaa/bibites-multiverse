@@ -15,10 +15,11 @@
 #
 # WHAT IT MAY COST. This runs on two vCPUs that are also serving the public
 # website, so it obeys monitor.sh's discipline (deploy/monitor.sh, "this
-# monitor's largest cost on a two-vCPU box"): O(1) reads of /proc and one
-# `systemctl show`, no `du`, no directory walks, no genome-store scans. The one
-# deliberate expense is a one-second sleep to turn /proc/stat into a rate, and
-# that second is spent sleeping rather than spinning.
+# monitor's largest cost on a two-vCPU box"): O(1) reads of /proc, fixed
+# `systemctl show` calls, and two bounded local JSON reads. It runs no `du`,
+# directory walk, or genome-store scan. The one deliberate expense is a
+# one-second sleep to turn /proc/stat into a rate. That second is spent sleeping
+# rather than spinning.
 #
 # UNKNOWN IS A VALUE (§10.1). Every field this cannot read is emitted as null,
 # never as zero. A missing conntrack count and a conntrack count of zero are
@@ -31,13 +32,17 @@ set -u
 
 OUT="${MV_HOST_SAMPLE_OUT:-/var/lib/multiverse/metrics/service-host.jsonl}"
 DATA_DIR="${MV_DATA_DIR:-/var/lib/multiverse/archive}"
-UNITS="${MV_HOST_SAMPLE_UNITS:-multiverse-relay multiverse-archive nginx multiverse-stream}"
+PROC_ROOT="${MV_PROC_ROOT:-/proc}"
+TRAFFIC_DOCUMENT="${MV_TRAFFIC_DOCUMENT:-/var/www/multiverse-status/viewers.json}"
+STATUS_SOURCE="${MV_STATUS_SOURCE:-http://127.0.0.1:8796/api/status}"
+SOURCE_MAX_BYTES="${MV_SOURCE_MAX_BYTES:-1048576}"
+UNITS="${MV_HOST_SAMPLE_UNITS-multiverse-relay multiverse-archive nginx multiverse-stream}"
 # The units whose MAIN PROCESS is also read from /proc. It is one small file per
 # named unit and it is deliberately not every unit: a per-process resident set
 # describes a unit truthfully only when the unit is one process, and nginx is a
 # master with workers. The archive is one process, and the archive is the one
 # whose replay peak nothing else can see.
-PROC_UNITS="${MV_HOST_SAMPLE_PROC_UNITS:-multiverse-archive}"
+PROC_UNITS="${MV_HOST_SAMPLE_PROC_UNITS-multiverse-archive}"
 CGROUP_ROOT="${MV_CGROUP_ROOT:-/sys/fs/cgroup}"
 STDOUT=0
 
@@ -56,12 +61,19 @@ command -v jq >/dev/null || { printf 'no jq on PATH\n' >&2; exit 2; }
 # Read a single value, or print nothing so jq renders it as null.
 try() { "$@" 2>/dev/null || true; }
 
+read_source() {
+  case "$1" in
+    http://*|https://*) curl -fsS --max-time 2 --max-filesize "$SOURCE_MAX_BYTES" "$1" 2>/dev/null | head -c "$SOURCE_MAX_BYTES" || true ;;
+    *) [ -r "$1" ] && head -c "$SOURCE_MAX_BYTES" -- "$1" || true ;;
+  esac
+}
+
 # ---------------------------------------------------------------- cpu
 
 # /proc/stat is cumulative, so a single read is meaningless. One second apart is
 # enough to turn it into a percentage and short enough that the sample stays a
 # point rather than a window.
-read_cpu_total() { awk '/^cpu /{i=$5; t=0; for(f=2;f<=NF;f++) t+=$f; print t, i}' /proc/stat 2>/dev/null; }
+read_cpu_total() { awk '/^cpu /{i=$5; t=0; for(f=2;f<=NF;f++) t+=$f; print t, i}' "$PROC_ROOT/stat" 2>/dev/null; }
 cpu_busy_pct=""
 c0="$(read_cpu_total)"
 if [ -n "$c0" ]; then
@@ -77,13 +89,13 @@ fi
 
 # ---------------------------------------------------------------- memory, load, disk
 
-mem_total="$(try awk '/^MemTotal:/{print $2*1024}'     /proc/meminfo)"
-mem_avail="$(try awk '/^MemAvailable:/{print $2*1024}' /proc/meminfo)"
-swap_total="$(try awk '/^SwapTotal:/{print $2*1024}'   /proc/meminfo)"
-swap_free="$(try awk '/^SwapFree:/{print $2*1024}'     /proc/meminfo)"
-load1="$(try cut -d' ' -f1 /proc/loadavg)"
-load5="$(try cut -d' ' -f2 /proc/loadavg)"
-load15="$(try cut -d' ' -f3 /proc/loadavg)"
+mem_total="$(try awk '/^MemTotal:/{print $2*1024}'     "$PROC_ROOT/meminfo")"
+mem_avail="$(try awk '/^MemAvailable:/{print $2*1024}' "$PROC_ROOT/meminfo")"
+swap_total="$(try awk '/^SwapTotal:/{print $2*1024}'   "$PROC_ROOT/meminfo")"
+swap_free="$(try awk '/^SwapFree:/{print $2*1024}'     "$PROC_ROOT/meminfo")"
+load1="$(try cut -d' ' -f1 "$PROC_ROOT/loadavg")"
+load5="$(try cut -d' ' -f2 "$PROC_ROOT/loadavg")"
+load15="$(try cut -d' ' -f3 "$PROC_ROOT/loadavg")"
 
 disk_free_bytes=""; disk_used_pct=""
 if [ -d "$DATA_DIR" ]; then
@@ -98,9 +110,9 @@ fi
 # They are cumulative since boot; a reader compares consecutive samples.
 
 snmp_field() { try awk -v k="$1" '/^Tcp:/{if(h==""){h=$0;next} split(h,H," "); split($0,V," ");
-                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' /proc/net/snmp; }
+                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' "$PROC_ROOT/net/snmp"; }
 ext_field()  { try awk -v k="$1" '/^TcpExt:/{if(h==""){h=$0;next} split(h,H," "); split($0,V," ");
-                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' /proc/net/netstat; }
+                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' "$PROC_ROOT/net/netstat"; }
 
 tcp_curr_estab="$(snmp_field CurrEstab)"
 tcp_active_opens="$(snmp_field ActiveOpens)"
@@ -113,8 +125,84 @@ tcpext_listen_overflows="$(ext_field ListenOverflows)"
 tcpext_listen_drops="$(ext_field ListenDrops)"
 tcpext_syn_retrans="$(ext_field TCPSynRetrans)"
 
-conntrack_count="$(try cat /proc/sys/net/netfilter/nf_conntrack_count)"
-conntrack_max="$(try cat /proc/sys/net/netfilter/nf_conntrack_max)"
+conntrack_count="$(try cat "$PROC_ROOT/sys/net/netfilter/nf_conntrack_count")"
+conntrack_max="$(try cat "$PROC_ROOT/sys/net/netfilter/nf_conntrack_max")"
+
+# ------------------------------------------------------- pressure and paging
+# PSI totals are cumulative microseconds since boot. The public projection
+# compares adjacent samples and publishes the share of each sample window that
+# contained pressure. vmstat counters preserve swap activity and kernel OOM
+# kills that occurred between samples.
+pressure_total() {
+  try awk -v kind="$2" '$1==kind { for (i=2;i<=NF;i++) if ($i ~ /^total=/) {
+    sub(/^total=/, "", $i); print $i; exit
+  }}' "$PROC_ROOT/pressure/$1"
+}
+vm_field() { try awk -v key="$1" '$1==key {print $2; exit}' "$PROC_ROOT/vmstat"; }
+
+psi_cpu_some="$(pressure_total cpu some)"
+psi_cpu_full="$(pressure_total cpu full)"
+psi_memory_some="$(pressure_total memory some)"
+psi_memory_full="$(pressure_total memory full)"
+psi_io_some="$(pressure_total io some)"
+psi_io_full="$(pressure_total io full)"
+vm_pswpin="$(vm_field pswpin)"
+vm_pswpout="$(vm_field pswpout)"
+vm_oom_kill="$(vm_field oom_kill)"
+
+# ---------------------------------------------------- local service summaries
+# viewers-presence.sh owns the bounded access-log read and writes public-only
+# HTTP aggregates. The status request contributes fixed archive counters. A
+# failed or malformed source becomes an empty object and never stops the host
+# sample.
+traffic_json="$(read_source "$TRAFFIC_DOCUMENT" | jq -c '
+  def number_or_null: if type == "number" then . else null end;
+  (.traffic // {}) as $traffic
+  | if ($traffic | type) != "object" then {}
+    else {
+      available: ($traffic.available == true),
+      complete: ($traffic.complete == true),
+      windowSeconds: ($traffic.windowSeconds | number_or_null),
+      requests: ($traffic.requests | number_or_null),
+      status1xx: ($traffic.status1xx | number_or_null),
+      status2xx: ($traffic.status2xx | number_or_null),
+      status3xx: ($traffic.status3xx | number_or_null),
+      status4xx: ($traffic.status4xx | number_or_null),
+      status5xx: ($traffic.status5xx | number_or_null),
+      p50Ms: ($traffic.p50Ms | number_or_null),
+      p95Ms: ($traffic.p95Ms | number_or_null),
+      routes: [($traffic.routes // [])[]?
+        | select(type == "object")
+        | select(.id == "pages" or .id == "api" or .id == "relay" or .id == "stream")
+        | {
+        id: (if (.id | type) == "string" then .id else null end),
+        requests: (.requests | number_or_null),
+        status1xx: (.status1xx | number_or_null),
+        status2xx: (.status2xx | number_or_null),
+        status3xx: (.status3xx | number_or_null),
+        status4xx: (.status4xx | number_or_null),
+        status5xx: (.status5xx | number_or_null),
+        p50Ms: (.p50Ms | number_or_null),
+        p95Ms: (.p95Ms | number_or_null)
+      }]
+    }
+    end
+' 2>/dev/null || printf '{}')"
+[ -n "$traffic_json" ] || traffic_json='{}'
+archive_json="$(read_source "$STATUS_SOURCE" | jq -c '
+  def number_or_null: if type == "number" then . else null end;
+  {
+    ledgerRecords: (.ledgerRecords | number_or_null),
+    ledgerRawBytes: (.ledgerRawBytes | number_or_null),
+    ledgerSegments: (.ledgerSegments | number_or_null),
+    ledgerSegmentsAwaitingColdCopy: (.ledgerSegmentsAwaitingColdCopy | number_or_null),
+    ledgerRetiredTotal: (.ledgerRetiredTotal | number_or_null),
+    rollupCoveredRecords: (.rollupCoveredRecords | number_or_null),
+    genomeGaps: (.genomeGaps | number_or_null),
+    duplicatesRefused: (.duplicatesRefused | number_or_null)
+  }
+' 2>/dev/null || printf '{}')"
+[ -n "$archive_json" ] || archive_json='{}'
 
 # ---------------------------------------------------------------- per-unit state
 #
@@ -181,11 +269,11 @@ units_json="$(
     rss_anon=""; vm_hwm=""
     case " $PROC_UNITS " in
       *" $u "*)
-        if [ -n "$pid" ] && [ "$pid" -gt 0 ] 2>/dev/null && [ -r "/proc/$pid/status" ]; then
+        if [ -n "$pid" ] && [ "$pid" -gt 0 ] 2>/dev/null && [ -r "$PROC_ROOT/$pid/status" ]; then
           # Both are kB in /proc and bytes everywhere in this record.
           pair="$(try awk '$1=="RssAnon:"{r=$2*1024} $1=="VmHWM:"{h=$2*1024}
                            END{ if (r != "" || h != "") printf "%s %s", r, h }' \
-                  "/proc/$pid/status")"
+                  "$PROC_ROOT/$pid/status")"
           rss_anon="${pair%% *}"; vm_hwm="${pair##* }"
         fi ;;
     esac
@@ -229,7 +317,12 @@ sample="$(jq -nc \
   --arg orst "$tcp_out_rsts" \
   --arg lo "$tcpext_listen_overflows" --arg ld "$tcpext_listen_drops" --arg sr "$tcpext_syn_retrans" \
   --arg ctc "$conntrack_count" --arg ctm "$conntrack_max" \
-  --argjson units "${units_json:-[]}" '
+  --arg pcs "$psi_cpu_some" --arg pcf "$psi_cpu_full" \
+  --arg pms "$psi_memory_some" --arg pmf "$psi_memory_full" \
+  --arg pis "$psi_io_some" --arg pif "$psi_io_full" \
+  --arg vsi "$vm_pswpin" --arg vso "$vm_pswpout" --arg vok "$vm_oom_kill" \
+  --argjson traffic "$traffic_json" --argjson archive "$archive_json" \
+  --argjson units "$units_json" '
   def n(x): if (x // "") == "" then null else (x | tonumber) end;
   {
     at: $at,
@@ -243,6 +336,14 @@ sample="$(jq -nc \
           outResets: n($orst), listenOverflows: n($lo), listenDrops: n($ld),
           synRetrans: n($sr)},
     conntrack: {count: n($ctc), max: n($ctm)},
+    pressure: {
+      cpu: {someUsec: n($pcs), fullUsec: n($pcf)},
+      memory: {someUsec: n($pms), fullUsec: n($pmf)},
+      io: {someUsec: n($pis), fullUsec: n($pif)}
+    },
+    vm: {swapInPages: n($vsi), swapOutPages: n($vso), oomKills: n($vok)},
+    traffic: $traffic,
+    archive: $archive,
     units: $units
   }')" || exit 1
 

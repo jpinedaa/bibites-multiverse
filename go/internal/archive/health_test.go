@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ func writeHealthFixture(t *testing.T, path, body string) {
 		t.Fatalf("write %s: %v", filepath.Base(path), err)
 	}
 }
+
+func ptr[T any](value T) *T { return &value }
 
 func TestMonitorHealthPublishesOnlyNamedVerdicts(t *testing.T) {
 	dir := t.TempDir()
@@ -120,6 +123,95 @@ func TestHostHealthReturnsARecentSanitizedWindow(t *testing.T) {
 		if strings.Contains(string(body), forbidden) {
 			t.Fatalf("public host JSON disclosed %q: %s", forbidden, body)
 		}
+	}
+}
+
+func TestHostHealthProjectsPressureTrafficAndArchiveRates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "service-host.jsonl")
+	now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+	first := fmt.Sprintf(`{"at":%q,"pressure":{"cpu":{"someUsec":1000000,"fullUsec":0},"memory":{"someUsec":0,"fullUsec":2000000},"io":{"someUsec":0,"fullUsec":3000000}},"vm":{"swapInPages":10,"swapOutPages":20,"oomKills":1},"archive":{"ledgerRecords":1000}}`, now.Add(-70*time.Second).Format(time.RFC3339))
+	last := fmt.Sprintf(`{"at":%q,"pressure":{"cpu":{"someUsec":7000000,"fullUsec":0},"memory":{"someUsec":0,"fullUsec":3500000},"io":{"someUsec":0,"fullUsec":6000000}},"vm":{"swapInPages":13,"swapOutPages":24,"oomKills":2},"traffic":{"available":true,"complete":true,"windowSeconds":60,"requests":120,"status1xx":0,"status2xx":100,"status3xx":0,"status4xx":14,"status5xx":6,"p50Ms":12.5,"p95Ms":48.25,"clientAddress":"198.51.100.4","routes":[{"id":"pages","requests":60,"status5xx":0,"p50Ms":8,"p95Ms":20},{"id":"api","requests":30,"status5xx":3,"p50Ms":20,"p95Ms":60},{"id":"private-customer-route","requests":30,"status5xx":3,"p50Ms":90,"p95Ms":120}]},"archive":{"ledgerRecords":1120}}`, now.Add(-10*time.Second).Format(time.RFC3339))
+	writeHealthFixture(t, path, first+"\n"+last+"\n")
+
+	view := readHostHealth(path, now)
+	if view.Latest == nil {
+		t.Fatal("latest host view is nil")
+	}
+	pressure := view.Latest.Pressure
+	if pressure.WindowSeconds == nil || *pressure.WindowSeconds != 60 ||
+		pressure.CPUSomePct == nil || *pressure.CPUSomePct != 10 ||
+		pressure.MemoryFullPct == nil || *pressure.MemoryFullPct != 2.5 ||
+		pressure.IOFullPct == nil || *pressure.IOFullPct != 5 {
+		t.Fatalf("pressure projection = %+v", pressure)
+	}
+	vm := view.Latest.VM
+	if vm.SwapInPages == nil || *vm.SwapInPages != 3 || vm.SwapOutPages == nil || *vm.SwapOutPages != 4 || vm.OOMKills == nil || *vm.OOMKills != 1 {
+		t.Fatalf("VM event projection = %+v", vm)
+	}
+	traffic := view.Latest.Traffic
+	if !traffic.Available || !traffic.Complete || traffic.RequestsPerSec == nil || *traffic.RequestsPerSec != 2 ||
+		traffic.P50Ms == nil || *traffic.P50Ms != 12.5 || traffic.P95Ms == nil || *traffic.P95Ms != 48.25 ||
+		traffic.Status1xxPct == nil || *traffic.Status1xxPct != 0 ||
+		traffic.Status2xxPct == nil || *traffic.Status2xxPct != 100.0*100/120 ||
+		traffic.Status3xxPct == nil || *traffic.Status3xxPct != 0 ||
+		traffic.Status4xxPct == nil || *traffic.Status4xxPct != 14.0*100/120 ||
+		traffic.ServerErrorPct == nil || *traffic.ServerErrorPct != 5 || len(traffic.Routes) != len(publicTrafficRoutes) {
+		t.Fatalf("traffic projection = %+v", traffic)
+	}
+	if traffic.Routes[0].ID != "pages" || traffic.Routes[0].RequestsPerSec == nil || *traffic.Routes[0].RequestsPerSec != 1 ||
+		traffic.Routes[1].ID != "api" || traffic.Routes[1].ServerErrorPct == nil || *traffic.Routes[1].ServerErrorPct != 10 ||
+		traffic.Routes[2].RequestsPerSec != nil {
+		t.Fatalf("route projection = %+v", traffic.Routes)
+	}
+	history := view.History
+	if len(history) != 2 || history[0].ArchiveRecordsPerSec != nil || history[1].ArchiveRecordsPerSec == nil || *history[1].ArchiveRecordsPerSec != 2 ||
+		history[1].CPUPressureSomePct == nil || *history[1].CPUPressureSomePct != 10 || history[1].OOMKills == nil || *history[1].OOMKills != 1 {
+		t.Fatalf("derived history = %+v", history)
+	}
+	body, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"private-customer-route", "198.51.100.4", "clientAddress", "someUsec", "fullUsec"} {
+		if strings.Contains(string(body), forbidden) {
+			t.Fatalf("public health JSON disclosed %q: %s", forbidden, body)
+		}
+	}
+}
+
+func TestDerivedHealthMetricsRejectResetsAndInvalidWindows(t *testing.T) {
+	previous := rawHostSample{
+		parsedAt: time.Unix(100, 0),
+		Pressure: rawHostPressure{CPU: rawPressureResource{SomeUsec: ptr(int64(5_000_000))}},
+		VM:       rawHostVM{OOMKills: ptr(int64(4))},
+		Archive:  rawArchiveSample{LedgerRecords: ptr(int64(500))},
+	}
+	current := rawHostSample{
+		parsedAt: time.Unix(160, 0),
+		Pressure: rawHostPressure{CPU: rawPressureResource{SomeUsec: ptr(int64(2_000_000))}},
+		VM:       rawHostVM{OOMKills: ptr(int64(3))},
+		Archive:  rawArchiveSample{LedgerRecords: ptr(int64(400))},
+	}
+	history := publicHostHistory(current, &previous)
+	if history.CPUPressureSomePct != nil || history.OOMKills != nil || history.ArchiveRecordsPerSec != nil {
+		t.Fatalf("counter resets produced interval values: %+v", history)
+	}
+
+	badWindow := int64(3601)
+	requests := int64(5)
+	tooManyErrors := int64(6)
+	traffic := publicTraffic(rawTrafficView{
+		Available: true, Complete: true, WindowSeconds: &badWindow,
+		Requests: &requests, Status5xx: &tooManyErrors,
+	})
+	if traffic.Complete || traffic.RequestsPerSec != nil || traffic.ServerErrorPct != nil {
+		t.Fatalf("invalid traffic window produced public metrics: %+v", traffic)
+	}
+
+	pressure := pressurePercentage(ptr(int64(130_000_000)), ptr(int64(1_000_000)), time.Minute)
+	if pressure == nil || *pressure != 100 {
+		t.Fatalf("impossible PSI interval = %v, want capped 100", pressure)
 	}
 }
 
@@ -232,14 +324,45 @@ func TestProductionHealthMapAndChartsStayInteractive(t *testing.T) {
 		if !strings.Contains(flow, `data-tooltip="`) {
 			t.Errorf("system-map connector has no tooltip: %s", flow)
 		}
+		for _, field := range []string{"Measures:", "Unit:", "Source:", "Read:"} {
+			if !strings.Contains(flow, field) {
+				t.Errorf("system-map connector tooltip lacks %q: %s", field, flow)
+			}
+		}
+	}
+
+	tooltipPattern := regexp.MustCompile(`data-tooltip="([^"]+)"`)
+	for _, match := range tooltipPattern.FindAllStringSubmatch(healthPageHTML, -1) {
+		if strings.HasPrefix(match[1], "Measures:") {
+			continue
+		}
+		if !strings.Contains(healthPageHTML, strconv.Quote(match[1])+`:[`) {
+			t.Errorf("static tooltip has no metric-specific explanation: %q", match[1])
+		}
+	}
+	for _, dynamicHelp := range []string{`/^Slot [0-9]+ is /`, `This color identifies the `} {
+		if !strings.Contains(healthPageHTML, dynamicHelp) {
+			t.Errorf("dynamic tooltip explanation is missing %q", dynamicHelp)
+		}
 	}
 
 	for _, want := range []string{
 		`y="203"`, `>UTC</text>`, "formatChartTimestamp", "chart-cursor",
 		"not collected", `event.key==="ArrowRight"`, `event.key==="Home"`,
+		`id="pressure-chart"`, `id="http-rate-chart"`, `id="http-latency-chart"`,
+		`id="http-status-chart"`, `id="archive-rate-chart"`, "cpuPressureSomePct",
+		"httpStatus1xxPct", "httpStatus2xxPct", "httpStatus4xxPct", "httpServerErrorPct",
 	} {
 		if !strings.Contains(healthPageHTML, want) {
 			t.Errorf("interactive charts are missing %q", want)
+		}
+	}
+	for _, removed := range []string{
+		"Host PSI</strong><span>not collected", "Request volume</strong><span>no series",
+		"route rate not collected", "Archive rate history is not collected",
+	} {
+		if strings.Contains(healthPageHTML, removed) {
+			t.Errorf("implemented dashboard metric still appears as a gap: %q", removed)
 		}
 	}
 }

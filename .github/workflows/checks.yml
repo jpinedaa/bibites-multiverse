@@ -200,6 +200,13 @@ jobs:
       - name: viewer presence
         run: deploy/test-viewers-presence.sh
 
+      # The host sampler is the source for public resource, PSI, HTTP, and
+      # archive-rate series. This fixture uses a fake proc tree and fixed public
+      # input documents, so collection and the privacy boundary stay testable
+      # without systemd, nginx, an archive process, or a production host.
+      - name: service host telemetry
+        run: deploy/test-service-host-sample.sh
+
       # The broadcast world's presentation, identity and startup ordering.
       # install.sh mints this world its own map credential and protects it with
       # a Windows ACL, and run-windows.ps1 starts a sidecar, a game and OBS in
