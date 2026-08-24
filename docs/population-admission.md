@@ -115,6 +115,12 @@ creature. If the same migration ID spills onward, one glyph appears only at the 
 ACK-confirmed destination. If `/api/hops` is unavailable, the page pauses delivery animation
 instead of guessing an arrival from the offer counters.
 
+`CLOSED` applies to **new offers**. It does not revoke custody the world already accepted before
+the gate closed, because discarding those journal entries would lose organisms after handoff. Read
+`pacedDepth` beside the gate: while it is above zero, those previously accepted arrivals can still
+reach the game and produce genuine ACK-confirmed animations. Once it drains to zero, a closed gate
+has no accepted backlog left to deliver.
+
 The enforcement promotion gate is:
 
 - at least 24 hours of shadow samples per production world;
@@ -178,3 +184,10 @@ rollback.
   active after restart; the initial snapshot had six gates closed, migrations continuing, and no
   capacity shed or journal discard. `metrics.jsonl` now supplies the 24-hour and 72-hour evidence
   described above.
+- The delivery-confirmed archive correction merged as `3617390` and passed hosted checks run
+  `32681067865`. Its guarded production restart replayed in 97 seconds, held the participant gate
+  for 104 seconds, and proved the archive subscription preceded every placement claim. Sixty
+  seconds later the original 15 live and four dark slots were present. In a post-deploy 15-second
+  interval, slot 9 rejected 27 new offers while `/api/hops` reported 148 confirmed deliveries to
+  other slots and zero to slot 9. Its `pacedDepth` remained 12, explicitly preserving the older
+  accepted backlog rather than treating `CLOSED` as permission to discard custody.
