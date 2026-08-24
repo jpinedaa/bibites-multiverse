@@ -648,9 +648,10 @@ Use these exact terminal pairs:
 Automation must reject a successful phase that has a missing, repeated, or mismatched pair.
 
 Record the exact pair in the private deployment record.
-For a `sha256-<digest>` result, the helper writes the owner-only generation to
+For a `captured` or `already-captured` result, the owner-only generation exists at
 `/var/lib/multiverse/rollback/binaries/<generation>/`.
-Its `manifest.tsv` and `SHA256SUMS` record the exact captured bytes.
+That generation contains `manifest.tsv` and `SHA256SUMS`, which record the exact captured bytes.
+A `dry-run-verified` result writes no rollback directory or artifact.
 
 Use only a named generation for a restore.
 First, verify the generation without a mutation:
