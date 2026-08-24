@@ -55,7 +55,7 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 | # | Decision | Why | Consequence |
 |---|---|---|---|
 | **D1** | **Relay-first, P2P-ready.** MVP transport is a deliberately dumb relay server (the topology §6.1 recommends); direct libp2p arrives in M6 behind unchanged Contract B message shapes. | Full P2P puts NAT traversal, gossip, DHT, and CRDTs on the critical path, and the research itself judged a pure mesh unviable. The sidecar boundary means the mod never notices the transport change. | New `multiverse-relay` component. Ring insertion (D8) is relay-arbitrated until M6. "Dumb" is load-bearing: it is why the organism database is a separate service (D11) and not a relay feature. |
-| **D2** | **Durable custody handoff, idempotent delivery.** The sidecar journals an organism to disk *before* ACKing `MIGRATE_OUT`; receivers dedup on `migrationId`; only proven-safe failures bounce into the local sim. Preference: rare loss over duplication. | Destroy-on-ACK without persistence silently kills organisms on any crash; retries without dedup clone them. Loss reads as natural death; duplication reads as cloning. | Contract A gains `MIGRATE_IN_ACK/NACK`; the envelope gains `migrationId`; the sidecar owns a migration journal. See the custody chain under Contract A. ~~**Amended 2026-08-05 by the owner's M4 sign-off — at-most-once now carries exactly one bounded exception.** An organism forwarded to a slot that then went dark, with no proof of non-delivery, is **held for a configurable timeout (default 24 hours) and then bounces home automatically**. The owner accepts the residual duplication risk of the invisible-delivery case: a far sidecar that took custody, died before its ACK, and replays its own journal when it returns. An unbounded hold was the alternative and was rejected — an organism stranded forever in a journal nobody reads is the more likely loss, and it is invisible.~~ **Reversed 2026-08-17 by the same owner (`contract-b-m4.md` §25, B37): AT-MOST-ONCE CARRIES NO EXCEPTION.** *"we don't mind much on bibites being lost, we can see migrating as dangerous, and then there wouldn't be duplicates while making things simpler."* A forwarded frame is forwarded **once** — no hold, no re-forward, no clock, no automatic bounce. An entry with no answer within `forwardTimeoutMs` (5 minutes since 2026-08-19 — `contract-b-m4.md` §27, B42; 24 hours before that) is recorded **lost**: the organism is gone, counted on `stats.lostForwardTotal` and readable on the map. **Migration is the dangerous act, and it is dangerous in one direction only.** The row's own preference sentence — *rare loss over duplication* — is now the whole rule rather than the rule with an exception attached. What stays: re-routing under a **proof** that no custody moved (a `pending` entry, or a NACK), because a statement is not silence and cannot duplicate; bounce-back on a NACK and on an entry that reached nobody; and `--release-inflight`, which is now the **only** way left to duplicate an organism and says so before it acts. **Refined 2026-08-23 by `contract-b-m4.md` §30, B45.** Exact relay `NOT_FORWARDED` proof starts one durable same-axis walk through compatible untried destinations. One first-refusal deadline and `maxReroutes` bound the whole walk. Exhaustion bounces once. False, missing, mismatched, or same-session-receipt-contradicted proof moves nothing. The sidecar also fsyncs `sent` before socket enqueue. A crash or local enqueue error can cause loss, but it cannot cause a retry or duplicate. |
+| **D2** | **Durable custody handoff, idempotent delivery.** The sidecar journals an organism to disk *before* ACKing `MIGRATE_OUT`; receivers dedup on `migrationId`; only proven-safe failures bounce into the local sim. Preference: rare loss over duplication. | Destroy-on-ACK without persistence silently kills organisms on any crash; retries without dedup clone them. Loss reads as natural death; duplication reads as cloning. | Contract A gains `MIGRATE_IN_ACK/NACK`; the envelope gains `migrationId`; the sidecar owns a migration journal. See the custody chain under Contract A. ~~**Amended 2026-08-05 by the owner's M4 sign-off — at-most-once now carries exactly one bounded exception.** An organism forwarded to a slot that then went dark, with no proof of non-delivery, is **held for a configurable timeout (default 24 hours) and then bounces home automatically**. The owner accepts the residual duplication risk of the invisible-delivery case: a far sidecar that took custody, died before its ACK, and replays its own journal when it returns. An unbounded hold was the alternative and was rejected — an organism stranded forever in a journal nobody reads is the more likely loss, and it is invisible.~~ **Reversed 2026-08-17 by the same owner (`contract-b-m4.md` §25, B37): AT-MOST-ONCE CARRIES NO EXCEPTION.** *"we don't mind much on bibites being lost, we can see migrating as dangerous, and then there wouldn't be duplicates while making things simpler."* A forwarded frame is forwarded **once** — no hold, no re-forward, no clock, no automatic bounce. An entry with no answer within `forwardTimeoutMs` (5 minutes since 2026-08-19 — `contract-b-m4.md` §27, B42; 24 hours before that) is recorded **lost**: the organism is gone, counted on `stats.lostForwardTotal` and readable on the map. **Migration is the dangerous act, and it is dangerous in one direction only.** The row's own preference sentence — *rare loss over duplication* — is now the whole rule rather than the rule with an exception attached. What stays: re-routing under a **proof** that no custody moved (a `pending` entry, or a NACK), because a statement is not silence and cannot duplicate; bounce-back on a NACK and on an entry that reached nobody; and `--release-inflight`, which is now the **only** way left to duplicate an organism and says so before it acts. **Refined 2026-08-23 by `contract-b-m4.md` §30, B45, and narrowed by §31, B46.** A queue-full relay `NOT_FORWARDED` starts one durable same-axis walk only when its relay session, destination, and reroute count match the current journal attempt. The legacy `neverForwarded` field must be present, but it can be false after an earlier accepted attempt. A same-session receipt for that destination contradicts the proof. Missing, malformed, stale, delayed, drain, or contradicted proof moves neither custody nor its scheduler. One first-refusal deadline and `maxReroutes` bound the whole walk. Exhaustion bounces once. The sidecar also fsyncs `sent` before socket enqueue. A crash or local enqueue error can cause loss, but it cannot cause a retry or duplicate. |
 | **D3** | **Map-edge borders; gateway towers deferred.** Migration triggers at designated map edges, and the mod owns whatever it takes to get organisms *to* an open edge (§5.1). | Edges preserve the illusion of one continuous world. Towers (§5.3) remain the fallback if crossing rates stay too low — parked, and revisited only if a real multi-peer world crosses far below M2's measured rate. **Mechanism corrected 2026-08-02 (`m2_findings.md`):** the original rationale — "vanilla void-avoidance AI keeps crossing rates near zero" — misattributed the cause. Void avoidance is a single torque blend in `BibitePropulsion.UpdateOrgan` gated on a global static that **ships off** (`ScenarioSettings.voidAvoidance`, `DefaultValue = false`; no shipped scenario enables it, and `Apocalypse` disables it explicitly). What actually keeps organisms on their islands is **food density**: pellets spawn only inside a `Zone`, and `3 Islands` separates its islands with a ~3000× fertility ratio, not with a steering rule. | Mod still owns the void-avoidance override (cheap, and worlds that enable *Void-No-Mo'* need it); the sidecar tells the mod which edges are open (`EDGE_STATUS`). **Consequence of the correction:** suppression alone cannot raise a rate that steering was never holding down, so M2 *measured* the natural crossing rate at an open edge first. **Measured 2026-08-02/03: the lure is unnecessary** — crossing is frequent once an edge is open (20.5 and 24.4 strip entries per sim-hour), so the corridor zone was canceled and the pheromone beacon stays parked. M2 also disabled `worldWrapping` while an edge was open, so a missed capture could not teleport an organism to the antipode — which in turn leaked organisms out of the three unguarded edges. **D10 reverses that trade for M3:** the vanilla wrap goes back on and becomes the containment mechanism. |
 | **D4** | **The bb8 body is opaque to the mod.** The mod ships the game's own Newtonsoft output as a version-tagged blob; parsing, validation, and indexing live only in the sidecar's `bb8-schema`. | The authoritative serializer is the game itself. One schema implementation instead of two, no cross-language fidelity risk, and the mod survives game updates that add fields. | `bb8-schema` needs no C# implementation. All payload validation happens sidecar-side, before anything reaches a mod. |
 | **D5** | **No global clock.** Every sector runs at its own sim speed; envelope timestamps are informational; a migrating organism may experience time discontinuities. | Peers' sim speeds differ by hardware and settings; synchronizing would couple every peer to the slowest. | Age/season continuity across sectors is explicitly not guaranteed. |
@@ -299,18 +299,21 @@ the sidecar's job.
   fiction until 2026-08-17**: the timed rewrite renamed its copy over a file the same
   process held open, which Windows refuses, so only the compaction at start-up ever ran
   and two live sidecars reached 718 MB and 132 MB. The rewrite now closes its append
-  handle across the rename. **From B45, an exact relay `NOT_FORWARDED` also records a
+  handle across the rename. **From B46, an exact queue-full `NOT_FORWARDED` also records a
   durable tried-slot set and one first-refusal deadline.** Both survive compaction and
-  restart. A reroute, retry, or reconnect cannot reset them (`contract-b-m4.md` §30)
+  restart. A reroute, retry, or reconnect cannot reset them. A reroute clears the prior
+  attempt's relay session and send clock. The next durable send commit replaces them
+  (`contract-b-m4.md` §31)
 - Routing: the export edge → the ring's next slot east (D8). From M4 that target is the
   **effective** east neighbour: the next *deliverable* slot, with dark slots bypassed
   (D12), and one target per export edge, east and north, on the live grid (D13). From D17
   there are **four** targets, one per edge, and the west and south walks are the east and
   north walks with the step negated — route-around is symmetric. The mod
   never sees any of this — route-around and the grid are invisible on Contract A.
-  **An exact full-queue proof continues after the refused destination.** It selects the
-  next compatible, untried slot on the same axis. Exhaustion, `maxReroutes`, or the one
-  first-refusal deadline bounces the entry once (B45)
+  **An exact full-queue proof continues after the refused destination.** The relay session,
+  destination, and reroute count must match the current journal attempt. The source selects
+  the next compatible, untried slot on the same axis. Exhaustion, `maxReroutes`, or the one
+  first-refusal deadline bounces the entry once (B46)
 - Payload validation via `bb8-schema` — nothing invalid ever reaches a mod, in
   either direction
 - Admission control: inbound migration rate limits, population-aware via `HEARTBEAT`
@@ -357,7 +360,9 @@ the sidecar's job.
   false, so the next custody tick offers it again. Pending journal ACKs have strict priority
   over new outbound payloads. For a payload, encoding and pace admission happen before the
   durable send commit. The sidecar then fsyncs `sent` before socket enqueue. A crash or
-  enqueue error after that commit cannot retry the payload (B45).
+  enqueue error after that commit cannot retry the payload. Each custody tick reloads the
+  current journal state while it holds the sidecar lock. A stale `Create` snapshot cannot
+  commit a second send (B45, B46).
 - **Immediate response reserve.** `PONG`, other liveness frames, immediate `MIGRATION_NACK`,
   and tombstone re-ACK frames bypass the deferred gate. Destination pacing bounds the
   migration replies. The sidecar charges every bypass frame. Its debt stops deferred traffic
@@ -403,14 +408,19 @@ between sidecars and arbitrates the ring. It never parses bb8 bodies.
 - **Frame-level validation.** The source frame and byte meters run before queue admission.
   The relay then validates the required routing fields and the `migrationId` UUID. An invalid
   or empty `migrationId` closes the source as malformed before admission. The relay does not
-  inspect the body, lineage, or species data.
+  inspect the body, lineage, or species data. For a migration payload, it also reads only
+  `reroute.count` from the reroute block. A present count must be a positive integer. The
+  relay uses it only to correlate a queue refusal; it does not route on it.
 - **Atomic migration admission.** Admission resolves the current connection for the destination
   slot once. Final target validation, queue acceptance, and forwarding-record insertion form
   one atomic relay action for a frame with valid relay-visible Contract B fields. This action is
   the attempted-write boundary (§3.3, §5.2, §28 B43). Insufficient queue space returns
   `NOT_FORWARDED` before this attempt gets a forwarding record and does not close the destination.
-  The source handler never waits for a writer turn. Under B45, the sending sidecar can use this
-  exact proof to advance past that destination. The relay still does not reroute the frame.
+  This 4.2 answer echoes the refused destination and reroute count. The legacy
+  `neverForwarded` field stays present, but it can be false after an earlier accepted attempt.
+  The source handler never waits for a writer turn. Under B46, the sending sidecar can use the
+  exact current-attempt proof to advance past that destination. The relay still does not
+  reroute the frame.
 - **Identity-owned writer pacing.** The writer sends queued migrations at
   `R = max(1, floor(F / 8))` each second. Current relays refuse `F < 8` at start, so current
   operation uses `floor(F / 8)`. Writers in a reconnect overlap share one schedule for the
@@ -427,12 +437,13 @@ between sidecars and arbitrates the ring. It never parses bb8 bodies.
   forwarding record makes a drop conservative under D2. This boundary does not guarantee
   delivery or destination custody.
 - **Relay-wide drain.** The relay first rejects new migration admission with `NOT_FORWARDED`
-  and no forwarding record. It then drains all ordinary queues and accepted migration queues
-  at the identity pace. All connection drains use one shared 18-second deadline and run
-  concurrently. Pacing delay alone uses at most 15 seconds of this deadline. The remaining
-  margin covers scheduling and close work but does not guarantee an empty queue. At the
-  deadline, the relay overrides a longer write timeout, force-closes the remainder, and sends
-  no late NACK.
+  and no forwarding record. A drain refusal omits `refusedAttempt`, `neverForwarded`, and
+  `relaySessionId`. It cannot consume a source destination or start a refusal deadline. The
+  relay then drains all ordinary queues and accepted migration queues at the identity pace.
+  All connection drains use one shared 18-second deadline and run concurrently. Pacing delay
+  alone uses at most 15 seconds of this deadline. The remaining margin covers scheduling and
+  close work but does not guarantee an empty queue. At the deadline, the relay overrides a
+  longer write timeout, force-closes the remainder, and sends no late NACK.
 - Compatibility enforcement at connect. **D22 adds a contract-version gate**: the relay
   refuses a sidecar whose contract version it cannot speak and publishes the minimum it
   accepts. The gate is a compatibility control, never a security one, because a claimed version
@@ -620,15 +631,18 @@ EDGE_STATUS        Whether the export edge is open for migration — drives the 
    Mod destroys the organism.
 3. Sidecar prepares `MIGRATION_PAYLOAD`, fsyncs its `sent` handoff, and makes one socket
    enqueue attempt (via relay in M2–M5, direct in M6). A crash or enqueue error after the
-   durable commit cannot cause a retry (B45).
+   durable commit cannot cause a retry. The commit records the relay session and send clock
+   for this attempt (B45, B46).
 4. Receiving sidecar validates, admission-checks, journals, sends `MIGRATE_IN` to its
    mod. Mod restores the organism from the blob and re-links its parent/child
    references, then replies `MIGRATE_IN_ACK`.
 5. Receiving sidecar schedules a durable `MIGRATION_ACK`. A deferral leaves
    `AckedUpstream` false for retry. The sender deletes its journal entry after the ACK.
 6. A remote NACK sends the entry through the code-specific re-route or bounce path in
-   step 8. An exact relay `NOT_FORWARDED` starts one bounded refusal walk. A timeout on
-   an ambiguous `sent` entry is silence and never triggers a bounce.
+   step 8. A queue-full relay `NOT_FORWARDED` starts one bounded refusal walk only when
+   its session, destination, and reroute count match the current journal attempt. A drain
+   refusal carries no proof and starts no walk. A timeout on an ambiguous `sent` entry is
+   silence and never triggers a bounce.
 7. Receivers dedup `MIGRATION_PAYLOAD` on `migrationId`. This protects against an old or
    defective sender, but it does not authorize a current sender to re-forward. A destroyed
    journal can cause loss during flight. This loss reads as death (D2).
@@ -636,9 +650,11 @@ EDGE_STATUS        Whether the export edge is open for migration — drives the 
    and which one it is depends on custody, never on convenience.** A frame the relay
    proves it never forwarded may be re-routed east to the effective neighbour under its
    original `migrationId`; a peer-specific refusal (overloaded, size mismatch) may be
-   re-routed the same way. Exact `NOT_FORWARDED` continues after the refused destination
-   to the next compatible, untried slot on that axis. Its durable first deadline and tried
-   set never reset. Exhaustion, `maxReroutes`, or deadline expiry bounces once. A
+   re-routed the same way. Exact attempt-scoped `NOT_FORWARDED` continues after the refused
+   destination to the next compatible, untried slot on that axis. Its durable first deadline
+   and tried set never reset. A stale, delayed, malformed, mismatched, or contradicted NACK
+   does not change the entry or its schedule. Exhaustion, `maxReroutes`, or deadline expiry
+   bounces once. A
    payload-fatal refusal bounces home as in step 6. A frame
    that was forwarded and never answered gets **nothing done to it at all**, because the
    far sidecar may already have taken custody and every available action would risk
@@ -1033,7 +1049,7 @@ Four remain milestone decisions in `m5_considerations.md`.
 
 M5 delivered the public `0.1.0` release and its hosted service. The release includes TLS,
 peer-bound credentials, capacity limits, participant packages, diagnostics, and support guides.
-It publishes `contract-a/2.4` and `contract-b/4.0`.
+It publishes `contract-a/2.4` and `contract-b/4.2`.
 
 The first announced service period runs from **August 14 through November 14, 2026**.
 The release channel is GitHub Releases, with checksums and security guidance.

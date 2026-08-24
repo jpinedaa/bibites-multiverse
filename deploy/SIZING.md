@@ -784,7 +784,8 @@ window. What is left is the crossing rate itself.
 
 ## Relay pacing for frames and responses
 
-Contract B §3.3 defines the transport bounds and §5.2 defines the attempted-write boundary.
+Contract B 4.2 §3.3 defines the transport bounds, and §5.2 defines the attempted-write
+boundary. Section 31 defines exact queue-refusal correlation.
 
 `F` is the relay's `maxFramesPerSecond` value. This value is an inbound ceiling for
 each peer connection. The relay publishes it in `HANDSHAKE_ACK` and `PEER_STATUS`.
@@ -822,10 +823,14 @@ Both bounds apply at admission. The production values are `F = 50` and
 The relay applies the source frame and byte meters before queue admission. Thus a single
 frame larger than `B` normally closes the source with `4007` before the queue evaluates it.
 The relay then validates the required routing fields and the `migrationId` UUID. An invalid
-or empty `migrationId` closes the source as malformed before queue admission.
+or empty `migrationId` closes the source as malformed before queue admission. It also reads
+`reroute.count` only for queue-refusal correlation. A present count must be a positive integer.
 
 Source-meter admission does not guarantee destination queue space. If that space is
-insufficient, the relay returns `NOT_FORWARDED` and does not close the destination.
+insufficient, the relay returns `NOT_FORWARDED` and does not close the destination. A 4.2
+queue refusal echoes the payload's destination and reroute count in `refusedAttempt`. It also
+includes the current relay session and the legacy `neverForwarded` field. That legacy value can
+be false after an earlier attempt was accepted.
 
 The queue retains the byte-identical Contract B frame. The relay does not decode the body,
 lineage, or species data. It does not create an organism job. For a frame with valid relay-visible
@@ -833,7 +838,11 @@ Contract B fields, a successful enqueue and its forwarding record form one atomi
 attempted-write boundary.
 
 If admission refuses the queue, the attempt adds no forwarding record. The source handler
-does not wait for capacity or for a writer turn.
+does not wait for capacity or for a writer turn. The source advances only when the session,
+destination, and reroute count match its current durable attempt and no receipt contradicts
+that destination in the same session. Missing or stale attempt correlation causes no custody
+or scheduler change. Deploy the 4.2 relay before the 4.2 sidecars. An older relay omits the
+correlation, so the progress feature stays safely unavailable during a sidecar-first mismatch.
 
 These payload bounds apply to capacity planning:
 
@@ -920,9 +929,11 @@ therefore delivery-ambiguous and follows the at-most-once loss rule. The queue i
 and this design is not a lossless transport.
 
 A relay-wide drain uses a different close path. It rejects new migration admission with
-`NOT_FORWARDED` and no forwarding record. It drains all ordinary queues and accepted migration
-queues. The migration queues keep their identity rates. All connection drains run concurrently
-with one shared 18-second deadline.
+`NOT_FORWARDED` and no forwarding record. This drain answer omits `refusedAttempt`,
+`neverForwarded`, and `relaySessionId`. It cannot consume a source destination or start a
+refusal deadline. The relay drains all ordinary queues and accepted migration queues. The
+migration queues keep their identity rates. All connection drains run concurrently with one
+shared 18-second deadline.
 
 For all supported `F` values, pacing delay alone is at most 15 seconds for a full queue. The
 remaining margin covers scheduling and close work. This margin does not guarantee that all

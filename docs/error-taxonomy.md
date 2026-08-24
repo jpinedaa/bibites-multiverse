@@ -9,7 +9,7 @@ on their computer (`m5_considerations.md`, DQ8).
 **Status: WP7's spine, with WP2's, WP4's and WP6's texture landed and WP7's own slots closed.**
 Every entry below is taken
 from the wire as WP1 published it — `contracts/contract-a.md` at `contract-a/2.4` and
-`contracts/contract-b-m4.md` at `contract-b/4.1` — and every wording, value and log line that
+`contracts/contract-b-m4.md` at `contract-b/4.2` — and every wording, value and log line that
 belongs to the credential and TLS work (WP2), to the capacity table, the admin path and the
 A49/A50 halves (WP4), or to the package and its installer (WP6) is quoted from what those
 packages ship. Entries whose exact wording,
@@ -247,17 +247,17 @@ which is why the warning comes first.
 
 ## 3. The map wire — your sidecar and the relay
 
-`contract-b/4.1` over TLS (`contract-b-m4.md` §3), on the same `/contract-b/v4` path: the minor
-bump changes no frame, and a map carries sidecars either side of it without anybody being
-evicted for the difference. **This is where another participant's machine can become your
-symptom**, and every entry that has that shape says so.
+`contract-b/4.2` over TLS (`contract-b-m4.md` §3), on the same `/contract-b/v4` path. The minor
+adds optional queue-refusal attempt correlation. A 4.1 relay omits it, and a 4.2 sidecar then
+keeps the conservative no-action result. No peer is evicted for the difference. **This is where
+another participant's machine can become your symptom**, and every entry with that shape says so.
 
 ### 3.1 Refused before the socket exists
 
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
 | `B-401` | HTTP **401** with `WWW-Authenticate: Bearer`; no WebSocket is created. Your sidecar logs one loud error per attempt — `contract B: the relay refused THIS PEER'S CREDENTIAL with HTTP 401`, carrying the count so far, this world's peer id, the remedy and who must act — and after five in a row it holds at the maximum backoff and stops saying anything new | The relay refused this credential: missing, malformed, or wrong. **The line names this peer's own credential on purpose**: a refusal at the door is about the secret this machine presented and about nothing on the map | Re-apply the correct private-map join string if you still have it. The secret goes in the file `--credential-file` names, never on a command line. **If the final public or private secret is lost or changed, there is no software recovery** — ask the operator for a slot handover (`contract-b-m4.md` §22, B22, and §7.5) | **you**, then **operator** |
-| `B-429` | HTTP **429** with `Retry-After: 5` and the body `too many simultaneous connections from this address`; no WebSocket is created | Too many simultaneous connections from this source address. **The only capacity limit answered with an HTTP status instead of a close code**, because it is decided before there is a WebSocket to close — the relay has the address before it has read a header. It is deliberately loose: one machine legitimately runs several worlds | Run fewer worlds from this address, or ask the operator to raise the knob. A `contract-b/4.0` relay defaults to 8; the number that binds you is the `maxConnectionsPerAddress` your map publishes — see the limit table under §3.2 | **you**, then **operator** |
+| `B-429` | HTTP **429** with `Retry-After: 5` and the body `too many simultaneous connections from this address`; no WebSocket is created | Too many simultaneous connections from this source address. **The only capacity limit answered with an HTTP status instead of a close code**, because it is decided before there is a WebSocket to close — the relay has the address before it has read a header. It is deliberately loose: one machine legitimately runs several worlds | Run fewer worlds from this address, or ask the operator to raise the knob. A Contract B relay defaults to 8; the number that binds you is the `maxConnectionsPerAddress` your map publishes — see the limit table under §3.2 | **you**, then **operator** |
 | `B-426` | HTTP **426** with `Upgrade: TLS/1.2, HTTP/1.1` | You dialled `ws://` at a relay that only takes `wss://`. It is answered with a refusal and **never a redirect**, because a redirect to a scheme you did not ask for is how a downgrade goes unnoticed | Use the `wss://` URL from the public configuration or private join string | **you** |
 | `B-TLS` | The connection fails with a certificate error naming the host, the presented name and the verification failure. It retries and keeps failing | The relay's certificate could not be verified against your platform's trust store. **There is no flag that skips this and there will not be one** | Check your machine's clock and its trust store first — a wrong clock fails a valid certificate. If both are right, it is the relay's certificate and no client-side action makes it safe | **you**, then **operator** |
 
@@ -285,7 +285,7 @@ journal's destination addresses and every organism addressed to it
 | `B-4006` | Close `4006` on the older connection | A newer connection that **authenticated as the same identity** took over. On your own restart this is the normal, self-healing shape | If you did not restart anything, somebody else is using your credential. Ask the operator for a handover to a new identity with a freshly minted credential | **nobody**, or **operator** if unexplained |
 | `B-4007` | Close `4007 CAPACITY`, and the reason names the limit, the value it is set to and the measurement that crossed it: `maxFramesPerSecond 50 exceeded (peak 412/s over 3s)`, `maxBytesPerSecond 4194304 exceeded (peak … B/s over …)`, `maxConnectionsPerPeer 2 exceeded (3 open for this peerId)`. Your sidecar logs `contract B: the relay SHED THIS CONNECTION for capacity (close 4007)` with that reason verbatim; two in a row and it holds at maximum backoff. The same text appears on your slot's `lastRefusal` as `capacity: …`, for every other peer to see | A published capacity limit was exceeded and the relay is shedding **this connection, never the map**. No other peer's traffic changes, no lane closes, and nothing in flight is dropped. Your world goes dark like any other dark world and its neighbours route around it | Read the limits your map publishes — at connect and on every status broadcast — and bring this world under them. If your peer is legitimately inside them, this is a defect worth reporting; if the map's limit is genuinely too low for honest traffic, the operator raises it, because **every limit is a knob** | **you** (report), or **operator** |
 
-**The limits, and what crossing each one does to you.** A relay speaking `contract-b/4.0`
+**The limits, and what crossing each one does to you.** A Contract B relay
 publishes the values **it is running with** in a `limits` object — on `HANDSHAKE_ACK` when you
 connect, and on every `PEER_STATUS` after it, beside each world's stats block rather than
 inside it. The numbers below are the defaults it ships with; **the ones your map publishes are
@@ -325,7 +325,7 @@ durable custody, which is what makes both the bounce-back and the re-route safe.
 |---|---|---|---|---|---|
 | `BMIG-SLOT_VACANT` | **permanent** | relay | The destination slot names no reservation at all — released, or never issued. **Slot numbers are never reused, so that world never returns** | None. Where the relay can prove it never handed this migration anywhere, the organism re-routes along the same axis, or comes home. Where it cannot, the entry was already forwarded once and is **recorded lost** at `forwardTimeoutMs` like any other unanswered forward: there was never anything to wait for, and a slot that will never answer resolves as a loss rather than as a bounce that might duplicate (`contract-b-m4.md` §9.3) | **nobody** |
 | `BMIG-PEER_OFFLINE` | transient | relay | The reservation exists, but its peer has no live connection. This code also covers a target connection that stops before the relay's atomic acceptance | Wait. The frame reached nobody, which is the relay stating that no custody moved, so the entry **re-routes** to the next live world along that axis — or comes home after `bounceTimeoutMs` where that axis has no lane to offer. Nothing retries the dark world, and nothing accrues against it | **nobody** |
-| `BMIG-NOT_FORWARDED` | transient | relay | The relay declined this attempt before atomic acceptance. The destination paced-migration queue was full by frames or retained bytes, or relay-wide drain had closed migration admission. A full queue refuses the migration before the forwarding record and keeps the destination connected. This condition uses the existing `NOT_FORWARDED` code. It adds no wire error code | Wait | **nobody** |
+| `BMIG-NOT_FORWARDED` | transient | relay | The relay declined this attempt before atomic acceptance. A full destination queue keeps the destination connected and returns exact attempt correlation in 4.2. Graceful drain uses the same code without proof, so it does not consume another destination or start a bounce deadline | Wait. An exact queue refusal automatically tries another same-axis world within one bound. A drain waits for reconnect | **nobody** |
 | `BMIG-PEER_UNKNOWN` | transient | relay | The named peer is not connected. Applies to the acknowledgement and genome messages, which route on identity rather than on a slot | Wait | **nobody** |
 | `BMIG-NOT_A_MEMBER` | **permanent** | relay | A read-only subscriber tried to send a migration | Connect with the peer role | **you** |
 | `BMIG-OVERLOADED` | transient | sidecar | The destination's inbound queue is full, its paced backlog stopped draining, or an enforcing population-admission policy is closed | The sender continues to the next untried compatible world on the same axis before retrying the full world. Read the destination's queue, delivery rate, population-admission mode, learned or fixed limit, committed population, and rejection total together | **nobody** |
@@ -337,26 +337,22 @@ durable custody, which is what makes both the bounce-back and the re-route safe.
 | `BMIG-MALFORMED_MESSAGE` | **permanent** | sidecar | A field failed validation | Report it | **you** (report) |
 | `BMIG-SHUTTING_DOWN` | transient | either | The sender is draining | Wait | **nobody** |
 
-**A relay refusal is a statement about one attempt.** Whether the migration as a whole was
-ever handed anywhere is a separate, provable fact the relay attaches to its own refusals, and
-it is scoped to one relay process — after a relay restart the relay honestly says it cannot
-speak for the period before it started. With no proof, **the sender does nothing at all**: the
-frame is not sent again, the entry is not re-routed and the organism is not brought home, and
-at `forwardTimeoutMs` the entry is recorded **lost** (`contract-b-m4.md` §5.2, §6.8, §9.2,
-§9.3). Silence is never proof, and this map spends an organism rather than guess with one.
-**Nothing here is a participant action**. An unanswered forward can remain `sent` for five
-minutes before it becomes lost. The sender does not send it again during that time.
+**A queue refusal proves one current attempt in 4.2.** Its relay session, destination slot, and
+reroute count must match the journal. A receipt for the same session and destination contradicts
+it. The migration-wide `neverForwarded` value can be false after an earlier accepted attempt.
+The `refusedAttempt` object makes the later queue refusal exact (`contract-b-m4.md` §31).
 
-**A refusal, on the other hand, is a statement — and a stated refusal still gets a second
-world.** A sender acts on a code only where the code says, in as many words, that nobody took
-custody: the frame never left this machine; the relay proved it forwarded nothing for the whole
-life of the entry; or the destination refused it before journaling anything, which §6.8 forbids
-it to do afterwards. Those entries re-route along the same axis, up to four times, and then
-bounce home. None of it can duplicate an organism, because the only party who could hold a
-second copy has said it holds none. **The one knob here belongs to the operator of this
-machine**: a negative `--max-reroutes` (`MULTIVERSE_MAX_REROUTES`) turns re-routing off
-altogether, making a crossing a single hop and bouncing a refused organism home instead of
-offering it to a second world (`contract-b-m4.md` §9.2, §25 B37).
+Missing, stale, or mismatched correlation causes **no sender action**. Graceful drain deliberately
+omits every proof field and has the same result. The sender does not re-send, re-route, or bring
+the organism home. An unanswered committed attempt becomes **lost** after `forwardTimeoutMs`.
+Silence is never proof, and the map spends an organism rather than risk a duplicate.
+
+**An exact refusal still gets another world.** The sender records the refused destination and one
+absolute deadline. It then walks through compatible, untried worlds on the same axis. A delayed
+NACK from an older destination cannot delay that alternate. Exhaustion, `maxReroutes`, or the
+first deadline bounces the organism once. A negative `--max-reroutes`
+(`MULTIVERSE_MAX_REROUTES`) disables re-routing and bounces a proven-safe refusal instead.
+Nothing here requires participant action.
 
 ### 3.5 A genome fetch was refused — `contract-b-m4.md` §6.10
 
