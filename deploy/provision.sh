@@ -1323,7 +1323,7 @@ phase_verify() {
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
-  chk "health dashboard over TLS" "curl -fsS --max-time 15 https://$MV_DOMAIN/health | grep -q 'Live production evidence'"
+  chk "health dashboard over TLS" "curl -fsS --max-time 15 https://$MV_DOMAIN/health | grep -q '<h1>Production telemetry</h1>'"
   chk "health API over TLS"       "curl -fsS --max-time 15 https://$MV_DOMAIN/api/health | grep -q '\"serviceHost\"'"
   # The publisher stops when this says nobody is watching, so an endpoint that
   # 404s reads to a watcher as a broken service rather than as an empty room.

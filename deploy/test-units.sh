@@ -101,6 +101,8 @@ for setting in \
     fail "$provision does not write '$setting' to archive.env; the health dashboard
       would deploy successfully and report that collector as unknown forever"
 done
+grep -Fq "grep -q '<h1>Production telemetry</h1>'" "$provision" ||
+  fail "$provision does not verify the telemetry dashboard's current page signature"
 grep -Fqx 'ProtectSystem=strict' "$archive" ||
   fail "$archive must keep ProtectSystem=strict while it reads dashboard inputs"
 if grep -E '^ReadWritePaths=' "$archive" | grep -Eq '(/monitor|/metrics)'; then
