@@ -136,17 +136,37 @@ longer guesses arrivals from payload-derived counters if the hop feed is unavail
 rate remains explicitly labelled as migration offers, so routing pressure stays visible beside a
 closed gate without being presented as delivered population.
 
-The confirmed-hop deployment record reports a guarded archive restart that replayed for 75
-seconds; the peer gate made the participant outage 78 seconds. An earlier status entry attributed
-those binaries to `c321aad`. Current binary stamps identify `60dac3a`, and `c321aad` is not an
-ancestor of that source. No retained receipt proves that `c321aad` ran. This status therefore uses
-`60dac3a` as the live and rollback baseline and treats the earlier attribution as unreconciled.
-The archive subscribed before any placement claim, so the receipt reports a complete record. At
-the 60-second closeout, the map had the same 15 live and four dark slots and a connected relay.
-All four public routes checked returned HTTP `200`. The public status reported 11 mod `0.6.8`
-worlds in `adaptive-shadow`, zero enforcing population gates, and the live page carried the new
-population-admission explanation. The announcements page published the planned window and its
+An earlier status entry attributed a separate service-host activation to `c321aad`. It reported a
+75-second archive replay, a 78-second participant outage, and archive subscription before every
+placement claim. Its 60-second closeout had the same 15 live and four dark slots and a connected
+relay. All four public routes returned HTTP `200`. The public status reported 11 mod `0.6.8`
+worlds in `adaptive-shadow` and zero enforcing population gates. The live page carried the new
+population-admission explanation, and the announcements page published the planned window and
 actual return time.
+
+A later direct binary audit identified `60dac3a` instead. Commit `c321aad` is not an ancestor of
+that source, and no retained receipt proves that `c321aad` ran. The earlier source attribution
+therefore remains unreconciled.
+
+The confirmed-hop correction merged and deployed on 2026-08-24 as `3617390`; GitHub checks run
+`32681067865` completed successfully. A fresh provider snapshot and local durable-file backup
+preceded the guarded restart. The archive replayed in 97 seconds, and the peer gate held the
+participant outage to 104 seconds. The relay log proved the archive subscribed before any
+placement claim. At the 60-second closeout, the original 15 live and four dark slots were present
+and the relay was connected. The public page carried the confirmed-delivery wording, and the
+bounded hop endpoint was active.
+
+At `2026-08-24T02:25Z`, a fresh read-only host receipt reported active relay and archive units.
+Their installed hashes exactly matched a clean `3617390` build, and the deployment gate passed all
+34 checks. Commit `3617390` is therefore the current service and rollback baseline before the
+Contract B 4.2 rollout.
+
+The production regression interval separated the two signals directly. During 15 seconds, slot
+9's enforcing closed gate increased `admissionRejectedTotal` by 27. The `/api/hops` endpoint
+contained 148 new ACK-confirmed deliveries elsewhere and none to slot 9. Its `pacedDepth` stayed
+at 12. Those arrivals entered custody before the population gate closed and remain there until
+delivery. A later animation into a closed world can therefore be correct only for that accepted
+backlog. The rejected new offers no longer animate.
 
 ### Species genealogy repair
 
