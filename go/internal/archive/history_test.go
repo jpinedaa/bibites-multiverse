@@ -806,8 +806,9 @@ func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
 			t.Fatalf("the page still infers a delivery from offer counters: %q", forbidden)
 		}
 	}
-	for _, want := range []string{"MIGRATION_ACK", "Rejected offers never move",
-		"eventual acknowledged destination"} {
+	for _, want := range []string{"MIGRATION_ACK",
+		"A rejected offer by itself never animates as an arrival",
+		"confirmed alternate route"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the page does not explain delivery-confirmed motion: missing %q", want)
 		}
@@ -822,6 +823,66 @@ func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
 	if strings.Contains(page, "if (!reduced){ tickHops()") {
 		t.Fatal("the hop feed is gated on reduced motion again; motion changes how a " +
 			"crossing is drawn, never whether the page knows one happened")
+	}
+}
+
+// TestPageShowsPopulationAdmissionOnEachLiveMapCell pins the operator-facing
+// half of adaptive admission. A limit hidden on the settings tab does not help
+// somebody watching traffic; every cell must say OPEN/CLOSED and the effective
+// limit, and repaint it from each fresh status block without rebuilding the
+// SVG or interrupting live hops.
+func TestPageShowsPopulationAdmissionOnEachLiveMapCell(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		`id="cadm-`, `id="cadmlbl-`, `id="cadmtitle-`,
+		"function admissionView", "function paintAdmission", "paintAdmission(v);",
+		`label:"CLOSED · LIMIT "+limit`, `label:"OPEN · LIMIT "+limit`,
+		"admissionPopulationLimit", "admissionEstimatedLimit", "admissionCommitted",
+		"admissionEnforcing", "admissionClosed", ".cell.admission-closed .cellbg",
+		`data-t="admissiongate"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the live map population gate is missing %q", want)
+		}
+	}
+	if strings.Contains(page, "admissionPopulationLimit||") {
+		t.Fatal("a zero or absent population limit is defaulted with || instead of rendered honestly")
+	}
+}
+
+// TestPageReplaysARefusalBeforeTheConfirmedReroute is the visual regression
+// behind the report "slot 9 is CLOSED but creatures still enter it". The feed
+// gives the page the exact refused slots and the final ACK destination. The
+// page must stop at each refused boundary, label it, and derive a temporary
+// route to the confirmed endpoint rather than walking the original lane and
+// merely flashing another cell afterward.
+func TestPageReplaysARefusalBeforeTheConfirmedReroute(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		"hp.refusedSlots", "function hopPlan", "function hopAttempt",
+		"function hopSteps", "function materializeHopAttempt", "function startHopAttempt",
+		"function rejectCell", `label.textContent = "REFUSED · → SLOT " + next`,
+		"HOPTRYMS", "HOPREJECTMS", ".hoproute{", ".hoprejected .hopring",
+		`id="creject-`, `data-t="reroute"`, "lane.toSlot === to",
+		"laneGeom({fromSlot:hp.fromSlot, toSlot:to", "flashCell(q.to)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the confirmed reroute playback is missing %q", want)
+		}
+	}
+	for _, stale := range []string{
+		"hopQ.push({a:a, name:hopName(hp), to:hp.toSlot})",
+		"stillHop(a, hopName(hp), hp.toSlot)",
+	} {
+		if strings.Contains(page, stale) {
+			t.Fatalf("the page still attaches a confirmed reroute to the original lane: %q", stale)
+		}
+	}
+	// Reduced motion removes travel, not evidence: it still labels every
+	// refusal and places the glyph at the endpoint of the final attempt.
+	if !strings.Contains(page, "rejectCell(q.refused[i]") ||
+		!strings.Contains(page, "q.attempts.length-1") {
+		t.Fatal("reduced motion hides the refusal chain or uses the rejected endpoint")
 	}
 }
 
@@ -857,7 +918,7 @@ func TestReducedMotionDegradesRatherThanSuppresses(t *testing.T) {
 	}
 	// And it is the SAME glyph, in the same species colour, with the same
 	// escaping: it goes through buildHopGlyph inside the fence.
-	if !strings.Contains(page, "var g = buildHopGlyph(name, to);") {
+	if !strings.Contains(page, "var g = buildHopGlyph(q.name, q.to, q.refused);") {
 		t.Fatal("the still arrival builds its own glyph instead of the fenced one")
 	}
 	// The arrival flash is a pure opacity fade and is deliberately NOT suppressed

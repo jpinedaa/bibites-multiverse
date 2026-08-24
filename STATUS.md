@@ -172,6 +172,14 @@ at 12. Those arrivals entered custody before the population gate closed and rema
 delivery. A later animation into a closed world can therefore be correct only for that accepted
 backlog. The rejected new offers no longer animate.
 
+A follow-up visual audit found that the confirmed-hop backend was correct but the browser still
+attached every glyph to the source edge's currently drawn lane. When that ordinary lane ended at
+closed slot 9 and the ACK named a later world, the glyph visibly entered slot 9 and only the later
+world flashed. The live-console correction records the exact ordered receiver refusals in the
+bounded hop correlator. Each map cell now shows its fresh effective population limit and explicit
+gate state. A confirmed spillover stops at the refused boundary with a refusal label, then follows
+a temporary dashed route to the ACK-confirmed world. Standalone rejections still do not animate.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
@@ -242,7 +250,7 @@ request.
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release, and names which release that is. Neither the links nor the number carry a compiled-in version — the links address `/releases/latest` and the number is resolved from GitHub hourly in the background — so a release reaches the homepage with no deployment, and the page drops the number rather than guess if that lookup fails. A three-step Windows walkthrough sits under those links, with one line for Linux |
-| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The Species tab expands vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The genealogy view separates reused names into immutable lineage instances and labels unresolved evidence. |
+| Live console | Full-screen map fitting, per-world live population-gate badges and effective limits, evidence-backed refusal/reroute playback, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are implemented. The Species tab expands vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. The genealogy view separates reused names into immutable lineage instances and labels unresolved evidence. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 

@@ -67,6 +67,11 @@ const (
 	hopCorrelationWindow = 24 * time.Hour
 	hopPendingMax        = 8192
 	hopEarlyAckMax       = 1024
+	// The protocol default permits four reroutes, but an operator can raise it
+	// and a hostile copied stream must still not grow one pending map value
+	// without bound. This is a visualization sample, so retain a generous chain
+	// and say when it was cut.
+	hopRefusedMax = 64
 )
 
 type pendingHop struct {
@@ -90,6 +95,17 @@ type Hop struct {
 	AtMs        int64  `json:"atMs"`
 	FromSlot    int    `json:"fromSlot"`
 	ToSlot      int    `json:"toSlot"`
+	// RefusedSlots is the ordered chain of receivers that explicitly NACKed
+	// this migration before ToSlot acknowledged it. It is ephemeral display
+	// evidence, not a second migration ledger: a refusal is retained only in the
+	// bounded correlator and is published only if the same migration eventually
+	// has a receiver-confirmed delivery. The page can therefore show the blocked
+	// attempt and the successful reroute without animating a rejected offer as an
+	// arrival.
+	RefusedSlots []int `json:"refusedSlots,omitempty"`
+	// RefusalsTruncated is true only if hopRefusedMax cut a pathological chain.
+	// The final confirmed destination remains exact either way.
+	RefusalsTruncated bool `json:"refusalsTruncated,omitempty"`
 	// ExitEdge is the edge the organism LEFT its own world by, which is the lane
 	// key the page animates: lanes are keyed fromSlot+edge everywhere on this
 	// surface. All four values occur under D17.
@@ -111,14 +127,25 @@ func (a *Archive) observeHopAttempt(p contractb.MigrationPayload,
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.trimHopCorrelationLocked(nowMs)
+	// A reroute keeps its migration ID. Preserve the ordered refusal evidence
+	// from the preceding attempt while replacing only the destination currently
+	// eligible to match an ACK.
+	var refused []int
+	var refusalsTruncated bool
+	if previous, ok := a.hopPending[p.MigrationID]; ok {
+		refused = append(refused, previous.hop.RefusedSlots...)
+		refusalsTruncated = previous.hop.RefusalsTruncated
+	}
 	destPeer := a.peerForSlotLocked(p.DestSlot)
 	a.hopPending[p.MigrationID] = pendingHop{
 		hop: Hop{
-			MigrationID: p.MigrationID,
-			FromSlot:    p.SourceSlot,
-			ToSlot:      p.DestSlot,
-			ExitEdge:    p.ExitEdge,
-			Species:     species,
+			MigrationID:       p.MigrationID,
+			FromSlot:          p.SourceSlot,
+			ToSlot:            p.DestSlot,
+			ExitEdge:          p.ExitEdge,
+			Species:           species,
+			RefusedSlots:      refused,
+			RefusalsTruncated: refusalsTruncated,
 		},
 		destPeer: destPeer,
 		seenAtMs: nowMs,
@@ -163,9 +190,10 @@ func (a *Archive) confirmHop(ack contractb.MigrationAck, nowMs int64) {
 	a.capHopCorrelationLocked()
 }
 
-// rejectHopAttempt forgets only the attempt rejected by this receiver. A NACK
-// from slot B arriving after the migration has been rerouted to slot C must not
-// erase C's pending attempt. An unmatchable relay-generated NACK is left to the
+// rejectHopAttempt closes only the attempt rejected by this receiver and keeps
+// its slot as bounded evidence for a later reroute animation. A NACK from slot
+// B arriving after the migration has been rerouted to slot C must not erase or
+// alter C's pending attempt. An unmatchable relay-generated NACK is left to the
 // time/count bounds; it cannot produce a public hop without an ACK.
 func (a *Archive) rejectHopAttempt(nack contractb.MigrationNack, nowMs int64) {
 	if nack.MigrationID == "" {
@@ -176,7 +204,19 @@ func (a *Archive) rejectHopAttempt(nack contractb.MigrationNack, nowMs int64) {
 	a.trimHopCorrelationLocked(nowMs)
 	if p, ok := a.hopPending[nack.MigrationID]; ok && p.destPeer != "" &&
 		nack.SourcePeer == p.destPeer {
-		delete(a.hopPending, nack.MigrationID)
+		if n := len(p.hop.RefusedSlots); n == 0 || p.hop.RefusedSlots[n-1] != p.hop.ToSlot {
+			if n < hopRefusedMax {
+				p.hop.RefusedSlots = append(p.hop.RefusedSlots, p.hop.ToSlot)
+			} else {
+				p.hop.RefusalsTruncated = true
+			}
+		}
+		// Empty binding means a late ACK from the rejected receiver cannot
+		// promote this attempt. The next copied payload replaces it with the
+		// alternate destination while carrying RefusedSlots forward.
+		p.destPeer = ""
+		p.seenAtMs = nowMs
+		a.hopPending[nack.MigrationID] = p
 	}
 }
 
