@@ -342,18 +342,30 @@ The updater keeps these static items unchanged:
 - The Multiverse plugin.
 - The installed runner, stopper, watcher, configuration, and WSL control scripts.
 - The OBS profile, encoder, publish, scene, and obs-websocket configuration files.
-- The ACLs on all static files, the broadcast root, `multiverse`, and `multiverse\data`.
+- The owner, primary group, and DACL on all static files, the broadcast root, `multiverse`, and
+  `multiverse\data`.
+
+The ACL seal contains the Windows owner, primary group, DACL, and DACL control flags.
+The control flags record the protection and inheritance state.
+The preflight rejects a DACL that contains the unresolved `AR` automatic-inheritance request.
+The seal excludes the audit SACL.
+Windows requires `SeSecurityPrivilege` when a process restores an audit SACL.
 
 The updater stages the candidate on the same NTFS volume.
-It stops the installed service and makes sure that all private processes and supervisors are down.
-It then replaces the executable atomically and reapplies the exact saved ACL.
+It stops the installed service, private processes, and supervisors.
+It then replaces the executable atomically.
+It restores only the saved DACL and its control flags.
+It does not write the owner or primary group.
+The current ACL seal must match the saved ACL seal exactly.
 
 After the start, the updater requires exactly one private runtime set.
 It also requires the expected tmux session, tunnel, slot, map connection, and four export directions.
-It compares the sidecar ACL again after the start and at each observation boundary.
+It compares the sidecar ACL seal again after the start and at each observation boundary.
 
-The final observation uses 21 samples at 30-second intervals.
-It requires cumulative source migrations to increase in each exact five-minute window.
+The final observation uses 21 completed samples.
+The updater waits 30 seconds between completed samples.
+The samples form two non-overlapping windows of at least five minutes.
+Cumulative source migrations must increase in each window.
 It also rejects two consecutive samples where all naturally open outbound lanes report zero.
 Naturally closed lanes are outside this rule.
 The receipt shows the cumulative start, midpoint, and end totals.

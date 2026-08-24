@@ -24,6 +24,57 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# The updater writes only the DACL. The proof also keeps the owner, primary
+# group, and the DACL protection and inheritance controls.
+$fileAclProofSections = (
+    [System.Security.AccessControl.AccessControlSections]::Owner -bor
+    [System.Security.AccessControl.AccessControlSections]::Group -bor
+    [System.Security.AccessControl.AccessControlSections]::Access
+)
+$fileAclRestoreSections = [System.Security.AccessControl.AccessControlSections]::Access
+
+function Assert-NoDaclAutoInheritRequest(
+    [System.Security.AccessControl.RawSecurityDescriptor]$Descriptor,
+    [string]$Message
+) {
+    if (($Descriptor.ControlFlags -band
+        [System.Security.AccessControl.ControlFlags]::DiscretionaryAclAutoInheritRequired) -ne 0) {
+        throw $Message
+    }
+}
+
+function Get-FileSystemAccessSddl([System.IO.FileSystemInfo]$Item) {
+    $security = $Item.GetAccessControl($script:fileAclProofSections)
+    $sddl = $security.GetSecurityDescriptorSddlForm($script:fileAclProofSections)
+    $descriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor($sddl)
+    Assert-NoDaclAutoInheritRequest -Descriptor $descriptor -Message (
+        "The ACL seal has an unresolved DACL inheritance request on $($Item.FullName)"
+    )
+    return $sddl
+}
+
+function Get-SavedFileAccessSddl([string]$Sddl) {
+    $descriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor($Sddl)
+    Assert-NoDaclAutoInheritRequest -Descriptor $descriptor -Message (
+        'The saved ACL has an unresolved DACL inheritance request'
+    )
+    $systemAclFlags = (
+        [System.Security.AccessControl.ControlFlags]::SystemAclPresent -bor
+        [System.Security.AccessControl.ControlFlags]::SystemAclAutoInheritRequired -bor
+        [System.Security.AccessControl.ControlFlags]::SystemAclAutoInherited -bor
+        [System.Security.AccessControl.ControlFlags]::SystemAclProtected
+    )
+    if ($null -ne $descriptor.SystemAcl -or
+        ($descriptor.ControlFlags -band $systemAclFlags) -ne 0) {
+        throw 'The saved ACL includes an audit SACL'
+    }
+    if ($null -eq $descriptor.Owner -or $null -eq $descriptor.Group -or
+        $null -eq $descriptor.DiscretionaryAcl) {
+        throw 'The saved ACL must include an owner, group, and DACL'
+    }
+    return $descriptor.GetSddlForm($script:fileAclProofSections)
+}
+
 function Get-NormalPath([string]$Value) {
     if (-not $Value) { throw 'A required Windows path is empty' }
     $full = [System.IO.Path]::GetFullPath($Value)
@@ -104,33 +155,49 @@ switch ($Operation) {
         $item = Get-Item -LiteralPath $Path -Force
         if ($item.PSIsContainer) { throw "The static path is not a file: $Path" }
         $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-        $sddl = (Get-Acl -LiteralPath $Path).Sddl
+        $sddl = Get-FileSystemAccessSddl $item
         $acl = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sddl))
         Write-Output "$hash`t$acl"
     }
     'PathAcl' {
         Assert-NoReparsePath $Path
-        $null = Get-Item -LiteralPath $Path -Force
-        $sddl = (Get-Acl -LiteralPath $Path).Sddl
+        $item = Get-Item -LiteralPath $Path -Force
+        $sddl = Get-FileSystemAccessSddl $item
         Write-Output ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sddl)))
     }
     'GetAcl' {
         Assert-NoReparsePath $Path
-        $sddl = (Get-Acl -LiteralPath $Path).Sddl
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.PSIsContainer) { throw "The ACL target is not a file: $Path" }
+        $sddl = Get-FileSystemAccessSddl $item
         Write-Output ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sddl)))
     }
     'SetAcl' {
         Assert-NoReparsePath $Path
         if (-not $AclBase64) { throw 'The saved ACL is empty' }
         $sddl = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($AclBase64))
+        $expected = Get-SavedFileAccessSddl $sddl
+        $expectedDescriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor(
+            $expected
+        )
+        $before = Get-FileSystemAccessSddl (Get-Item -LiteralPath $Path -Force)
+        $beforeDescriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor(
+            $before
+        )
+        if ($beforeDescriptor.Owner.Value -cne $expectedDescriptor.Owner.Value -or
+            $beforeDescriptor.Group.Value -cne $expectedDescriptor.Group.Value) {
+            throw "The owner or primary group changed before DACL restoration on $Path"
+        }
         $security = New-Object System.Security.AccessControl.FileSecurity
         $security.SetSecurityDescriptorSddlForm(
-            $sddl,
-            [System.Security.AccessControl.AccessControlSections]::All
+            $expected,
+            $fileAclRestoreSections
         )
         [System.IO.File]::SetAccessControl($Path, $security)
-        $actual = (Get-Acl -LiteralPath $Path).Sddl
-        if ($actual -ne $sddl) { throw "Windows did not restore the exact ACL on $Path" }
+        $actual = Get-FileSystemAccessSddl (Get-Item -LiteralPath $Path -Force)
+        if ($actual -cne $expected) {
+            throw "The ACL seal does not match after DACL restoration on $Path"
+        }
     }
     'ProtectDirectory' {
         Assert-NoReparsePath $Path

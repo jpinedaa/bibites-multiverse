@@ -28,6 +28,21 @@ forbid_text() {
   fi
 }
 
+# The updater restores only the DACL. Owner and group values remain proof data,
+# and audit policy never enters the write request.
+expect_text "$updater_windows_helper" '$fileAclProofSections = ('
+expect_text "$updater_windows_helper" \
+  '$fileAclRestoreSections = [System.Security.AccessControl.AccessControlSections]::Access'
+expect_text "$updater_windows_helper" \
+  '[System.Security.AccessControl.ControlFlags]::DiscretionaryAclAutoInheritRequired'
+expect_text "$updater_windows_helper" \
+  'The ACL seal has an unresolved DACL inheritance request'
+expect_text "$updater_windows_helper" 'The saved ACL includes an audit SACL'
+forbid_text "$updater_windows_helper" \
+  '[System.Security.AccessControl.AccessControlSections]::All'
+forbid_text "$updater_windows_helper" \
+  '[System.Security.AccessControl.AccessControlSections]::Audit'
+
 fail() {
   printf '%s\n' "$*" >&2
   exit 1
@@ -189,7 +204,7 @@ fixtures="$(mktemp -d)"
 cleanup() {
   if [ -n "${windows_acl_root:-}" ]; then
     powershell.exe -NoProfile -Command \
-      'param($path) Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue' \
+      '& { param($path) Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }' \
       "$windows_acl_root" >/dev/null 2>&1 || true
   fi
   rm -rf "$fixtures"
@@ -686,6 +701,20 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
     }
   }' "$windows_acl_root"
 
+  identity_root_acl="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation PathAcl -Path "$windows_acl_root" | tr -d '\r')"
+  [ -n "$identity_root_acl" ] || fail 'the Windows directory ACL seal is empty'
+  identity_file_windows="$(wslpath -w "$multiverse_root/peer-secret.txt")"
+  identity_file_metadata="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation FileMetadata \
+    -Path "$identity_file_windows" | tr -d '\r')"
+  [[ "$identity_file_metadata" == *$'\t'* ]] || fail 'the Windows file metadata is invalid'
+  identity_file_acl="${identity_file_metadata#*$'\t'}"
+  [ "$identity_file_acl" = "$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$identity_file_windows" | tr -d '\r')" ] ||
+    fail 'the Windows file metadata and ACL operations returned different seals'
+
   # File.Replace needs a real backup path on Windows PowerShell/.NET. Exercise
   # the same NTFS operation as the updater, not only the shell transaction mock.
   atomic_wsl="$windows_acl_wsl/atomic-replace"
@@ -697,6 +726,10 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   [ "$atomic_source_sha" != "$atomic_old_sha" ] || fail 'the NTFS replacement fixture hashes are equal'
   atomic_source_windows="$(wslpath -w "$atomic_wsl/source.exe")"
   atomic_destination_windows="$(wslpath -w "$atomic_wsl/destination.exe")"
+  atomic_saved_acl="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$atomic_destination_windows" | tr -d '\r')"
+  [ -n "$atomic_saved_acl" ] || fail 'the NTFS ACL fixture returned an empty seal'
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
     "$updater_windows_helper_path" -Operation AtomicReplace \
     -Source "$atomic_source_windows" -Destination "$atomic_destination_windows"
@@ -706,6 +739,105 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   [ "$(find "$atomic_wsl" -maxdepth 1 -type f | wc -l)" -eq 1 ] ||
     fail 'the NTFS replacement kept a temporary backup file'
   printf 'Windows NTFS atomic replacement: PASS\n'
+
+  # Change both the DACL entries and their inheritance state. The helper must
+  # restore their exact seal without requesting audit privileges.
+  powershell.exe -NoProfile -Command '& {
+    param([string]$Path, [string]$SavedAcl)
+    $sections = (
+      [System.Security.AccessControl.AccessControlSections]::Owner -bor
+      [System.Security.AccessControl.AccessControlSections]::Group -bor
+      [System.Security.AccessControl.AccessControlSections]::Access
+    )
+    $savedSddl = [Text.Encoding]::UTF8.GetString(
+      [Convert]::FromBase64String($SavedAcl)
+    )
+    $saved = New-Object System.Security.AccessControl.RawSecurityDescriptor($savedSddl)
+    if ($null -ne $saved.SystemAcl) { throw "The ACL seal contains a SACL" }
+    if (($saved.ControlFlags -band
+        [System.Security.AccessControl.ControlFlags]::DiscretionaryAclAutoInherited) -eq 0 -or
+        ($saved.ControlFlags -band
+        [System.Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0) {
+      throw "The ACL fixture did not start with inherited DACL controls"
+    }
+    $changed = [System.IO.File]::GetAccessControl($Path, $sections)
+    $changed.SetAccessRuleProtection($true, $true)
+    [System.IO.File]::SetAccessControl($Path, $changed)
+    $changedSddl = [System.IO.File]::GetAccessControl(
+      $Path, $sections
+    ).GetSecurityDescriptorSddlForm($sections)
+    $changedDescriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor(
+      $changedSddl
+    )
+    if (($changedDescriptor.ControlFlags -band
+        [System.Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -eq 0) {
+      throw "The ACL fixture did not protect its changed DACL"
+    }
+  }' "$atomic_destination_windows" "$atomic_saved_acl"
+  atomic_changed_acl="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$atomic_destination_windows" | tr -d '\r')"
+  [ "$atomic_changed_acl" != "$atomic_saved_acl" ] ||
+    fail 'the NTFS ACL fixture did not change its saved seal'
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation SetAcl \
+    -Path "$atomic_destination_windows" -AclBase64 "$atomic_saved_acl"
+  atomic_restored_acl="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$atomic_destination_windows" | tr -d '\r')"
+  [ "$atomic_restored_acl" = "$atomic_saved_acl" ] ||
+    fail 'the NTFS ACL fixture did not restore the owner, primary group, DACL, and controls'
+
+  atomic_ar_acl="$(powershell.exe -NoProfile -Command '& {
+    param([string]$SavedAcl)
+    $sddl = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($SavedAcl))
+    $sddl = $sddl -replace "D:", "D:AR"
+    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sddl))
+  }' "$atomic_saved_acl" | tr -d '\r')"
+  set +e
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation SetAcl \
+    -Path "$atomic_destination_windows" -AclBase64 "$atomic_ar_acl" \
+    >"$fixtures/ar-acl-output" 2>&1
+  ar_acl_status=$?
+  set -e
+  [ "$ar_acl_status" -ne 0 ] || fail 'the NTFS ACL fixture accepted D:AR'
+  grep -Fq 'The saved ACL has an unresolved DACL inheritance request' \
+    "$fixtures/ar-acl-output" || fail 'the NTFS ACL fixture reported the wrong D:AR error'
+  [ "$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$atomic_destination_windows" | tr -d '\r')" = "$atomic_saved_acl" ] ||
+    fail 'the rejected D:AR seal changed the NTFS ACL seal'
+
+  atomic_audit_acl="$(powershell.exe -NoProfile -Command '& {
+    param([string]$SavedAcl)
+    $sddl = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($SavedAcl))
+    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sddl + "S:"))
+  }' "$atomic_saved_acl" | tr -d '\r')"
+  set +e
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation SetAcl \
+    -Path "$atomic_destination_windows" -AclBase64 "$atomic_audit_acl" \
+    >"$fixtures/audit-acl-output" 2>&1
+  audit_acl_status=$?
+  set -e
+  [ "$audit_acl_status" -ne 0 ] || fail 'the NTFS ACL fixture accepted an audit SACL'
+  grep -Fq 'The saved ACL includes an audit SACL' "$fixtures/audit-acl-output" ||
+    fail 'the NTFS ACL fixture reported the wrong audit-SACL error'
+  [ "$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation GetAcl \
+    -Path "$atomic_destination_windows" | tr -d '\r')" = "$atomic_saved_acl" ] ||
+    fail 'the rejected audit SACL changed the NTFS ACL seal'
+
+  windows_token_is_admin="$(powershell.exe -NoProfile -Command \
+    '([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+       [Security.Principal.WindowsBuiltInRole]::Administrator
+     )' | tr -d '\r')"
+  case "$windows_token_is_admin" in
+    False) printf 'Windows non-elevated ACL round trip, D:AR rejection, and audit rejection: PASS\n' ;;
+    True) printf 'Windows ACL round trip, D:AR rejection, and audit rejection: PASS (elevated token)\n' ;;
+    *) fail 'Windows returned an invalid elevation state for the ACL fixture' ;;
+  esac
 
   runner_windows="$(wslpath -w "$runner")"
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
