@@ -322,12 +322,20 @@ adaptive mode would make, including whether the gate would be closed, but it nev
 organism because of that decision. The existing 64-entry inbound-journal ceiling remains an
 independent safety control and can still return `OVERLOADED` before custody.
 
-**Why shadow is the default.** Production history shows a strong population/speed relationship,
-but the safe limit is a property of each machine and ecology rather than one universal number.
+**Why shadow is the participant default.** Production history shows a strong population/speed
+relationship, but the safe limit is a property of each machine and ecology rather than one
+universal number.
 Shadow mode collects that machine-local evidence across saves and restarts without turning an
 estimate into participant-visible routing policy. Promotion to enforcing adaptive mode requires
 the rollout gates in [`population-admission.md`](population-admission.md), including at least 24
 hours of stable samples and a reviewed fixed fallback for each host class.
+
+**Controlled production override.** On 2026-08-23 the operator explicitly authorized an early
+evidence-gathering promotion for the five local and six hosted worlds under direct control. Those
+eleven services set `MULTIVERSE_INBOUND_ADMISSION=adaptive`; the bare-install value above remains
+unchanged. Learned state persisted across the promotion, and the initial verification found all
+eleven enforcing with no capacity sheds or discarded journal bytes. The exception, monitoring,
+fallbacks, and rollback criteria are recorded in the rollout runbook.
 
 **What it spends.** One small atomic JSON state write per valid wall-clock minute after a target
 speed is known. It sends no additional network request: the requested speed is an optional field

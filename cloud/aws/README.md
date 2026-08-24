@@ -512,6 +512,14 @@ Activation reapplies the pinned manifest, current credentials, environment files
 If an installed save is missing, the installer restores it from the object named in that manifest.
 Use [Apply a manifest update](#apply-a-manifest-update) for a manifest or save change.
 
+The checked-in hosted sidecar unit explicitly sets
+`MULTIVERSE_INBOUND_ADMISSION=adaptive` for these six operator-controlled worlds. This is a
+production override, not a change to the participant-package `adaptive-shadow` default. The
+admission estimator lives on each persistent world volume, so activation and rollback retain its
+sample history. To roll back enforcement, change that unit override to `adaptive-shadow`, build a
+new runtime-only artifact, and use the same guarded transaction; do not delete admission or
+migration-journal state.
+
 CAUTION: Do not deploy the host stack only to update runtime files.
 Use the in-place procedure in this section.
 The host deployment wrapper refuses every live Host change.

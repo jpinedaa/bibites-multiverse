@@ -95,11 +95,11 @@ that refusal durably and continues in the same direction to the next compatible 
 tried. Queue overload and the new population policy both use this custody-safe path; relay queue
 pressure remains a retry to the same destination and is not misclassified as a world refusal.
 
-The population controller ships in `adaptive-shadow`. It measures a per-world capacity estimate
-for ×10 and publishes the limit and open/closed decision, but `enforcing` is false and population
-therefore refuses no organism in this rollout. Fixed and enforcing adaptive modes are available
-for explicit later use. Promotion requires at least 24 hours of stable shadow evidence and the
-other gates in [`docs/population-admission.md`](docs/population-admission.md).
+The population controller ships to participants in `adaptive-shadow`. It measures a per-world
+capacity estimate for ×10 and publishes the limit and open/closed decision without refusing on
+population. Fixed and enforcing adaptive modes remain explicit operator choices. The normal
+promotion gate requires at least 24 hours of stable shadow evidence and the other checks in
+[`docs/population-admission.md`](docs/population-admission.md).
 
 On 2026-08-23, candidate `94a71b2` passed the full uncached Go suite and vet, a release plugin
 build, Windows and Linux cross-build checks, and the three-live-world spillover regression. Five
@@ -107,8 +107,32 @@ Windows worlds and six hosted Linux worlds then activated mod `0.6.8` and the ca
 All eleven retained their reserved slots with mod and relay connected, exposed requested speed and
 non-enforcing shadow state, and reported zero capacity sheds and zero discarded journal bytes.
 The guarded cloud runtime transaction and host verification completed successfully. The race suite
-was not rerun because this WSL image has no CGO compiler; enforcing adaptive mode, forced rollback,
-disk failure, crash replay, and private-map behavior were not exercised in production.
+was not rerun because this WSL image has no CGO compiler; forced rollback, disk failure, crash
+replay, and private-map behavior were not exercised in production.
+
+Later on 2026-08-23, the operator authorized an early controlled-world exception to the 24-hour
+shadow gate in order to collect real enforcement evidence. The five Windows worlds now persist
+`MULTIVERSE_INBOUND_ADMISSION=adaptive`, and the six hosted Linux worlds receive the same override
+from their systemd unit. The hosted runtime transaction activated immutable runtime
+`ef3ff4d5a3692592b2ca582b921ee70596d6f1ace594a98312a64c6948a47e2b`; SSM command
+`d98dc8aa-f9b4-4581-9321-0a181c7c88ae` succeeded on all six worlds, host verification passed, and
+the three temporary credential parameters were deleted. The initial public closeout had all
+eleven controlled worlds live, mod-connected, and enforcing, six closed by their learned limits,
+continuing migrations, and no capacity sheds or discarded journal bytes. Existing learned state
+was retained. Automatic `metrics.jsonl` history will be reviewed after 24 and 72 hours; rollback
+criteria and fixed host-class fallbacks are recorded in the population-admission runbook.
+
+The first 20-minute enforcement watch also established the loss baseline that later reviews must
+use. Slot 3 recorded 22 unanswered forwards: 15 were sent to newly closed hosted slot 6 during a
+short post-activation burst, and the later seven targeted participant slot 19 around a mod
+disconnect. Other hosted sources added only isolated losses. This was not classified as a new
+enforcement regression because the retained pre-promotion logs contain similar clustered
+five-minute timeouts from slots 2 and 5 to overloaded local slot 9 while it was still in shadow
+mode. All affected sends had relay forward receipts, so the follow-up is to determine why no ACK
+or pre-custody NACK returned from those destinations, and whether offers to a recently
+mod-disconnected slot can be narrowed without guessing about custody. Enforcement remains active;
+the 24-hour comparison must use rates on each side of the promotion rather than restart-reset
+aggregate totals.
 
 The service host then activated the archive and relay binaries built from `c321aad`. The guarded
 archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
