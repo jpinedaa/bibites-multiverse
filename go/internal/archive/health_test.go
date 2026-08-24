@@ -176,10 +176,11 @@ func TestProductionHealthCacheKeepsFreshnessClockCurrent(t *testing.T) {
 
 func TestProductionHealthPageAndAPIAreSelfContained(t *testing.T) {
 	for _, want := range []string{
-		"Live production evidence", "Automated service checks", "Service-host profile",
-		"What is and is not centralized", `get("/api/health")`, `get("/api/status")`,
-		`get("/api/viewers")`, "Missing and stale measurements stay unknown",
-		"World-host performance and PSI", "Continuous CPU / heap profiling",
+		"Production telemetry", "Live system map", "Compute", "Cloud &amp; services",
+		"Application &amp; traffic", "Archive &amp; data", "Data coverage",
+		"Automated service checks", "not collected", "not centralized", "not installed",
+		`get("/api/health")`, `get("/api/status")`, `get("/api/viewers")`,
+		`data-tooltip=`, `role="tooltip"`, "pointerover", "focusin",
 	} {
 		if !strings.Contains(healthPageHTML, want) {
 			t.Fatalf("health page is missing %q", want)
@@ -197,7 +198,7 @@ func TestProductionHealthPageAndAPIAreSelfContained(t *testing.T) {
 	for _, tc := range []struct {
 		path, contentType, contains string
 	}{
-		{"/health", "text/html", "System health"},
+		{"/health", "text/html", "Production telemetry"},
 		{"/api/health", "application/json", `"monitor"`},
 	} {
 		resp, err := http.Get(ts.URL + tc.path)

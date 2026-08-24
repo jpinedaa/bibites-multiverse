@@ -458,6 +458,20 @@ not add a collector and does not invent a new severity model:
   the newest 121 service-host samples: about two hours at the sampler's
   one-minute cadence.
 
+The page uses one visual model of the production system:
+
+1. The system map shows hosts, services, traffic paths, data paths, and current flow.
+2. Eight headline signals show checks, worlds, migrations, records, gaps, CPU, memory, and disk.
+3. Compute shows aligned host charts, saturation gauges, service memory, and missing instruments.
+4. Cloud and services shows monitor checks, systemd state, route verdicts, and provider verdicts.
+5. Application and traffic shows worlds, relay state, TCP events, audience state, and HTTP gaps.
+6. Archive and data shows the record pipeline, integrity counters, replay cost, storage, and retention.
+7. Data coverage shows the age, cadence, and boundary of each source.
+
+All host charts use the same two-hour range. A gap means unknown data, not zero. Tooltips explain
+each chart, status mark, metric, path, stage, and coverage source. They work with a pointer or
+keyboard focus.
+
 ### View the dashboard
 
 Open the live dashboard at
@@ -742,9 +756,11 @@ what is actually running.
   enabled. Layer 1's table gives the interval and the path for each.
 - **The production-health dashboard.** The public
   [`/health`](https://bibitesmultiverse.com/health) page joins the current monitor results,
-  service state, deployment identity, and a bounded tail of service-host samples. Its fixed
+  service state, archive state, audience state, and a bounded tail of service-host samples. The
+  page organizes them into a system map and four visual layers. Its fixed
   [`/api/health`](https://bibitesmultiverse.com/api/health) projection excludes private values.
-  The dashboard remains on-host. It is not an off-host store or a dead-man check.
+  The dashboard remains on-host. It is not an off-host store or a dead-man check. Deployment
+  identity remains in the private source lock and deployment receipts.
 - **The deployment health window.** `deploy/health-snapshot.sh` is in the
   hosting kit and fills in [the health window](#the-health-window) on request.
   It is a tool a person runs, not something a deployment does by itself yet.
