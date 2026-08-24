@@ -2655,7 +2655,7 @@ a relay that reads journals. The division is therefore:
 |---|---|
 | What happens to the map? | The relay command's own pre-act report. |
 | Who has already LOST organisms addressed to this slot? | `PEER_STATUS.slots[].stats.lostForwardTotal` (§6.3.1) — visible on the status page and in `ringstat` for every peer at once (amended — §25, B37: this row read `stats.heldDepth` before that set, and there is no held depth). |
-| **Which** entries are unresolved, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It prints each entry's `migrationId`, `entityId`, `destSlot`, handoff state, when it was forwarded and how long is left before it is recorded lost. |
+| **Which** entries are unresolved, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It always prints each entry's `migrationId`, `entityId`, `destSlot`, and handoff state. A `sent` entry also prints its send time and remaining loss time. Pending and refused entries print neither. Since 4.2, the durable first-refusal deadline bounds a queue-refusal walk, but this command does not print that deadline. |
 
 The operator therefore makes one decision with the facts in view; the facts simply come from
 two places, because custody does.

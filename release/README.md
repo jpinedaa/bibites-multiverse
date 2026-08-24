@@ -395,8 +395,8 @@ used to be done by eye turned into refusals:
    `--allow-dirty` is never used.
 3. It runs `release/check-drift.sh`, then `make-release.sh` with both game directories, tee-ing the
    build to a log.
-4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the twenty-one success
-   lines or carrying one of the three silent downgrades. Two of the build's strongest checks
+4. It runs `release/verify-build-log.sh`, which refuses a log missing any required success line or
+   carrying one of the three silent downgrades. Two of the build's strongest checks
    degrade to a note when an input is unreadable; under a dedicated runner user that is exactly how
    a check stops running for months without anybody noticing.
 5. It verifies the artifacts independently: `SHA256SUMS`, each archive against its own

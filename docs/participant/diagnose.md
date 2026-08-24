@@ -238,9 +238,11 @@ Written out for your platform in [leave.md](leave.md); the flags are the same on
 `--data-dir` at the data root of the world you are asking about — on Windows,
 `multiverse-launcher.exe status --all` names each one.
 
-The list says, for each organism handed over, when it went and how long is left before it is
-written off as lost. The release prints the entry, then the duplication risk, and waits for a
-typed `YES` **before it acts**. [leave.md](leave.md) gives both commands in full, and
+The list always shows the migration id, organism, destination, and handoff state. A `sent` entry
+also shows its send time and remaining loss time. Pending and refused entries show neither.
+Version 4.2 stores one durable first-refusal deadline for a bounded queue-refusal walk. This
+command does not print that deadline. The release prints the entry, then the duplication risk,
+and waits for a typed `YES` **before it acts**. [leave.md](leave.md) gives both commands in full, and
 [`../error-taxonomy.md`](../error-taxonomy.md) §2.4 gives the warning's exact words and why
 bouncing an entry the far side may already hold is now **the only way left to duplicate an
 organism on this map** — nothing here does it on its own any more.
