@@ -624,6 +624,100 @@ relay live and nothing recording it. The private operations record owns the inci
 Read this before any deployment that installs packages and replaces binaries in the same visit.
 The deployment lock coordinates operators. `needrestart` is not an operator.
 
+## Binary preimages and explicit restore
+
+`provision.sh --only binaries` captures the running relay and archive before the first binary
+replacement. It opens both `/proc/<MainPID>/exe` files before it copies either file.
+It also captures the installed `ringstat` when that file exists.
+
+The capture rechecks both service PIDs, both running hashes, and all installed hashes.
+If one value changes, the capture fails and the provisioner installs nothing.
+An empty first installation has no preimage, so it reports `rollback_generation=initial-install`.
+
+A successful capture reports this value:
+
+```text
+rollback_generation=sha256-<64 hexadecimal characters>
+```
+
+Record that exact identifier in the private deployment record.
+The helper writes the owner-only generation to
+`/var/lib/multiverse/rollback/binaries/<generation>/`.
+Its `manifest.tsv` and `SHA256SUMS` record the exact captured bytes.
+
+Use only a named generation for a restore.
+First, verify the generation without a mutation:
+
+```sh
+GENERATION='sha256-<64 hexadecimal characters>'
+sudo /opt/multiverse/deploy/binary-generation.sh restore \
+  --dry-run --generation "$GENERATION" \
+  --bin-dir /opt/multiverse/bin \
+  --store /var/lib/multiverse/rollback/binaries
+```
+
+Read the printed relay, archive, and optional `ringstat` hashes.
+Compare them with the deployment record.
+If they match the intended rollback, run this exact restore under the deployment lock:
+
+```sh
+sudo flock -n -E 75 /run/lock/bibites-archive-deploy.lock \
+  /opt/multiverse/deploy/binary-generation.sh restore \
+  --generation "$GENERATION" \
+  --bin-dir /opt/multiverse/bin \
+  --store /var/lib/multiverse/rollback/binaries
+```
+
+The helper verifies the directory owner, modes, manifest, file set, sizes, hashes, and generation
+identifier before it replaces the first installed path.
+It rejects a missing, malformed, or modified generation.
+It does not accept `latest`, and it does not infer a generation from directory order.
+
+The restore replaces the installed relay and archive paths.
+It restores `ringstat` when the generation contains that file.
+If the generation records no `ringstat`, it restores that exact absence.
+It removes a later `ringstat` only after it proves that the path is a regular, non-symbolic-link
+file with the expected owner.
+An unsafe path stops the restore before the first service-binary replacement.
+The restore does not restart a unit.
+The running services continue to use the candidate executables through their open inodes.
+
+This temporary installed/running split preserves service availability during restore.
+It also creates a crash-auto-restart risk.
+If one service crashes in this window, systemd loads the restored preimage for that service while
+the other service still runs the candidate.
+Do not leave this window unattended, and do not stop either service by hand.
+
+Run the guarded archive restart sequence immediately after the restore.
+This is the only restart sequence for a relay-and-archive generation restore:
+
+```sh
+RESTART_REASON="activate restored binary generation $GENERATION"
+sudo /opt/multiverse/deploy/restart-archive.sh \
+  --dry-run --reason "$RESTART_REASON"
+sudo /opt/multiverse/deploy/restart-archive.sh \
+  --reason "$RESTART_REASON"
+```
+
+The script raises the peer gate, stops the relay, restarts and replays the archive, starts the
+relay, proves the archive subscription, removes the gate, and writes a receipt.
+Do not use the relay-only restart for this restore.
+
+If the replay gate is critical, do not run the real restart without a valid measurement.
+If an approved measurement proves that replay fits, add these exact options to both commands:
+
+```text
+--i-proved-the-replay-fits --proof "<measurement and private record>"
+```
+
+After the guarded sequence, complete [post-restart checks](#post-restart-checks).
+Record the restore generation, restart receipt, proof, and verification result.
+
+Treat restored paths as newly staged binaries.
+Do not run an apt transaction between restore and the deliberate restart.
+If an I/O error stops a restore after one path changes, run the same named restore again.
+Do not select a different generation as an unreviewed recovery step.
+
 ## Pre-restart checks
 
 Complete these checks before a planned restart:

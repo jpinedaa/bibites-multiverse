@@ -16,8 +16,9 @@ Keep these records outside the public repository:
 |---|---|
 | `deploy.env.example` | Parameters for one deployment. Copy it outside the repository before use. |
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
+| `binary-generation.sh` | Captures the running service binaries before replacement and restores one exact named generation. It restarts nothing. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
-| `deploy.sh` | The deployment sequence on the host: install the kit, prove what landed, install the binaries, prove those. It restarts nothing. |
+| `deploy.sh` | The deployment sequence on the host: install the kit, prove what landed, capture the running generation, install the binaries, and prove those. It restarts nothing. |
 | `ci-gate.sh` | The forced command for a CI deployment key. It accepts a fixed list of verbs and refuses everything else. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
@@ -40,6 +41,7 @@ Keep these records outside the public repository:
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
+| `test-binary-generation.sh` | Checks exact running-binary capture, race rejection, owner-only artifacts, tamper rejection, and explicit restore. |
 | `test-restart-archive.sh` | Makes sure that a roll-up rebuild refuses an incomplete on-host raw record. |
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses, including a part-day response that pins the billing lag. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
@@ -231,8 +233,12 @@ sudo /opt/multiverse/deploy/deploy.sh --kit /path/to/staged-kit --binaries
 It snapshots `/etc/multiverse/*.env`, installs the kit from the staged copy's own `provision.sh`,
 proves every installed file is byte-identical to the file it came from, and refuses if a phase
 rewrote an environment file — restoring the file first.
-It installs the binaries only after those checks pass, and then proves each installed binary
-against the artifact that was staged.
+It installs the binaries only after those checks pass.
+Before the first replacement, it opens the running relay and archive executables through
+`/proc/<MainPID>/exe` and captures both from those stable handles.
+It then rechecks the service PIDs, running hashes, and installed hashes.
+If a check fails, it installs nothing.
+After capture, it installs and proves each staged artifact.
 It restarts nothing.
 
 `ci-gate.sh` is the forced command for the CI key.
@@ -257,8 +263,10 @@ The gate accepts these verbs and refuses everything else with exit code 3:
 
 Four rules the gate applies to all of them:
 
-- **A dry run is the default.** Every mutating verb takes `--dry-run`, and it reaches
-  `provision.sh`, which routes every mutation through one helper.
+- **A dry run is the default.** Every mutating verb takes `--dry-run`.
+  `provision.sh` prints each direct mutation instead of running it.
+  The binary-generation helper also opens and verifies the running executables, but it writes
+  no rollback artifact and replaces no path.
 - **The archive is never restarted by CI.** `restart-archive` is accepted with `--dry-run` and with
   nothing else. An archive restart replays the whole ledger, costs the map a full relay outage for
   the length of the replay, and needs an operator's measured proof that the replay fits in memory.
@@ -760,6 +768,7 @@ Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
 Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
 Use `test-ci-gate.sh` after a `ci-gate.sh` change.
 Use `test-deploy.sh` after a `deploy.sh` change.
+Use `test-binary-generation.sh` after a binary capture, install, or restore change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
@@ -768,15 +777,32 @@ every check still passing.
 
 ### What a deployment leaves on the host
 
-Each deployment stages a kit copy, replaces binaries, and can leave a copy of a file it edited.
-These copies are rollback references. They are useful for one generation and clutter after that.
-This is host housekeeping. It is not `MV_RETENTION`, which governs participant data.
+Each binary deployment captures the exact running service generation before it replaces an
+installed path. The capture has a content-addressed identifier of the form `sha256-<digest>`.
+The deployment output reports that identifier for the private deployment record.
+
+The helper writes the capture to `/var/lib/multiverse/rollback/binaries/<generation>/`.
+The directory contains the running relay and archive executables, an optional installed
+`ringstat`, `SHA256SUMS`, and `manifest.tsv`.
+On the service host, root owns the generation directory and its files.
+The directory has mode `0700`, and each file has mode `0600`.
+
+The manifest records both running service hashes and the hashes at the installed paths.
+When a new binary is installed but its service has not restarted, those values differ.
+The capture reads the running executables from stable `/proc/<MainPID>/exe` handles, so it keeps
+the actual running bytes in that case.
+A PID or hash change during capture rejects the generation.
+The provisioner then installs nothing.
+
+These files are rollback references.
+They are host housekeeping, not participant data under `MV_RETENTION`.
 
 Keep on the host:
 
 - The installed kit in `/opt/multiverse/deploy/`, and the staging copy it was installed from.
 - The previous kit staging copy.
-- The installed binaries in `/opt/multiverse/bin/`, and the previous binaries beside them.
+- The installed binaries in `/opt/multiverse/bin/`.
+- Each named rollback generation that an open deployment, incident, or recovery record references.
 - The staging directory that `ship.sh` writes, `MV_STAGE_DIR`. Each `ship.sh` run overwrites the
   artifacts and their `SHA256SUMS`, so it never accumulates. **An artifact put there by hand is a
   different matter**: `provision.sh --only binaries` reads whatever sits under the canonical
@@ -797,11 +823,17 @@ Keep on the host:
 Remove after the next deployment succeeds:
 
 - Every kit staging copy older than the previous one.
-- Every binary copy older than the previous one.
 - Every `.bak-*` copy beyond the last two.
 
-Remove nothing while a deployment record is still open. A record that is open still names its
-rollback artifacts.
+Remove a rollback generation only by its exact identifier.
+Before removal, verify that no open deployment, incident, or recovery record names it.
+Never select a generation from a `latest` link or directory order.
+
+[`RESTART-POLICY.md`](RESTART-POLICY.md#binary-preimages-and-explicit-restore) gives the exact
+verification and restore commands.
+Restore accepts one named generation, reproduces its installed paths and recorded `ringstat`
+absence, and restarts nothing.
+The guarded archive sequence activates and verifies the restored service generation.
 
 A deploy script belongs in this repository, not in a home directory. A script under `/home/<user>`
 is unversioned, unreviewed, and gone when the instance is replaced. If a deployment needs a step
@@ -838,6 +870,7 @@ deploy/test-viewers-presence.sh
 deploy/test-ce-reconcile.sh
 deploy/test-ci-gate.sh
 deploy/test-deploy.sh
+deploy/test-binary-generation.sh
 deploy/test-restart-archive.sh
 ```
 

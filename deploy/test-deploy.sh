@@ -134,6 +134,45 @@ else
 fi
 
 echo
+echo "== capture failure occurs before every binary replacement"
+
+fail_kit="$TMP/fail-kit"
+fail_prefix="$TMP/fail-prefix"
+fail_stage="$TMP/fail-stage"
+mkdir -p "$fail_kit" "$fail_prefix/bin" "$fail_stage"
+cp "$PROVISION" "$fail_kit/provision.sh"
+cat >"$fail_kit/binary-generation.sh" <<'SH'
+#!/usr/bin/env sh
+echo "fixture capture failure" >&2
+exit 73
+SH
+chmod +x "$fail_kit/provision.sh" "$fail_kit/binary-generation.sh"
+printf 'old relay\n' >"$fail_prefix/bin/multiverse-relay"
+printf 'old archive\n' >"$fail_prefix/bin/multiverse-archive"
+printf 'new relay\n' >"$fail_stage/relay-linux-amd64"
+printf 'new archive\n' >"$fail_stage/archive-linux-amd64"
+printf 'MV_STAGE_DIR=%s\nMV_PREFIX=%s\nMV_STATE=%s\nMV_DOMAIN=multiverse.test\n' \
+  "$fail_stage" "$fail_prefix" "$TMP/fail-state" >"$TMP/fail.env"
+old_relay_sha="$(sha256sum "$fail_prefix/bin/multiverse-relay" | awk '{print $1}')"
+old_archive_sha="$(sha256sum "$fail_prefix/bin/multiverse-archive" | awk '{print $1}')"
+
+if out="$(PATH="$TMP/fakebin:$PATH" "$fail_kit/provision.sh" \
+    --env-file "$TMP/fail.env" --only binaries 2>&1)"; then
+  bad "a failed running-generation capture stops the binary phase"
+elif printf '%s\n' "$out" | grep -Fq 'Nothing has been installed'; then
+  ok "a failed running-generation capture stops the binary phase and says so"
+else
+  bad "a failed running-generation capture stops the binary phase and says so"
+fi
+
+if [ "$old_relay_sha" = "$(sha256sum "$fail_prefix/bin/multiverse-relay" | awk '{print $1}')" ] &&
+   [ "$old_archive_sha" = "$(sha256sum "$fail_prefix/bin/multiverse-archive" | awk '{print $1}')" ]; then
+  ok "capture failure leaves both installed service binaries unchanged"
+else
+  bad "capture failure leaves both installed service binaries unchanged"
+fi
+
+echo
 printf '%d pass, %d fail\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ] || exit 1
 echo "deploy.sh OK"
