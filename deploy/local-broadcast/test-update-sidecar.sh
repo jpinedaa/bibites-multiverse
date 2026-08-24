@@ -119,7 +119,13 @@ capture_windows_path_acl() {
 }
 
 get_windows_acl() {
-  tr -d '\r\n' <"$target_acl_file"
+  local acl
+  acl="$(tr -d '\r\n' <"$target_acl_file")"
+  if [[ "$acl" == *'D:AR'* ]]; then
+    die 'The ACL seal has an unresolved DACL inheritance request'
+    return 1
+  fi
+  printf '%s\n' "$acl"
 }
 
 set_windows_acl() {
@@ -135,6 +141,7 @@ protect_windows_directory() {
 
 atomic_replace_windows() {
   mv -f -- "$1" "$2"
+  printf 'fixture-replacement-acl\n' >"$target_acl_file"
   record_event atomic-replace
   if [ "$case_mode" = replacement-failure ] &&
       [ "$(grep -c '^atomic-replace$' "$events_file")" -eq 1 ]; then
@@ -352,9 +359,13 @@ prepare_fixture success
 run_update "$fixture/output"
 [ "$run_status" -eq 0 ] || fail "the success fixture failed: $(cat "$fixture/output")"
 assert_target_hash "$new_sha"
+[ "$(get_windows_acl)" = 'fixture-target-acl' ] ||
+  fail 'the success fixture did not restore the saved ACL seal after replacement'
 assert_executable_only_backup
 grep -Fq 'source flow advanced in both windows' "$fixture/output" ||
   fail 'the success fixture did not complete both observation windows'
+grep -Fq '30-second waits between completed samples' "$fixture/output" ||
+  fail 'the success fixture did not report the observation wait contract'
 grep -Fq 'source-flow cumulative migrations start=100 midpoint=101 end=102' "$fixture/output" ||
   fail 'the success fixture did not print receipt-safe window boundary totals'
 [ -z "$(find "$fixture_root" -maxdepth 1 -name '.sidecar-update-stage.*' -print -quit)" ] ||
@@ -372,6 +383,24 @@ after="$(find "$fixture_root" "$config_root" "$runtime_root" -type f -print0 |
 [ ! -e "$fixture_root/.sidecar-update-backups" ] || fail 'the dry-run fixture created a backup'
 [ ! -s "$events_file" ] || fail 'the dry-run fixture stopped, started, replaced, or changed an ACL'
 printf 'dry-run: PASS\n'
+
+prepare_fixture target-acl-auto-inherit-request
+crafted_ar_acl='O:S-1-5-18G:S-1-5-18D:AR(A;;FA;;;S-1-5-18)'
+printf '%s\n' "$crafted_ar_acl" >"$target_acl_file"
+run_update "$fixture/output"
+[ "$run_status" -eq 20 ] ||
+  fail "a D:AR target ACL returned status $run_status, not 20"
+assert_target_hash "$old_sha"
+[ "$(tr -d '\r\n' <"$target_acl_file")" = "$crafted_ar_acl" ] ||
+  fail 'the D:AR preflight changed the target ACL seal'
+[ ! -s "$events_file" ] ||
+  fail 'the D:AR preflight stopped, replaced, or changed an ACL'
+[ "$(read_state)" = up ] || fail 'the D:AR preflight changed the runtime state'
+[ ! -e "$fixture_root/.sidecar-update-backups" ] ||
+  fail 'the D:AR preflight created an executable backup'
+grep -Fq 'unresolved DACL inheritance request' "$fixture/output" ||
+  fail 'the D:AR preflight reported the wrong error'
+printf 'DACL auto-inherit request rejection before mutation: PASS\n'
 
 prepare_fixture legacy-missing-lock
 find "$config_root" -maxdepth 1 -type f -name install.lock -delete
