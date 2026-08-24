@@ -233,6 +233,15 @@ func TestB26TheRecordedReceiptSurvivesARestartAndACompaction(t *testing.T) {
 		t.Fatal("a receipt answered ForwardedUnder for NO session; an empty session is not a " +
 			"session two statements can be about")
 	}
+	if !st.ForwardedAttemptUnder(session, destSlot) {
+		t.Fatal("a replayed receipt did not contradict its own destination attempt")
+	}
+	if st.ForwardedAttemptUnder(session, destSlot+1) {
+		t.Fatal("a receipt for a prior destination contradicted a later attempt")
+	}
+	if st.ForwardedAttemptUnder(wire.NewUUID(), destSlot) {
+		t.Fatal("a receipt contradicted an attempt in another relay session")
+	}
 }
 
 // TestB26ARecordedReceiptIsNotEvidenceUnderANewRelaySession is the asymmetry
@@ -273,12 +282,13 @@ type stubRelay struct {
 	conn     *websocket.Conn
 	ctx      context.Context
 	payloads []contractb.MigrationPayload
+	payload  chan struct{}
 	closeNow int // when >0, close the next connection with this code
 }
 
 func newStubRelay(t *testing.T) *stubRelay {
 	t.Helper()
-	s := &stubRelay{t: t, session: wire.NewUUID()}
+	s := &stubRelay{t: t, session: wire.NewUUID(), payload: make(chan struct{}, 1)}
 	mux := http.NewServeMux()
 	mux.HandleFunc(contractb.ContractBPath, s.serve)
 	s.ts = httptest.NewServer(mux)
@@ -345,6 +355,10 @@ func (s *stubRelay) serve(w http.ResponseWriter, r *http.Request) {
 				s.mu.Lock()
 				s.payloads = append(s.payloads, p)
 				s.mu.Unlock()
+				select {
+				case s.payload <- struct{}{}:
+				default:
+				}
 			}
 		case contractb.TypePing:
 			var ping contractb.Ping

@@ -749,6 +749,12 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 		"exitEdge", out.ExitEdge, "destSlot", destSlot, "genomeHash", genomeHash,
 		"parents", len(parents), "species", wire.SpeciesName(species))
 
+	s.mu.Lock()
+	afterCreate := s.afterOutboundCreate
+	s.mu.Unlock()
+	if afterCreate != nil {
+		afterCreate()
+	}
 	s.faultPoint(FaultPostJournal)
 
 	// 7. Custody has moved. Tell the mod to destroy the organism.
@@ -767,7 +773,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	// thing this sidecar is no longer allowed to do.
 	//
 	// IT READS THE SIDECAR'S OWN CLOCK, not the wall's. This is the call that
-	// writes `sentAt` for most entries, and forwardTimeoutMs is measured from it
+	// durably writes `sentAt` for most entries before socket enqueue, and forwardTimeoutMs is measured from it
 	// by a scheduler that reads s.now(): a mix of the two makes the deadline
 	// meaningless in either direction.
 	s.mu.Lock()
@@ -778,7 +784,11 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	if !s.hasPendingAckLocked() {
 		s.tickOutbound(st, s.now())
 	}
+	afterImmediateTick := s.afterOutboundImmediateTick
 	s.mu.Unlock()
+	if afterImmediateTick != nil {
+		afterImmediateTick()
+	}
 	return true
 }
 

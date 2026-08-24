@@ -5,19 +5,17 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-- **An overloaded live world no longer traps portal traffic.** When a destination refuses before
-  taking custody, the sender continues in the original direction to the next compatible world it
-  has not tried. The migration keeps its identity and remains bounded, so this does not create a
-  duplicate or an unbounded loop.
-- **Population-aware inbound admission is available.** A world can use a fixed living-population
-  limit or a per-machine adaptive limit sized for a requested simulation speed. This release
-  deploys adaptive estimation in shadow mode: it learns and reports the limit but does not refuse
-  organisms on population yet.
-- **The live and local status views explain the decision.** They show the admission mode, target
-  speed, learned and effective limits, committed population, sample count, open/closed decision,
-  and rejection count.
-- Mod `0.6.8` reports the requested speed separately from the speed the game actually achieves,
-  so a world deliberately set to ×5 is not mistaken for a machine failing to hold ×10.
+- **A relay queue refusal cannot fill the sender's custody journal forever.** Contract B 4.2 binds
+  the refusal to one relay session, destination, and reroute attempt. The sender then continues in
+  the original direction to a compatible world that it has not tried.
+- **The refusal walk is durable and bounded.** Restart, reconnect, replay, compaction, and a stale
+  or repeated refusal cannot reset the tried destinations or deadline. The migration bounces once
+  when no safe destination remains.
+- **At-most-once delivery remains the rule.** The sender records an attempt before it can enter the
+  socket. A crash can lose that migration, but no automatic recovery can send it twice.
+- **Older peers remain compatible.** The relay endpoint stays `/contract-b/v4`, and the hosted
+  minimum version does not change. A 4.0 or 4.1 peer can still join; it does not use the new exact
+  queue-refusal progress.
 
 ## Upgrading from an earlier release
 
@@ -26,8 +24,10 @@ Your game and saves stay on your computer.
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **No admission setting is required.** The new default is non-enforcing shadow mode. Existing
-  queue pacing, saves, credentials, and journals continue unchanged.
+- **Do not clear the journal.** Existing queue entries, identities, and saves remain in place. A
+  4.2 relay gives the upgraded sidecar the exact proof it needs to advance an old refused entry.
+- **No admission setting is required.** The default remains non-enforcing shadow mode. Existing
+  population settings and learned state continue unchanged.
 
 ## What you need
 

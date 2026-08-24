@@ -103,9 +103,13 @@ import (
 // answered the same way. `heldDepth` and `bouncedTimeoutTotal` are retired
 // rather than removed: a sidecar simply stops sending them, which §6.3.1's
 // "absence is a value" rule has always permitted, and their names are reserved.
+// Contract B takes another MINOR for §31's B46, `contract-b/4.2`, on the same
+// path. A queue-full relay NACK adds OPTIONAL refusedAttempt correlation. A 4.2
+// source treats omission conservatively, so a mixed fleet remains safe and the
+// bounded refusal walk becomes available only after the relay is upgraded.
 const (
 	ProtocolA = "contract-a/2.4"
-	ProtocolB = "contract-b/4.1"
+	ProtocolB = "contract-b/4.2"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

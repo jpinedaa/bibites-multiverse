@@ -204,10 +204,14 @@ every stat on that slot unknown. `metrics.jsonl` is the same object once a
 minute, durably.
 
 **A zero lane rate has a window.** Each lane's `/min` value counts archived migration envelopes
-in `flowWindowMs`. The current
-window is exactly five minutes. A single open lane can show `0/min` when no eligible organism
-crossed during that window. This reading alone is normal. Simultaneous zeroes across eligible
-lanes between populated, live worlds are abnormal when they continue through consecutive windows.
+in `flowWindowMs`. The current window is exactly five minutes. One open lane can show `0/min`
+when no eligible organism crossed during one window. This reading is normal.
+
+Repeated `0/min` readings on all open outbound lanes identify a refusal-progress custody wedge
+when the source is live, mod-connected, and populated. The same source also reports
+`custodyDepth: 64` and `pacedDepth: 0`. Its local view reports `pendingAckDepth: 0` and
+`unresolvedDepth: 0`, so delivery pacing, acknowledgement pacing, and a forwarded attempt do not
+explain the full custody set. Other sources can keep aggregate flow positive during this wedge.
 
 If this pattern occurs, inspect `slots[].lastRefusal` for a value that starts with `capacity:`.
 Then compare the source and destination queue readings. At the source, read custody and unresolved

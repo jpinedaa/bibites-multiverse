@@ -135,7 +135,7 @@ type Sidecar struct {
 	// pace is the delivery rate limit of contract-a.md §7.5.
 	pace pacer
 	// lostForwardTotal is monotonic and reset only by losing the journal: the
-	// forwards this sidecar handed to the relay and never heard an answer to
+	// forwards this sidecar committed to one relay enqueue and never heard an answer to
 	// (§6.3.1, §9.3). lateAckTotal is the half that says whether
 	// forwardTimeoutMs is set too short — an answer that arrived after the entry
 	// was already recorded lost. It is process-local and off the wire.
@@ -149,7 +149,14 @@ type Sidecar struct {
 	// genomeServed counts GENOME_REQUESTs answered per requester in the current
 	// minute (contract-b-m4.md §10's rate limit, answering side).
 	genomeServed map[string]*rateWindow
-	closed       bool
+	// Test-only interleaving hooks. Production leaves them nil. They let a
+	// regression stop at the custody boundaries that must be deterministic:
+	// after Create returns a clone, after the handler's immediate custody tick,
+	// and after frame preparation but before the durable sent transition.
+	afterOutboundCreate        func()
+	afterOutboundImmediateTick func()
+	afterForwardPrepare        func()
+	closed                     bool
 }
 
 type sched struct {
@@ -252,7 +259,7 @@ func New(cfg Config) (*Sidecar, error) {
 	for _, st := range jr.List() {
 		if st.Direction == journal.Out && st.Handoff == journal.HandoffSent &&
 			(st.Status == journal.StatusOpen || st.Status == journal.StatusInFlight) {
-			s.log.Warn("sidecar: an already-forwarded organism is unresolved and will not be re-sent",
+			s.log.Warn("sidecar: an already-committed organism is unresolved and will not be re-sent",
 				"migrationId", st.Entry.MigrationID, "destSlot", st.Entry.DestSlot,
 				"sentAt", time.UnixMilli(st.SentAtMs).UTC(),
 				"forwardTimeout", s.cfg.ForwardTimeout)
@@ -608,6 +615,16 @@ func (s *Sidecar) hasPendingAckLocked() bool {
 // — are the ones where NO CUSTODY CAN HAVE MOVED, so what they do cannot
 // duplicate an organism.
 func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
+	// Journal Create/List/Get return snapshots. A caller can release Sidecar.mu
+	// after taking one, and a custody tick can durably advance the real entry
+	// before that caller resumes. Always decide from the current journal state
+	// while the caller holds Sidecar.mu; a stale pending clone must never commit
+	// a second send after the scheduler already committed the first.
+	current, ok := s.jr.Get(st.Entry.MigrationID)
+	if !ok {
+		return
+	}
+	st = current
 	if st.Status != journal.StatusOpen && st.Status != journal.StatusInFlight {
 		return
 	}
@@ -630,6 +647,9 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 		// reached nobody, or the receiver said in as many words that it took
 		// none — so offering it to a destination is not a second copy of
 		// anything and cannot duplicate an organism.
+		if s.provenRefusalDeadlineExpiredLocked(st, now) {
+			return
+		}
 		if s.destLiveLocked(st.Entry.DestSlot) {
 			sc.bounceAt = time.Time{}
 			if now.Before(sc.nextForward) {
@@ -637,6 +657,18 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 			}
 			if s.forwardLocked(st, now) {
 				sc.nextForward = now.Add(s.cfg.ForwardRetry)
+			}
+			return
+		}
+		// An exact relay NOT_FORWARDED chain keeps walking forward from the
+		// selected destination. Returning to the source's current effective
+		// neighbour can select a transport queue that this migration already
+		// tried. The durable deadline and refused set remain in force across this
+		// never-sent alternate.
+		if st.RefusalDeadlineMs != 0 {
+			if s.rerouteLocked(st, contractb.ProofNeverSent, now) {
+				sc.bounceAt = time.Time{}
+				sc.nextForward = time.Time{}
 			}
 			return
 		}
@@ -664,6 +696,16 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 		proof := st.RerouteProof
 		if proof == "" {
 			proof = contractb.ProofPeerRefused
+		}
+		if st.RefusalDeadlineMs != 0 {
+			// This is a bounded transport-refusal chain, even if a later
+			// destination supplied a peer-local proof. Never retry a destination
+			// from the durable tried set, and never start a new deadline.
+			if s.rerouteLocked(st, proof, now) {
+				sc.bounceAt = time.Time{}
+				sc.nextForward = time.Time{}
+			}
+			return
 		}
 		if proof != contractb.ProofPeerRefused {
 			// A relay-generated NOT_FORWARDED says its bounded destination
@@ -727,7 +769,7 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 }
 
 // sentAt is when the forward-resolution deadline of §9.3 started running for
-// this entry. SentAtMs is written at the first write to a live relay connection;
+// this entry. SentAtMs is written at the durable commitment to the current socket enqueue;
 // a journal an older sidecar left behind has no such field, so the entry's own
 // journaling time stands in. It is earlier than the forward it stands for, which
 // is the safe direction for a deadline that only ever closes a record.
@@ -742,7 +784,7 @@ func (s *Sidecar) sentAt(st *journal.State) time.Time {
 }
 
 // loseLocked is §9.3's whole terminal action, and it is bookkeeping. The
-// organism was handed to the relay once and no answer ever came; this sidecar
+// organism was committed to one relay enqueue and no answer ever came; this sidecar
 // cannot tell a delivery whose acknowledgement was lost from a delivery that
 // never happened, and it will not guess in either direction. The entry becomes a
 // tombstone in the `lost` state so a late MIGRATION_ACK is still recognised, and
@@ -756,7 +798,7 @@ func (s *Sidecar) loseLocked(st *journal.State, now time.Time) {
 	completed := now.UnixMilli()
 	if _, err := s.jr.Apply(id, journal.Update{
 		Status: journal.StatusDone, CompletedAt: &completed, Handoff: journal.HandoffLost,
-		Note: fmt.Sprintf("lost: forwarded to slot %d and never answered within forwardTimeoutMs (%s)",
+		Note: fmt.Sprintf("lost: one relay enqueue committed for slot %d and never answered within forwardTimeoutMs (%s)",
 			st.Entry.DestSlot, s.cfg.ForwardTimeout)}); err != nil {
 		s.log.Error("sidecar: lost-forward journal update failed", "migrationId", id, "err", err)
 		return
@@ -765,7 +807,7 @@ func (s *Sidecar) loseLocked(st *journal.State, now time.Time) {
 	s.lostForwardTotal++
 	// A LOSS IS A FACT THE OPERATOR READS, not a silent repair — the same rule
 	// the timeout bounce carried, applied to the outcome that replaced it.
-	s.log.Error("sidecar: FORWARD LOST — an organism was handed to the relay and never answered",
+	s.log.Error("sidecar: FORWARD LOST — an organism was committed to one relay enqueue and never answered",
 		"migrationId", id, "entityId", st.Entry.EntityID, "destSlot", st.Entry.DestSlot,
 		"exitEdge", st.Entry.Edge, "sentAt", s.sentAt(st).UTC(),
 		"forwardTimeout", s.cfg.ForwardTimeout, "forwardReceipts", st.ForwardReceipts,
@@ -805,6 +847,20 @@ func (s *Sidecar) setHandoffLocked(st *journal.State, h journal.Handoff, note st
 	st.Handoff = h
 }
 
+// provenRefusalDeadlineExpiredLocked applies the durable first-refusal bound
+// only while custody provably has not moved. A sent entry can retain the
+// historical timestamp, but it can only become lost or receive an answer.
+func (s *Sidecar) provenRefusalDeadlineExpiredLocked(st *journal.State, now time.Time) bool {
+	if st.RefusalDeadlineMs == 0 || st.Handoff.CustodyMayHaveMoved() {
+		return false
+	}
+	if now.Before(time.UnixMilli(st.RefusalDeadlineMs)) {
+		return false
+	}
+	s.bounceLocked(st, "the first proven relay refusal reached bounceTimeoutMs before an alternate took custody")
+	return true
+}
+
 // rerouteLocked is §7.3's ONE exception to the no-rewrite rule, and it carries
 // its own evidence. Only destSlot is rewritten; the migrationId, the axis, the
 // exit geometry, the annex and the body are the same bytes.
@@ -814,9 +870,17 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		// would be the duplication D2 refuses.
 		return false
 	}
+	boundedTransportRefusal := st.RefusalDeadlineMs != 0
+	if boundedTransportRefusal && s.provenRefusalDeadlineExpiredLocked(st, now) {
+		return true
+	}
 	if s.cfg.MaxReroutes < 0 {
 		// Re-routing is off by configuration (§9.2, maxReroutes). The entry takes
 		// the no-lane path instead and bounces home after bounceTimeoutMs.
+		if boundedTransportRefusal {
+			s.bounceLocked(st, "re-routing is disabled and the relay proved that custody never moved")
+			return true
+		}
 		return false
 	}
 	if st.RerouteCount >= s.cfg.MaxReroutes {
@@ -826,13 +890,22 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		return true
 	}
 	var dest int
-	if proof == contractb.ProofPeerRefused {
+	walkKnown := false
+	if proof == contractb.ProofPeerRefused || boundedTransportRefusal {
 		me, ok := mapwalk.Find(s.status, s.slot)
 		excluded := make(map[int]bool, len(st.RefusedSlots))
 		for _, slot := range st.RefusedSlots {
 			excluded[slot] = true
 		}
 		if ok {
+			after, found := mapwalk.Find(s.status, st.Entry.DestSlot)
+			if found {
+				if contracta.Vertical(st.Entry.Edge) {
+					walkKnown = after.Position.Col == me.Position.Col
+				} else {
+					walkKnown = after.Position.Row == me.Position.Row
+				}
+			}
 			if next, found := mapwalk.WalkAfter(s.status, me, st.Entry.Edge,
 				st.Entry.DestSlot, excluded); found {
 				dest = next.Slot
@@ -842,7 +915,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		// frame, its position is unknowable. The relay's current effective
 		// neighbour remains safe so long as it is neither the current nor an
 		// already-refused destination.
-		if dest == 0 {
+		if dest == 0 && (!boundedTransportRefusal || !walkKnown) {
 			if n := s.neighbours[st.Entry.Edge]; n != nil &&
 				n.Slot != st.Entry.DestSlot && !excluded[n.Slot] {
 				dest = n.Slot
@@ -852,6 +925,10 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		dest = n.Slot
 	}
 	if dest == 0 {
+		if boundedTransportRefusal && walkKnown {
+			s.bounceLocked(st, "every compatible same-axis destination was tried after an exact relay NOT_FORWARDED proof")
+			return true
+		}
 		return false
 	}
 	from := st.RerouteFrom
@@ -861,6 +938,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 	count := st.RerouteCount + 1
 	at := now.UnixMilli()
 	empty := ""
+	zero := int64(0)
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
 		Handoff:        journal.HandoffPending,
 		DestSlot:       &dest,
@@ -869,6 +947,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		RerouteProof:   &proof,
 		RerouteAtMs:    &at,
 		RelaySessionID: &empty,
+		SentAtMs:       &zero,
 		Note: fmt.Sprintf("re-routed from slot %d to slot %d on the %s axis under %s",
 			from, dest, st.Entry.Edge, proof),
 	}); err != nil {
@@ -882,6 +961,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 	st.RerouteProof = proof
 	st.RerouteAtMs = at
 	st.RelaySessionID = ""
+	st.SentAtMs = 0
 	s.log.Warn("sidecar: re-routed a journaled hop under a proof of non-delivery",
 		"migrationId", st.Entry.MigrationID, "fromSlot", from, "destSlot", dest,
 		"axis", st.Entry.Edge, "proof", proof, "rerouteCount", count)
@@ -1118,10 +1198,16 @@ func (s *Sidecar) exportOpenLocked(edge string, simSize float64) (destSlot int, 
 // ---------------------------------------------------------------- custody
 
 func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
+	// Older journals can have an empty handoff, and §9.2 treats that value as
+	// sent. No state for which custody might have moved can enter the outbound
+	// writer a second time, even if a caller offers it by mistake.
+	if st.Handoff != journal.HandoffPending && st.Handoff != journal.HandoffRefused {
+		return false
+	}
 	// B24's client half, asked before the payload is built (contract-b-m4.md
 	// §3.3, §6.2, §22 B24). A drain offers every open entry on every tick, so
 	// this gate is what keeps a deferred forward from costing a multi-megabyte
-	// encode; sendRelayLocked still makes the real decision. THE ENTRY IS LEFT
+	// encode; prepareRelayFrameLocked still makes the real decision. THE ENTRY IS LEFT
 	// EXACTLY AS IT WAS — no journal write, no handoff change, no schedule move —
 	// so the next tick offers it again and the backlog drains slower rather than
 	// shorter. The wall clock is the one the relay's meter runs on.
@@ -1158,38 +1244,55 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 			FromSlot: st.RerouteFrom, Count: st.RerouteCount,
 			Proof: st.RerouteProof, AtMs: st.RerouteAtMs}
 	}
-	if !s.sendRelayLocked(contractb.TypeMigrationPayload, payload) {
+	frame, ok := s.prepareRelayFrameLocked(contractb.TypeMigrationPayload, payload, true)
+	if !ok {
 		return false
 	}
-	// §9.2: pending -> sent, RECORDING THE relaySessionId IN FORCE AT THIS FIRST
-	// WRITE. That id is what scopes every later proof: a link flap keeps it and
-	// keeps the proof, a relay restart changes it and the sender has no proof at
-	// all.
+	if s.afterForwardPrepare != nil {
+		s.afterForwardPrepare()
+	}
+	// Encoding and pace admission can take time. Re-read the sidecar clock after
+	// both and enforce the absolute first-refusal bound before the durable sent
+	// transition. Crossing the bound at this boundary bounces once; it never
+	// commits or enqueues an out-of-bounds alternate.
+	if st.RefusalDeadlineMs != 0 {
+		now = s.now()
+		if s.provenRefusalDeadlineExpiredLocked(st, now) {
+			return false
+		}
+	}
+	// §9.2: pending/refused -> sent, RECORDING THE relaySessionId IN FORCE BEFORE
+	// THIS ATTEMPT'S ENQUEUE. A safe reroute cleared the preceding attempt's
+	// session and sentAt, so every later proof is scoped to this attempt.
 	//
-	// THE TRANSITION HAPPENS AT MOST ONCE PER ENTRY, and since §25's B37 that is
-	// no longer a subtlety about which states to skip: a `sent` entry is never
-	// handed to the relay again, so this branch is reached from `pending` and
-	// from `refused` and from nowhere else. sentAt starts the one deadline an
-	// outbound entry carries.
-	if st.Handoff != journal.HandoffSent {
-		session := s.relaySessionID
-		sentAt := now.UnixMilli()
-		u := journal.Update{Handoff: journal.HandoffSent, SentAtMs: &sentAt}
-		if st.RelaySessionID == "" {
-			u.RelaySessionID = &session
-		}
-		if st.Status != journal.StatusInFlight {
-			u.Status = journal.StatusInFlight
-		}
-		if _, err := s.jr.Apply(st.Entry.MigrationID, u); err != nil {
-			s.log.Error("sidecar: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
-		} else {
-			st.Handoff = journal.HandoffSent
-			st.SentAtMs = sentAt
-			if st.RelaySessionID == "" {
-				st.RelaySessionID = session
-			}
-		}
+	// THE DURABLE TRANSITION PRECEDES THE SOCKET QUEUE. If the process crashes,
+	// or the local queue rejects the prepared frame, replay sees `sent` and can
+	// only wait for an answer or record a loss. Marking after Send would leave a
+	// crash window in which the relay could have the organism while the journal
+	// still invited a retry.
+	session := s.relaySessionID
+	sentAt := now.UnixMilli()
+	u := journal.Update{
+		Handoff: journal.HandoffSent, SentAtMs: &sentAt, RelaySessionID: &session,
+	}
+	if st.Status != journal.StatusInFlight {
+		u.Status = journal.StatusInFlight
+	}
+	if _, err := s.jr.Apply(st.Entry.MigrationID, u); err != nil {
+		s.log.Error("sidecar: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
+		return false
+	}
+	st.Handoff = journal.HandoffSent
+	st.SentAtMs = sentAt
+	st.RelaySessionID = session
+
+	s.faultPoint(FaultPreForward)
+	if !s.sendPreparedRelayFrameLocked(contractb.TypeMigrationPayload, frame) {
+		s.log.Error("sidecar: prepared migration was not enqueued after its durable sent transition; "+
+			"it will not be retried",
+			"migrationId", st.Entry.MigrationID, "destSlot", st.Entry.DestSlot,
+			"relaySessionId", st.RelaySessionID)
+		return false
 	}
 	s.log.Info("sidecar: forwarded MIGRATION_PAYLOAD",
 		"migrationId", st.Entry.MigrationID, "destSlot", st.Entry.DestSlot,
@@ -1222,8 +1325,9 @@ func lineageOf(e journal.Entry) contractb.Lineage {
 // and a bounce comes in moving OUTWARD, so the two populations are separated by
 // the mod's own outward-velocity test rather than by a rule here.
 // EVERY CALLER IS A CASE WHERE NO CUSTODY MOVED (§9.4). Since §25's B37 there is
-// no timeout bounce, so a bounce is never a guess: the frame reached nobody, or
-// a receiver stated it took none, or an operator took the risk by hand.
+// no ambiguous timeout bounce. B45's first-refusal deadline is safe because an
+// exact relay proof says custody did not move. A bounce is never a guess unless
+// an operator explicitly takes that risk by hand.
 func (s *Sidecar) bounceLocked(st *journal.State, why string) {
 	id := st.Entry.MigrationID
 	bounce := true
@@ -1512,9 +1616,9 @@ type InflightEntry struct {
 	Handoff     string
 	DestSlot    int
 	ExitEdge    string
-	// SentAt is when the frame was written to a live relay connection, and
+	// SentAt is when the sidecar durably committed to its one socket enqueue, and
 	// LostIn is what is left of forwardTimeoutMs before the entry is recorded
-	// lost (§9.3). Both are zero on an entry that has never been written.
+	// lost (§9.3). Both are zero on an entry that has never reached that commit.
 	SentAt       time.Time
 	LostIn       time.Duration
 	Reroutes     int
@@ -1652,8 +1756,8 @@ func ReleaseInflight(dataDir, migrationID, action string) (string, error) {
 const InflightRisk = `
 RISK, and it is the reason this command asks.
 
-An entry in handoff "sent" WAS written to a live relay connection, so the far
-sidecar may already hold custody of this organism. If it does, and it returns
+An entry in handoff "sent" was durably committed to one socket enqueue, so the
+relay may have accepted it and the far sidecar may hold custody. If it does, and it returns
 and replays its own journal after you bounce this one home, THE MAP HOLDS TWO
 COPIES.
 

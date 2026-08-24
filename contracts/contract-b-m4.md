@@ -1,6 +1,6 @@
 # Contract B — Sidecar ↔ Relay ↔ Sidecar ↔ Archive Wire Specification
 
-**Version:** `contract-b/4.1` (amended — §25, B37; `contract-b/4.0` before it, §22 B32)
+**Version:** `contract-b/4.2` (amended — §31, B46; `contract-b/4.1` before it, §25 B37)
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3 — **superseded — §25, B37**), **B6** the
@@ -169,6 +169,31 @@ path, routing input, or custody rule changes.** §4's test answers neither major
 at **`contract-b/4.1`**. Contract A takes no set. Affected body text carries an
 `(amended — §29, B44)` marker, and **§29 wins over the body and over §14 to §28 wherever they
 disagree.**
+**Amended:** 2026-08-23, amendment set **B45** (**§30**), from the source-side refusal wedge
+that left live, populated worlds at 64 outbound custody entries while all four lane rates stayed
+at zero. A matched relay `NOT_FORWARDED` with `neverForwarded: true` now starts one bounded,
+durable progress chain. The sender tries each compatible same-axis destination at most once.
+It bounces once if it exhausts those destinations, reaches `maxReroutes`, or reaches the first
+refusal deadline. A missing, false, mismatched, or contradicted proof does not start this chain.
+The sidecar also records `sent` before it offers any prepared migration to its socket writer.
+Thus, a crash or local enqueue error cannot cause a duplicate retry. **No Contract B message,
+wire field, enum, code, close code, schema, URL path, or routing input changes.** §4's test answers
+neither major nor minor. The identifier stays at **`contract-b/4.1`**. Contract A takes no set.
+Affected body text carries an `(amended — §30, B45)` marker, and **§30 wins over the body and
+over §14 to §29 wherever they disagree.**
+**Amended:** 2026-08-23, amendment set **`contract-b/4.2 + B46`** (**§31**), from the
+at-most-once review of B45. A migration-wide `neverForwarded` value cannot identify a refused
+attempt after an earlier destination accepted or refused the same migration. A queue-full relay
+NACK therefore gains the OPTIONAL `refusedAttempt` object. It echoes that payload's `destSlot`
+and `reroute.count`. The source acts only when both values match its current journal attempt.
+Graceful relay drain omits `refusedAttempt`, `neverForwarded`, and `relaySessionId`, so it does
+not consume destinations or start a refusal deadline. The relay now reads `reroute.count` only
+for this correlation. All other reroute fields stay opaque. This additive field makes §4's test
+answer **minor**, so the identifier moves to **`contract-b/4.2`**. The path stays
+`/contract-b/v4`, and the version floor does not move. Deploy the 4.2 relay before the 4.2
+sidecars. A 4.2 sidecar with a 4.1 relay safely leaves the feature unavailable. Contract A takes
+no set. Affected body text carries an `(amended — §31, B46)` marker, and **§31 wins over the
+body and over §14 to §30 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -560,6 +585,17 @@ in durable state and is offered again. Immediate `MIGRATION_NACK` frames and tom
 bypass this deferred class. Each is the answer to one relay-paced arrival, so their aggregate
 rate is causally bounded by `R` (§6.7, §6.8).
 
+**A proven full-queue refusal cannot pin the source at its custody cap** (amended — §31,
+B46). Only a queue-full `NOT_FORWARDED` carries `refusedAttempt`. The source requires the
+NACK's session, `destSlot`, and `rerouteCount` to match its current journal attempt. It also
+requires no contradictory receipt for that session and destination. It then records the
+destination, the `refused` transition, and the first refusal deadline in one durable update.
+It walks to the next compatible, untried destination on the same axis. A graceful-drain
+`NOT_FORWARDED` carries no proof fields. It does not start or advance this walk. A pace
+deferral happens before the durable `sent` transition and remains retryable. After pace
+admission, the sidecar records `sent` before it offers the prepared frame to the socket
+writer. A socket enqueue error is ambiguous and is not retryable (§9.2, §9.3).
+
 **What a limit MUST NOT be.** No limit on this wire may require the relay to decode
 `data.body.bb8`, `data.lineage` or `data.species` (§5), to index anything, or to keep
 per-organism custody or domain state. The bounded opaque frames in the destination transport
@@ -583,7 +619,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -609,6 +645,7 @@ twice over:
 | `PEER_STATUS.slots[].position`, `stats`, `darkSinceMs`; `map` | additive | no |
 | `MIGRATION_NACK.neverForwarded`, `relaySessionId`; codes `PEER_OFFLINE`, `NOT_FORWARDED` | additive field, additive enum values | no |
 | `MIGRATION_PAYLOAD.reroute` added; `exitEdge` may now be `"N"` | additive field, existing enum value | no |
+| `MIGRATION_NACK.refusedAttempt`; relay reads `MIGRATION_PAYLOAD.reroute.count` for correlation | additive field and additive relay-visible input | no — minor `contract-b/4.2` (§31, B46) |
 
 A `contract-b/2` sidecar and a `contract-b/3` relay are incompatible by design and say so
 with close `4000` instead of misrouting an organism.
@@ -708,6 +745,14 @@ do not change. Queue admission, write scheduling, graceful drain, and durable AC
 local behavior on existing frames. A mixed pair still exchanges the same bytes. The identifier
 therefore stays at **`contract-b/4.1`**, and `/contract-b/v4` does not move.
 
+**Attempt-scoped queue-refusal proof is the seventh minor** (added — §31, B46).
+`MIGRATION_NACK.refusedAttempt` is an additive OPTIONAL object. A 4.1 relay omits it, and a
+4.2 source then treats the refusal as unproven. A 4.1 source ignores it. Both directions are
+safe, but the bounded queue-refusal walk is available only after the relay speaks 4.2. The
+relay must therefore be upgraded before sidecars. The path remains `/contract-b/v4`, and the
+operator must not raise `minContractVersion` for this feature. The identifier moves to
+**`contract-b/4.2`**.
+
 **One rule §22 adds is deliberately *not* a compatibility rule, and the distinction has to be
 read here** (added — §22, B25). B25's minimum **contract**-version gate refuses a peer whose
 `protocolVersion` is below a published floor — and that floor may sit at a **minor**. That
@@ -726,22 +771,27 @@ the one idempotency key in the system (`contract-a.md` §7.1).
 
 ## 5. Routing, and what the relay may read
 
-The relay reads exactly two fields out of `data` and nothing else:
+The relay reads the routing fields below. Since 4.2, it also reads one correlation field from
+a migration payload (amended — §31, B46):
 
 | Field | Present on | Routes to |
 |---|---|---|
 | `destSlot` | `MIGRATION_PAYLOAD` | The peer that currently holds that slot |
 | `destPeer` | `MIGRATION_ACK`, `MIGRATION_NACK`, `GENOME_REQUEST`, `GENOME_RESPONSE` | That peer id |
+| `reroute.count` | `MIGRATION_PAYLOAD` only | Echoed with `destSlot` in a queue-full `refusedAttempt`. Absence means the original attempt, count 0. It is not a routing decision. |
 
 Every routable frame also carries `sourcePeer`. The relay **MUST** check it against the
 sending connection's own peer id and **MUST** close with `4003` when they disagree. It
-**MUST NOT** rewrite it, so the frame can be forwarded byte for byte.
+**MUST NOT** rewrite it, so the frame can be forwarded byte for byte. A present
+`reroute.count` MUST be a positive integer. A zero, negative, or malformed value closes the
+source with `4003` (added — §31, B46).
 
 The relay **MUST NOT** decode `data.body.bb8`, **MUST NOT** decode `data.lineage`,
 **MUST NOT** read `data.species` (added — §15, B9), and **MUST NOT** validate a payload
 (D4 — that is `bb8-schema`'s job, sidecar-side, at both ends). It forwards the original frame
 bytes unchanged. A species name is **never** a routing input, a filter, or an admission-control
-term: the relay routes on `destSlot` and `destPeer`, and on nothing else.
+term. The relay routes on `destSlot` and `destPeer`. It reads `reroute.count` only to
+correlate a queue refusal. Every other reroute field remains opaque (amended — §31, B46).
 
 **The relay MAY retain those original bytes only in the bounded migration transport queue**
 (added — §28, B43). It does not decode, rewrite, index, transfer, or re-resolve a queued
@@ -784,14 +834,14 @@ the peer grant**: the same mechanism, a different permission.
 | **The visibility boundary, stated rather than implied** (added — §22, B27) | A subscriber sees **every** `MIGRATION_PAYLOAD`, `MIGRATION_ACK` and `MIGRATION_NACK` the relay routes or generates, and **every** `PEER_STATUS` — which since §16 carries each world's species census and since §19 its mod version, its `contract-a` version, its save policy and its exclusion list (§6.3.1). **That is a fairly complete profile of a stranger's machine, and it is what the grant grants.** It is stated here so that granting it is a decision rather than a default, and so that D24's participant announcement can say what a participant is agreeing to. What a subscriber does **not** get is anything more than the peers themselves get: every field it reads is a field the relay already broadcasts to all six sidecars, and there is no subscriber-only view, no private field and no back channel. |
 | **What a peer may assume about its own stats** (added — §22, B27) | Nothing is confidential on this wire. A peer that must not publish a value **MUST NOT put it on the stats block**, because there is no rule here that would keep it from a subscriber. The block is a publication, and §6.3.1's fields are the whole of what is published. |
 | Fan-out | The relay **MUST** send every connected subscriber a **byte-identical copy** of each accepted `MIGRATION_PAYLOAD` (amended — §28, B43). It **MUST** also copy every routed `MIGRATION_ACK` and `MIGRATION_NACK`. The copy carries the original `sourcePeer`, `destSlot` and `migrationId`. |
-| Fan-out covers the relay's own non-delivery answers | **The set is a superset of "routed"** (amended — §14, B7). Every `MIGRATION_NACK` the relay **generates in answer to a `MIGRATION_PAYLOAD` it declined to forward** — `SLOT_VACANT`, `PEER_OFFLINE`, `NOT_FORWARDED` (§6.8) — **MUST** also be fanned out. Those three are exactly the frames that carry `neverForwarded` and `relaySessionId`, so they are the only record a subscriber can ever have of a hop that reached no sidecar. The relay's two **connection-level** refusals are **not** fanned out, because no migration was in question: `NOT_A_MEMBER` (a payload from a subscriber, refused as a role error) and `PEER_UNKNOWN` (a routed `ACK`/`NACK` whose `destPeer` has gone). |
+| Fan-out covers the relay's own non-delivery answers | **The set is a superset of "routed"** (amended — §14, B7). Every `MIGRATION_NACK` the relay **generates in answer to a `MIGRATION_PAYLOAD` it declined to forward** — `SLOT_VACANT`, `PEER_OFFLINE`, `NOT_FORWARDED` (§6.8) — **MUST** also be fanned out. Queue-full `NOT_FORWARDED` adds `refusedAttempt` in 4.2. Graceful-drain `NOT_FORWARDED` omits all proof fields (amended — §31, B46). The relay's two **connection-level** refusals are **not** fanned out, because no migration was in question: `NOT_A_MEMBER` (a payload from a subscriber, refused as a role error) and `PEER_UNKNOWN` (a routed `ACK`/`NACK` whose `destPeer` has gone). |
 | Best effort | The fan-out **MUST NOT** delay, block or fail a migration. A subscriber that is absent, slow or dead changes nothing on the migration path. |
 | Bounded | Each subscriber has a queue of `archiveQueueMax` (1024) frames. On overflow the relay **MUST** drop the **oldest** copy, increment a dropped-copies counter, and log at most one line per minute. It **MUST NOT** disconnect the migration it was copying. |
 | No answers | A subscriber **MUST NOT** answer a copied frame. The relay ignores an `ACK`/`NACK` from a subscriber with one warning. |
 | No sending | A `MIGRATION_PAYLOAD` from a subscriber is answered `MIGRATION_NACK` / `NOT_A_MEMBER` and is **not** forwarded. |
 | What a subscriber may send | `HANDSHAKE`, `PING`, `PONG`, `GENOME_REQUEST`. Nothing else. |
 | No claim | A `SECTOR_CLAIM` from a subscriber is refused with `granted: false, reason: "role_has_no_slot"`. |
-| Duplicates | A re-routed migration produces a second copy, and so does a sidecar older than §25's B37 running the retry that set removed. The archive deduplicates a `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` on `migrationId`, exactly as a sidecar does — **inside a bounded window since §25, B38**, because a legitimate duplicate stopped existing when the re-forward did and what is left arrives within minutes — and a **re-routed** copy carries a different `destSlot` with the same `migrationId`, which is not a duplicate organism but the same organism on a new lane (§6.6, §9). **A `MIGRATION_NACK` deduplicates on the pair `migrationId` + `code`** (amended — §14, B7), because one migration legitimately produces several different refusals on its way to a lane — a `PEER_OFFLINE` on the first attempt and a `NOT_FORWARDED` on the retry are two facts, not one fact twice, and collapsing them would erase the sequence a re-route has to be read against. |
+| Duplicates | A re-routed migration produces a second copy, and so does a sidecar older than §25's B37 running the retry that set removed. The archive deduplicates a `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` on `migrationId`, exactly as a sidecar does, inside the bounded B38 window. A re-routed copy is the same organism on a new lane (§6.6, §9). A legacy or proof-free `MIGRATION_NACK` deduplicates on `migrationId` + `code` (amended — §14, B7). A 4.2 `NOT_FORWARDED` with `refusedAttempt` adds its `destSlot` and `rerouteCount` to that key (amended — §31, B46). This keeps distinct queue refusals without changing old record keys. |
 | Full state, no polling | A subscriber also receives every `PEER_STATUS` broadcast, which is what lets the status page render the whole map without asking anybody anything (§10.1). |
 
 The M3 reasoning for the copy over a slot-less ring member is unchanged and still holds: a
@@ -815,8 +865,9 @@ never forwarded reached no sidecar and created no custody.
 | Close race | Queue acceptance and connection close **MUST** have one order. If close wins, the relay creates no new record and returns `PEER_OFFLINE`. If acceptance wins, the record remains and the close follows the after-acceptance rule below. |
 | What does not count | A frame does not count if the relay refuses it before queue acceptance. Causes are no slot, no live peer, a full queue, or closed migration admission. |
 | After acceptance | A queued frame stays with that exact destination connection. The relay **MUST NOT** transfer it to a replacement connection, re-route it, or send a later NACK for it. A disconnect or process exit may lose it. The forwarding record remains, so the ambiguity resolves conservatively toward at-most-once. |
-| The session | The relay mints a `relaySessionId` (a UUID) at process start and reports it in `HANDSHAKE_ACK` (§6.2) and in every relay-generated `MIGRATION_NACK` (§6.8). The record covers **that session only**. |
-| The answer | A relay-generated `MIGRATION_NACK` carries `neverForwarded: true` **only** when the `migrationId` is absent from the record of the current session. Otherwise it carries `false`. |
+| The session | The relay mints a `relaySessionId` (a UUID) at process start. It reports it in `HANDSHAKE_ACK` (§6.2) and in proof-bearing relay NACKs (§6.8). The record covers **that session only**. Graceful-drain NACKs omit it (amended — §31, B46). |
+| The legacy answer | A proof-bearing relay NACK retains `neverForwarded` for 4.1 compatibility. `true` means the `migrationId` is absent from this session's forwarding record. Otherwise it is `false`. This value is migration-wide and does not identify a mixed-history attempt (amended — §31, B46). |
+| The 4.2 queue answer | A queue-full `NOT_FORWARDED` also carries `refusedAttempt`. It copies the rejected payload's `destSlot` and `reroute.count`, using 0 when `reroute` is absent. It proves only that exact queue-admission attempt. Graceful drain carries none of these proof fields (added — §31, B46). |
 | Memory | One `migrationId` and one timestamp per forwarded migration. At T1's measured rate — 1 799 hops an hour — 48 hours is about 86 000 entries, a few megabytes. It is in memory, and it is deliberately **not** durable: a relay restart is exactly the event that invalidates the proof, and persisting it would claim knowledge the new process does not have. **The 48 hours used to be sized at twice the sender's hold** (§12); §25's B37 removed the hold, and what the retention now covers is a **re-routed** entry's later attempts and a sidecar older than B37 still retrying. The value does not move. |
 | **The receipt** (added — §22, B26; amended — §28, B43) | After acceptance, the relay **MUST** attempt one `FORWARD_RECEIPT` (§6.12) to the **sender**. Queue acceptance establishes the fact and its session. Receipt enqueue is best effort and is not part of the atomic record-to-queue action. A **re-route** of the same `migrationId` produces another receipt attempt. A retry from a sender older than §25's B37 does too. |
 | **What the receipt is for** (added — §22, B26) | It moves the forwarding record **into the sender's own durable journal** (§7.4, §9.2). A sender that holds a receipt knows the frame was forwarded under a named session and does not need to ask; a sender that holds **no** receipt for an entry it wrote to a live relay connection knows only that it does not know, which is exactly what `sent` already means. |
@@ -827,7 +878,7 @@ never forwarded reached no sidecar and created no custody.
 | Event | Required result |
 |---|---|
 | Connection error or replacement | Stop admission to that connection. Drain its ordinary queue, but promptly drop its queued migrations. At most one already-selected migration write may finish. Keep every forwarding record. Do not transfer, re-route, or later NACK a dropped frame. The identity's pace survives for any overlapping or replacement connection. |
-| Relay-wide graceful drain | First close migration admission. Return `NOT_FORWARDED` for a later payload without updating its forwarding record. Then drain each ordinary queue and all accepted migration frames. Run connection drains in parallel and keep the normal identity pace. |
+| Relay-wide graceful drain | First close migration admission. Return proof-free `NOT_FORWARDED` for a later payload without updating its forwarding record. Omit `refusedAttempt`, `neverForwarded`, and `relaySessionId`. Then drain each ordinary queue and all accepted migration frames. Run connection drains in parallel and keep the normal identity pace (amended — §31, B46). |
 | Drain deadline | The graceful drain has one relay-wide deadline of **18 seconds**, not one deadline per connection. At the deadline, force-close every remaining connection and drop its remaining queue. Keep the conservative forwarding records. |
 
 The queue holds at most `F` frames and drains at `R = max(1, floor(F / 8))`. For every
@@ -859,21 +910,27 @@ session *X* and hears `neverForwarded: true` from session *Y* has learned nothin
 same process to know its own entry was forwarded — the fact is in the sender's journal, where
 D2 keeps custody.
 
+**An attempt proof cannot contradict a receipt for that attempt** (amended — §31, B46). If a
+sender recorded a `FORWARD_RECEIPT` for session *X* and destination *D*, it MUST NOT accept a
+queue-refusal proof for session *X* and destination *D*. It keeps the entry `sent`, logs the
+contradiction, and does not re-route or bounce. A receipt for another session or destination
+does not contradict this attempt. The exact session, destination, and count match still applies.
+
 **Why the session id, and not a timestamp.** The sender has to know whether the relay's
 answer covers the whole life of its journal entry. A timestamp comparison would put a
 correctness decision on another machine's clock, which D5 forbids. The session id makes the
-test exact and clock-free: the sender records the `relaySessionId` under which the entry was
-first handed to a live relay connection, and the proof counts only when the two ids match
+test exact and clock-free: the sender records the `relaySessionId` under which it durably
+committed the current attempt's socket enqueue, and the proof counts only when the two ids match
 (§9.2). A **link flap** keeps the id and keeps the proof; a **relay restart** changes it and
 the sender has no proof at all — which since §25's B37 means the entry simply waits out
 `forwardTimeoutMs` and is recorded lost (§9.3).
 
-**The failure direction is deliberate.** Every ambiguity resolves toward `neverForwarded:
-false` — toward doing nothing at all with the entry (amended — §25, B37: toward the bounded
-hold and eventually the bounce, before that set removed both) — because doing nothing costs at
-worst one organism and re-routing on a bad proof costs a duplicated one. Risk 2 names the
-implementation that gets this wrong: one that treats **silence** as proof. Silence is never
-proof in this contract; only a relay statement or a peer NACK is.
+**The failure direction is deliberate.** Every ambiguity resolves toward no attempt proof and
+no change to the entry or its scheduler. The legacy migration-wide value alone is not enough
+(amended — §31, B46). Doing nothing costs at worst one organism. Re-routing on bad proof costs
+a duplicated one. Risk 2 names the implementation that gets this wrong: one that treats
+**silence** as proof. Silence is never proof in this contract. Only a current relay statement
+or a current peer NACK can authorize progress.
 
 **And the direction got cheaper to hold to, not more expensive** (added — §25, B37). Before
 that set, refusing a doubtful proof cost a 24-hour wait and then an automatic bounce that could
@@ -923,7 +980,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). **It is now also authenticated** (amended — §22, B22): the relay **MUST** refuse the connection when this value disagrees with the `peerId` the credential named, and the peer whose id was borrowed observes nothing (§3.1). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). **The credential's grant decides which values are legal for this connection** (amended — §22, B27), and a role the grant does not carry is refused with `4003`. |
-| `protocolVersion` | string | yes | `"contract-b/4.0"` (amended — §22, B32; `"contract-b/3.5"` before it, §19 B19; `"contract-b/3.4"` before that, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. **A value below the relay's published `minContractVersion` closes with `4003`** (added — §22, B25) — a *compatibility* refusal and never a security one, because this string is chosen by the peer that sends it. |
+| `protocolVersion` | string | yes | `"contract-b/4.2"` (amended — §31, B46; `"contract-b/4.1"` before it, §25 B37; `"contract-b/4.0"` before that, §22 B32). A different **major** closes with `4000`. **A value below the relay's published `minContractVersion` closes with `4003`** (added — §22, B25) — a compatibility refusal and never a security one, because this string is chosen by the peer that sends it. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -971,14 +1028,14 @@ first implies the second** (added — §22, B25):
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/4.0",
+    "protocolVersion": "contract-b/4.2",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -1014,14 +1071,14 @@ Authorization: Bearer peer-lan-slot5.9f3c1a2b7e4d05688c1f0a37d5b9e264
 ```
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "HANDSHAKE",
   "messageId": "5e2b90c1-77af-4d13-b0a6-31c8e5079f42",
   "sentAt": 1785693597100,
   "data": {
     "peerId": "peer-main-slot1",
     "role": "peer",
-    "protocolVersion": "contract-b/4.0",
+    "protocolVersion": "contract-b/4.2",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0"
   }
@@ -1069,7 +1126,7 @@ side can do it for them (D25).
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/4.0"` (amended — §22, B32; `"contract-b/3.5"` before it, §19 B19; `"contract-b/3.4"` before that, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
+| `protocolVersion` | string | yes | `"contract-b/4.2"` (amended — §31, B46; `"contract-b/4.1"` before it, §25 B37; `"contract-b/4.0"` before that, §22 B32). |
 | `minContractVersion` | string | no | **The floor this relay admits** (added — §22, B25). Absent means **no minimum**, which is the default. A peer that reads it can say what it will need before it needs it, and an operator surface can say which peers are one release from being refused. It is a **compatibility** statement and never a security one (§6.1). |
 | `limits` | object | yes | **The published capacity table** (added — §22, B24), as §3.3 defines it: the limits this relay is actually running with, not the shipped defaults. A peer reads it at connect and **MUST** respect it; a peer that cannot is a peer that will be shed with `4007`. It is the relay's own configuration, so it is authoritative and it changes only when the relay restarts. |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
@@ -1081,13 +1138,13 @@ side can do it for them (D25).
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/4.0",
+    "protocolVersion": "contract-b/4.2",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -1142,7 +1199,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -1190,7 +1247,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -1227,7 +1284,7 @@ memory (Risk 4).
 | `eggCount` | number (int) | no | Live eggs, when the mod reports them. |
 | `custodyDepth` | number (int) | no | Journal entries this sidecar holds custody of right now: outbound entries awaiting `MIGRATION_ACK` plus inbound entries awaiting `MIGRATE_IN_ACK`. |
 | `pacedDepth` | number (int) | no | Inbound entries waiting on the delivery rate limit (`contract-a.md` §7.5). A depth that never falls names a limit set too low. |
-| `lostForwardTotal` | number (int) | no | **What migration costs on this map** (added — §25, B37). Cumulative count of organisms this sidecar handed to the relay and never heard an answer for within `forwardTimeoutMs` (§9.3). A monotonic counter, reset only by losing the journal. **A loss is a fact the operator reads, not a silent repair** — it is the reading that replaced `bouncedTimeoutTotal`, and it names the same event with the organism no longer coming home. A rising count names a lane whose far end keeps disappearing mid-crossing, not a defect. |
+| `lostForwardTotal` | number (int) | no | **What migration costs on this map** (added — §25, B37; amended — §31, B46). Cumulative count of organisms whose current or most recent committed attempt heard no answer within `forwardTimeoutMs` (§9.3). The socket enqueue can fail after the commit, so the count includes conservative local-send losses. A monotonic counter, reset only by losing the journal. **A loss is a fact the operator reads, not a silent repair.** |
 | ~~`heldDepth`~~ | — | — | **RETIRED — §25, B37.** It counted outbound entries in the `held` state, and there is no such state. A `contract-b/4.1` sidecar does not send it; a peer that still does is older than that set, and a reader renders it as unknown or ignores it. **The name is reserved and MUST NOT be reused.** |
 | ~~`bouncedTimeoutTotal`~~ | — | — | **RETIRED — §25, B37.** It counted entries a hold timeout bounced home, and nothing bounces on a timeout. Same rules as the row above; **the name is reserved and MUST NOT be reused.** |
 | `simulatedTime` | float | no | The world's simulated seconds, from the last `HEARTBEAT`. It is what makes a paced rate interpretable. |
@@ -1350,7 +1407,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -1488,7 +1545,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -1614,9 +1671,9 @@ The Contract C `MigrationEnvelope`, carried in `data`, with the lineage annex (D
 | `heading` | float | yes | Degrees (`contract-a.md` §4.4). |
 | `entityId` | `entityId` | yes | Signed int32, often negative. See §11 item 3 for which value wins. |
 | `timestamp` | `timestampMs` | yes | The origin's clock. Informational (D5). |
-| `reroute` | object | no | **New in M4.** Present exactly when this frame's `destSlot` is not the one the entry was first journaled with (§9.2). Informational: the relay does not read it and the receiver does not act on it. It is what lets the archive and the status page say *why* an organism took the lane it took. |
+| `reroute` | object | no | **New in M4; amended — §31, B46.** Present exactly when this frame's `destSlot` is not the one the entry first carried (§9.2). The relay reads only `count` to correlate a queue-full refusal. The receiver does not act on it. The other fields remain informational. |
 | `reroute.fromSlot` | number (int) | yes | The `destSlot` this entry originally carried. |
-| `reroute.count` | number (int) | yes | How many times this entry has been re-routed, starting at 1. Bounded by `maxReroutes` (§9.2). |
+| `reroute.count` | number (int) | yes | How many times this entry has been re-routed, starting at 1. It MUST be positive when `reroute` is present. Absence means count 0. It is bounded by `maxReroutes` (§9.2) and is relay-visible only for `refusedAttempt` correlation (amended — §31, B46). |
 | `reroute.proof` | string enum | yes | What authorized it: `"never_sent"`, `"relay_never_forwarded"`, `"peer_refused"`. Nothing else may appear, because nothing else is proof (§9.2). |
 | `reroute.atMs` | `timestampMs` | yes | When the sender rewrote the destination. Informational. |
 
@@ -1743,7 +1800,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1790,7 +1847,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1892,7 +1949,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1920,14 +1977,17 @@ genome long after the migration completed (§10).
 | `class` | string enum | yes | `"transient"` or `"permanent"`. An unrecognised `code` is handled as its stated `class` — never switch on `code` without a default branch. |
 | `message` | string | yes | Human-readable. Never parsed. |
 | `retryAfterMs` | number (int) | no | Present on transient codes. |
-| `neverForwarded` | bool | no | **New in M4.** Present exactly on **relay-generated** NACKs. `true` means: *this relay process has forwarded no frame carrying this `migrationId` to any peer, ever, during `relaySessionId`.* `false` means it cannot say that — either it did forward one, or the record does not cover the question. It is a **proof, not a hint** (§5.2, §9.2). |
-| `relaySessionId` | `uuid` | no | Present exactly when `neverForwarded` is. The session the statement is scoped to. A sender **MUST** compare it against the session it recorded on the journal entry before treating `neverForwarded: true` as proof. |
+| `neverForwarded` | bool | no | **New in M4; amended — §31, B46.** Present on proof-bearing relay non-delivery NACKs. It retains its migration-wide 4.1 meaning. `true` means this relay session forwarded no attempt with this `migrationId`. `false` means it forwarded at least one attempt or cannot say. A 4.2 queue refusal can carry `false` with an exact `refusedAttempt` after an earlier accepted attempt. Graceful drain omits the field. |
+| `relaySessionId` | `uuid` | no | Present exactly when `neverForwarded` is. The statement applies only to this relay session. Graceful drain omits it. A sender MUST match it to the current journal attempt before using either proof form. |
+| `refusedAttempt` | object | no | **New in `contract-b/4.2`** (added — §31, B46). Present only on queue-full `NOT_FORWARDED`. It identifies the payload that queue admission rejected. Older relays omit it. Missing correlation is never proof. |
+| `refusedAttempt.destSlot` | number (int) | yes | The rejected payload's `destSlot`. |
+| `refusedAttempt.rerouteCount` | number (int) | yes | The rejected payload's `reroute.count`, or 0 when its `reroute` object was absent. |
 
 | Code | Class | Sent by | Cause |
 |---|---|---|---|
 | `SLOT_VACANT` | **permanent** | relay | `destSlot` names **no reservation at all** — released, handed to nobody, or never issued. Slot numbers are never reused (§2), so this world never returns and no retry can ever succeed. **Reclassified in M4**: it was `transient` in M3, when a vacant slot and an offline peer were the same answer. |
 | `PEER_OFFLINE` | transient | relay | **New in M4; amended — §28, B43.** The reservation exists, but its peer has no live connection. This also covers a target connection that stops before atomic queue acceptance. This is M3's `SLOT_VACANT` case, given its own name so the permanent one can mean what it says. |
-| `NOT_FORWARDED` | transient | relay | **New in M4; amended — §28, B43.** The relay declined the frame before its attempted-write boundary. The destination migration queue was full by frames or retained bytes, or graceful drain had closed admission. The slot exists and its peer can be live. Queue-full does **not** close that peer. |
+| `NOT_FORWARDED` | transient | relay | **New in M4; amended — §31, B46.** The relay declined the frame before its attempted-write boundary. A full destination queue includes attempt proof and does not close that peer. Graceful drain includes no proof fields and starts no source-side walk. |
 | `PEER_UNKNOWN` | transient | relay | `destPeer` is not connected. Applies to `MIGRATION_ACK`, `MIGRATION_NACK` and the genome messages, which route on a peer id rather than a slot. |
 | `NOT_A_MEMBER` | permanent | relay | The sender is a read-only subscriber and may not send migrations (§5.1). |
 | `OVERLOADED` | transient | sidecar | `inboundQueueMax` reached. Under M4 this is also what a **paced backlog** produces when it stops draining (`contract-a.md` §7.5). |
@@ -1939,6 +1999,14 @@ genome long after the migration completed (§10).
 | `MALFORMED_MESSAGE` | permanent | sidecar | A `data` field failed validation. |
 | `SHUTTING_DOWN` | transient | either | The sender is draining. |
 
+**Queue-full `NOT_FORWARDED` has one bounded source action** (amended — §31, B46). The action
+requires `neverForwarded` to be present, but its migration-wide value can be true or false.
+`refusedAttempt.destSlot`, `refusedAttempt.rerouteCount`, and `relaySessionId` MUST match the
+current journal attempt. A receipt for that session and destination contradicts the proof.
+Missing or stale correlation, a session mismatch, or a contradictory receipt leaves the entry
+and its scheduler unchanged. Graceful-drain `NOT_FORWARDED` has no proof fields and has the
+same result.
+
 **A sidecar MUST NOT send `MIGRATION_NACK` after it has durably journaled the payload.**
 This is what makes a sidecar NACK a *definitive* statement that custody never moved, and it
 is what makes both the bounce-back and the M4 re-route safe. It is the single most
@@ -1949,13 +2017,11 @@ violate by adding a NACK to a later failure path. See §9.
 not wait behind ordinary durable ACKs or outbound payloads. The relay has paced the arrival
 that caused it, so §3.3 bounds the aggregate reply rate.
 
-**A relay NACK is a statement about one attempt; `neverForwarded` is the statement about the
-migration.** A sender that reads `SLOT_VACANT` on a **re-routed** attempt learns nothing about
-the first one: the earlier attempt may have been forwarded to a peer that then died silently.
-This is exactly the trap Risk 2 describes, and the boolean is the only thing that gets a sender
-out of it (§5.2, §9.2). **The rule is unchanged and its reach narrowed** (amended — §25, B37):
-a conforming sender no longer makes a third attempt at the same destination, so the attempts
-this row separates are the re-routes and nothing else.
+**A relay NACK describes one attempt, but the legacy boolean describes the migration.** That
+difference is why 4.2 adds `refusedAttempt` (amended — §31, B46). An earlier destination can
+have accepted or peer-refused the migration before a later transport queue refuses it. In that
+mixed history, `neverForwarded` is false while the new attempt proof is exact. A missing attempt
+object must remain conservative. It does not authorize a re-route.
 
 **The class change on `SLOT_VACANT` is a wire semantic change and needs care in review.** An
 M3 sidecar reads it as transient and retries; an M4 sidecar reads it as permanent and stops
@@ -1970,7 +2036,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1995,7 +2061,7 @@ clock; it now waits out `forwardTimeoutMs` and is recorded lost, §9.3):
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -2012,6 +2078,34 @@ clock; it now waits out `forwardTimeoutMs` and is recorded lost, §9.3):
   }
 }
 ```
+
+A queue-full refusal after an earlier accepted or peer-refused attempt can carry
+`neverForwarded: false` and still prove this exact transport attempt:
+
+```json
+{
+  "protocol": "contract-b/4.2",
+  "type": "MIGRATION_NACK",
+  "messageId": "32fd8d96-8ac2-4c38-a39e-08d369b8547e",
+  "sentAt": 1785693840250,
+  "data": {
+    "migrationId": "0f6c8b3e-2c41-4a8f-9d1e-7a3b5c9d0e12",
+    "sourcePeer": "",
+    "destPeer": "peer-lan-slot4",
+    "code": "NOT_FORWARDED",
+    "class": "transient",
+    "message": "slot 7 has a full paced migration transport queue",
+    "retryAfterMs": 15000,
+    "neverForwarded": false,
+    "relaySessionId": "c8177a34-90bd-4f51-8e02-4d6b915ca7e3",
+    "refusedAttempt": { "destSlot": 7, "rerouteCount": 2 }
+  }
+}
+```
+
+The sender acts only if session, destination, and count match its current attempt. A graceful
+drain uses the same code but omits all three proof fields. It does not consume a destination or
+start the first-refusal deadline.
 
 ### 6.9 `GENOME_REQUEST` — archive or sidecar → sidecar, forwarded
 
@@ -2038,7 +2132,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -2084,7 +2178,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -2123,7 +2217,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -2182,13 +2276,13 @@ about the migration.
 | One per forward | A **re-route** of the same `migrationId` produces another receipt. A sender that holds two receipts under one `migrationId` has written the frame twice; that is a fact about its own re-routes, never a duplicate organism (the `migrationId` is preserved and the destination deduplicates — §6.6). **A conforming sender since §25's B37 writes a frame once per DESTINATION and never re-forwards**, so a second receipt names a second destination — and a sender older than that set may still produce several under one destination, which this rule has always covered. |
 | What the sender does with it | **Records it against the journal entry, durably** (§7.4, §9.2), and nothing else. It sends no answer. A receipt changes no handoff state on its own: an entry that is `sent` stays `sent`. |
 | Not delivery | It is **not** `MIGRATION_ACK`. Custody moves when the destination sidecar journals and its mod acknowledges (§9.1). A receipt says the relay accepted a local attempted write. |
-| Not proof of non-delivery | And it can never become one. `neverForwarded` (§6.8) is still the only statement that authorizes a re-route, and a receipt only ever makes the safe answer *more* certain: an entry with a receipt was forwarded, so it stays where it is (amended — §25, B37: *so it holds*, before that set removed the hold). |
+| Not proof of non-delivery | And it can never become one. A matched relay proof or peer NACK (§6.8, §9.2) can authorize a re-route. A receipt only makes the safe answer more certain: this session and destination were accepted, so the current attempt stays `sent` (amended — §31, B46). |
 | Best effort, and the failure direction is safe | A receipt the sender never sees costs nothing but the certainty it would have added — the entry stays `sent`, which is where the receipt would have kept it anyway. The relay **MUST NOT** delay, block or fail a forward on account of a receipt it could not send. |
 | Bounded | A receipt uses the bounded ordinary/control queue, not the destination migration queue (amended — §28, B43). If the sender's ordinary queue is full, the receipt is dropped, not queued indefinitely. See the row above for why that is safe. |
 
 ```json
 {
-  "protocol": "contract-b/4.1",
+  "protocol": "contract-b/4.2",
   "type": "FORWARD_RECEIPT",
   "messageId": "3f2a71b8-4c09-4d6e-9a15-8b0c7e42d391",
   "sentAt": 1785693732104,
@@ -2201,8 +2295,9 @@ about the migration.
 }
 ```
 
-**What it changes for a sender, in one sentence:** the sender's own journal now records that a
-hop was forwarded and under which session, so a relay restart no longer takes the fact with it
+**What it changes for a sender, in one sentence:** the sender's own journal records that the
+current attempt was accepted, with its destination and session. A relay restart cannot take
+that fact with it
 — **but a relay restart still takes the relay's ability to answer for the *absence* of a
 forward**, which is the direction that matters for a re-route, and §9.2 is unchanged in every
 particular.
@@ -2458,7 +2553,7 @@ rather than lifting it.
 | sidecar | `<data-dir>/peer-id` | One line, the `peerId` | The peer becomes a stranger and takes a second slot, stranding its old one. Generated once, on first start, if absent. |
 | sidecar | `<data-dir>/slot` | One line, the granted slot number | Only the `preferredSlot` hint; rule 1 recovers the slot from `peerId` anyway. |
 | sidecar | `<data-dir>/position` | One line, `col,row` | Only the `preferredPosition` hint, and only useful to a peer that lost its `peerId` too. Written on every granted `SECTOR_GRANT`. |
-| sidecar | journal | Custody, tombstones, the recorded `destSlot`, **the handoff state, the `relaySessionId` of the first hand-off, `sentAt`, the re-route count, and `ackedUpstream` for completed inbound entries** (§6.7, §9.2; `sentAt` replaced *the accrued hold time* — §25, B37; amended — §28, B43) | Organisms and pending upstream ACKs. This is the one file whose loss is not recoverable, and D2 accepts that as loss. |
+| sidecar | journal | Custody, tombstones, the recorded `destSlot`, **the handoff state, the current committed attempt's `relaySessionId` and `sentAt`, the re-route count, the tried/refused slot set, the first proven-refusal deadline, and `ackedUpstream` for completed inbound entries** (§6.7, §9.2; amended — §31, B46) | Organisms and pending upstream ACKs. This is the one file whose loss is not recoverable, and D2 accepts that as loss. |
 
 The relay writes `ring.json` **before** it answers a `SECTOR_CLAIM` that created or changed a
 reservation — an answered grant that is not on disk can hand the same slot to two peers across
@@ -2470,8 +2565,15 @@ journal: losing them costs a placement mix-up, never an organism.
 **The journal's new fields are load-bearing and must survive a restart.** §9.2 depends on
 every one of them: the handoff state says whether custody may have moved, the `relaySessionId`
 scopes the proof, `sentAt` is when `forwardTimeoutMs` starts running (amended — §25, B37: *the
-accrued hold time is what a bounded hold counts*), and the re-route count bounds the re-route. A sidecar that reconstructs any of them from memory at startup has lost
-the safety property, not just the bookkeeping.
+accrued hold time is what a bounded hold counts*), and the re-route count bounds the re-route.
+Since B46, the refused-slot set prevents a restart from trying the same transport queue again.
+The first proven-refusal deadline bounds the full chain and MUST NOT restart on a re-route,
+retry, reconnect, restart, or journal compaction. The sidecar MUST persist the refused
+transition, the rejected slot, the tried-slot set, and that deadline in one journal update.
+That transition clears the old attempt's `relaySessionId` and `sentAt`. The next durable send
+commit writes fresh values for the new attempt. A pending or refused entry has no active loss
+deadline. A sidecar that reconstructs any of these values from memory has lost the safety
+property, not only the bookkeeping (amended — §31, B46).
 
 **`ackedUpstream` is equally load-bearing for completed inbound entries** (added — §28,
 B43). `false` means the source is still waiting for this sidecar's durable ACK. Compaction
@@ -2553,7 +2655,7 @@ a relay that reads journals. The division is therefore:
 |---|---|
 | What happens to the map? | The relay command's own pre-act report. |
 | Who has already LOST organisms addressed to this slot? | `PEER_STATUS.slots[].stats.lostForwardTotal` (§6.3.1) — visible on the status page and in `ringstat` for every peer at once (amended — §25, B37: this row read `stats.heldDepth` before that set, and there is no held depth). |
-| **Which** entries are unresolved, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It prints each entry's `migrationId`, `entityId`, `destSlot`, handoff state, when it was forwarded and how long is left before it is recorded lost. |
+| **Which** entries are unresolved, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It always prints each entry's `migrationId`, `entityId`, `destSlot`, and handoff state. A `sent` entry also prints its send time and remaining loss time. Pending and refused entries print neither. Since 4.2, the durable first-refusal deadline bounds a queue-refusal walk, but this command does not print that deadline. |
 
 The operator therefore makes one decision with the facts in view; the facts simply come from
 two places, because custody does.
@@ -2708,11 +2810,11 @@ and accepts the residual duplication risk it names (§9.3).~~ **Superseded — �
 same owner on 2026-08-17: *"we don't mind much on bibites being lost, we can see migrating as
 dangerous, and then there wouldn't be duplicates while making things simpler."*
 
-**MIGRATION IS DANGEROUS, and that is the design rather than a defect in it.** An organism is
-handed to its destination **once**. It is never handed over again, no clock accrues against it,
-and it never comes home on a timer. If it does not arrive, it is **lost** — recorded, counted
-and readable on the map (§6.3.1, `lostForwardTotal`), and gone. The exception §9.3 used to
-carry, and every mechanism that existed to bound it, are removed together.
+**MIGRATION IS DANGEROUS, and that is the design rather than a defect in it.** Custody can move
+only once. A source may offer another destination only after exact evidence that the current
+attempt moved no custody. It never repeats an ambiguous attempt, and it never comes home on an
+ambiguous timer. If an accepted attempt does not arrive, it is **lost** — recorded, counted,
+readable on the map (§6.3.1, `lostForwardTotal`), and gone.
 
 ### 9.1 The chain
 
@@ -2722,9 +2824,10 @@ mod A            sidecar A                relay             sidecar B           
   ├─────────────────►│ hash + journal+fsync │                   │                  │
   │ MIGRATE_OUT_ACK  │  (handoff: pending)  │                   │                  │
   │◄─────────────────┤                      │                   │                  │
-  │  (destroys)      │ MIGRATION_PAYLOAD    │                   │                  │
+  │  (destroys)      │ journal sent + fsync │                   │                  │
+  │                  │ MIGRATION_PAYLOAD    │                   │                  │
   │                  ├─────────────────────►│ queue + record    │                  │
-  │                  │  (handoff: sent)     ├╌╌► archive (copy) │                  │
+  │                  │                      ├╌╌► archive (copy) │                  │
   │                  │                      ├─ identity-paced ─►│ journal + fsync  │
   │                  │                      │                   │  custody moves   │
   │                  │                      │                   │ MIGRATE_IN       │
@@ -2750,6 +2853,15 @@ The ordinary `MIGRATION_ACK` arrow also uses the sidecar's shared capacity pace.
 pending state survives deferral and restart (§6.7). Immediate NACKs and tombstone re-ACKs use
 the bounded control path instead.
 
+**The source commits before it enqueues** (amended — §31, B46). Encoding, connection checks,
+and pace admission happen while the entry is still safe to retry. For a bounded refusal chain,
+the sidecar checks the absolute first-refusal deadline again after preparation. If preparation
+crossed it, the entry bounces before any send commit. Otherwise, the sidecar records
+`handoff: sent`, the current `relaySessionId`, and the current `sentAt` durably. Only after that
+fsync can it offer the prepared frame to the socket writer. A crash or enqueue error after the commit is an ambiguous
+send. The entry stays `sent` and can only receive an answer or become `lost`. This ordering can
+lose an organism, but it cannot duplicate one.
+
 ### 9.2 The handoff state, and when a journaled hop may be re-routed
 
 **The problem, stated exactly.** A journaled hop names the slot it recorded. That slot goes
@@ -2765,23 +2877,28 @@ Every outbound journal entry therefore carries a **handoff state**, durable (§7
 
 | State | Meaning | Custody may have moved? |
 |---|---|---|
-| `pending` | Journaled. Never written to a live relay connection. | **No** |
-| `sent` | Written to a live relay connection, no terminal answer yet. Carries the `relaySessionId` in force at that write — **and, since `contract-b/4.0`, the relay's own `FORWARD_RECEIPT` for it when one arrived** (amended — §22, B26) — **and `sentAt`, the instant `forwardTimeoutMs` runs from** (added — §25, B37). The receipt does not change the state; it is the evidence that the state is right. | **Yes — unknowably** |
+| `pending` | Journaled, with no ambiguous send. The entry is new, or an exact refusal proved that its last attempt reached no receiver. | **No** |
+| `sent` | Durably committed to the current attempt's one socket enqueue, with no terminal answer yet (amended — §31, B46). Carries that attempt's `relaySessionId`, `sentAt`, and any matching `FORWARD_RECEIPT`. The local enqueue can fail after this commit. The sidecar cannot distinguish that failure from an accepted frame after a crash. The receipt does not change the state; it confirms that the state is right. | **Yes — unknowably** |
 | ~~`held`~~ | ~~`sent`, and the destination is observed dark. The hold clock accrues here and nowhere else.~~ **REMOVED — §25, B37.** A dark destination is no longer a state change: there was nothing left for the state to authorize once the re-forward and the timeout bounce were gone. A journal written before that set replays a `held` entry as **`sent`**, which is what it always meant. | — |
 | `refused` | A statement arrived that proves no custody moved. | **No** |
 | `done` | `MIGRATION_ACK` received. Becomes a tombstone. | It moved, and completed. |
 | `lost` | `sent`, and no terminal answer arrived within `forwardTimeoutMs` (added — §25, B37). **Terminal.** The entry becomes a tombstone, `stats.lostForwardTotal` increments, and the organism is gone. It is a tombstone rather than a deletion so that a late `MIGRATION_ACK` is still recognised (§9.3). | **Yes — and unknowably forever** |
 
-**B43 adds no handoff state.** After the source writes the payload to its live relay connection,
-the entry is `sent`. The relay may then hold the accepted frame in its destination transport
+**B43 adds no handoff state.** After the source commits to its one enqueue attempt, the entry
+is `sent`. The relay may then hold the accepted frame in its destination transport
 queue. A queue loss never returns that source entry to `pending` and never authorizes a re-route
 (§5.2, amended — §28, B43).
+
+**B46 keeps B45's local ordering and narrows its proof.** The source records `sent` before the
+socket enqueue. An exact attempt-scoped queue refusal can return it to the safe refusal path.
+A local enqueue error cannot do so because it is not a relay proof (amended — §31, B46).
 
 Transitions:
 
 ```
 journal write ─────────────────────► pending
-pending ── written to relay ───────► sent      (record relaySessionId and sentAt)
+pending/refused ── durable send commit ───────► sent      (record relaySessionId and sentAt)
+sent commit ── one socket enqueue attempt ───► sent      (no second attempt on failure)
 sent ── MIGRATION_ACK ─────────────► done
 sent ── proof of no custody ───────► refused
 sent ── forwardTimeoutMs elapsed ──► lost      (§9.3)
@@ -2794,10 +2911,11 @@ three are answers from somebody else, and the third is a deadline that resolves 
 rather than an organism. Nothing re-sends the frame; nothing brings it home. The removed
 arrows were `sent → held`, `held → sent`, `held → refused` and `held → bounced home`.
 
-**A bounce is a terminal action, not a state.** The entry leaves the outbound journal, becomes
-an inbound delivery into this peer's own mod (§9.4), and leaves a tombstone behind. **Both
-remaining bounces are cases where no custody moved** — a payload refusal, and an entry that
-reached nobody and has no lane — so a bounce is never a guess (§9.4).
+**A bounce is a terminal action, not a state.** The entry leaves the outbound journal and becomes
+an inbound delivery into this peer's own mod (§9.4). **Every remaining automatic bounce is a
+case where no custody moved** — a payload refusal, an entry that reached nobody and has no lane,
+or an exact `NOT_FORWARDED` chain that reached its bound. Thus, an automatic bounce is never a
+guess (§9.4; amended — §31, B46).
 
 **A late `MIGRATION_ACK` against a `lost` tombstone is GOOD NEWS, and it must still be read.**
 It says the organism did arrive and its acknowledgement outran the deadline. **Exactly one
@@ -2813,23 +2931,29 @@ throws that signal away. ~~It is the accepted duplication case of §9.3 announci
 |---|---|
 | The entry is `pending` | The frame was never handed to anybody. The sender's own record is sufficient. |
 | A **sidecar-generated** `MIGRATION_NACK` with a peer-local code — `OVERLOADED`, `SIM_SIZE_MISMATCH`, `MOD_ABSENT` | §6.8 forbids a sidecar to NACK after it has durably journaled, so a NACK *is* the receiver stating it took no custody. |
-| A **relay-generated** `MIGRATION_NACK` with `neverForwarded: true` **and** a `relaySessionId` equal to the one recorded on the entry | The relay has forwarded no frame with this `migrationId` to anyone during a session that covers the entry's whole life (§5.2). |
+| A relay `SLOT_VACANT` or `PEER_OFFLINE` with `neverForwarded: true`, a matching `relaySessionId`, and no same-session receipt | The migration-wide proof is exact while it remains true. Any receipt for that relay session contradicts it. |
+| A queue-full relay `NOT_FORWARDED` with a matching `refusedAttempt` and `relaySessionId`, plus no same-attempt receipt (added — §31, B46) | The relay rejected this exact `(destSlot, rerouteCount)` before queue acceptance. `neverForwarded` must be present for mixed-version discrimination, but its migration-wide value can be false after an earlier attempt. |
 
 | **Not** evidence | Why not |
 |---|---|
 | Silence, of any duration | The exact shape of the dangerous case. |
 | `neverForwarded: true` with a **different** `relaySessionId` | The relay restarted; it cannot speak for what the previous process forwarded. |
-| A relay NACK carrying `neverForwarded: false` | The relay either did forward this migration once, or cannot say. Both mean the same thing to a sender: no proof. |
-| A relay NACK carrying **no** `neverForwarded` field at all | A conforming relay always sets it on a NACK it generated (§6.8), so a missing field is a defect or a frame that came from somewhere else. Treat a missing proof as no proof, and log it. |
-| The `code` alone, on any single attempt | Every relay `code` describes **that attempt**. Attempt 1 may well have been forwarded, and only the boolean speaks about the whole migration. |
+| `SLOT_VACANT` or `PEER_OFFLINE` with `neverForwarded: false`, or `NOT_FORWARDED` with false but no exact attempt correlation | The legacy migration-wide statement is not proof. A queue-full NACK can still prove its exact attempt only when every B46 correlation field matches. |
+| A relay NACK carrying **no** `neverForwarded` field | It is proof-free. This is required for graceful drain and can come from an older relay. Treat it as no proof. |
+| Queue-full `NOT_FORWARDED` with no `refusedAttempt` | A 4.1 relay cannot identify the attempt. This is safe mixed-version degradation and authorizes no action. |
+| A stale or mismatched `refusedAttempt` | A delayed NACK can describe an older destination or count. It cannot move the current attempt. |
+| The `code` alone, on any single attempt | A code does not correlate a delayed answer to the current journal state. |
 | `SLOT_VACANT` on its own | It proves the destination will never return, which is a reason to stop retrying — not a statement that nothing was ever delivered there. |
 | **The absence of a `FORWARD_RECEIPT`** (added — §22, B26) | A receipt that was never sent, was dropped from a full outbound queue, or was lost with the session is indistinguishable from a forward that never happened. **A missing receipt is silence, and silence is never proof in this contract.** The receipt is evidence in exactly one direction: holding one means the frame *was* forwarded. Not holding one means nothing at all. |
+| A proof contradicted by a `FORWARD_RECEIPT` for the same session and destination (amended — §31, B46) | The statements cannot both be true for this attempt. Safety keeps the entry `sent`. A receipt for another attempt is not a contradiction. |
 
 **The rule, as the design states it** (`m4_considerations.md`, Question 2):
 
 | Journal entry state | Evidence | Action |
 |---|---|---|
-| Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` / `NOT_FORWARDED` carrying a matched `neverForwarded: true` | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
+| Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` carrying matched proof | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
+| Destination transport refused before acceptance | Queue-full relay `NOT_FORWARDED` with a matching `refusedAttempt` and `relaySessionId`, plus no receipt for that session and destination (amended — §31, B46) | In one durable update, record `refused`, the destination in the tried set, and the first refusal deadline if it does not exist. Clear the old attempt's session and `sentAt`. **Continue the same-axis walk after that destination.** Try the next compatible, untried slot. Bounce once when no such slot remains, `maxReroutes` is reached, or the first deadline expires. |
+| Relay graceful drain | Proof-free `NOT_FORWARDED` | Keep the entry `sent`. Do not add a tried slot, start a refusal deadline, re-route, or bounce. Wait for reconnect or the normal loss outcome. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED`, `SIM_SIZE_MISMATCH` or `MOD_ABSENT` | **Re-route.** The receiver stated it took no custody, and another slot accepts the same organism. |
 | Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. **`VERSION_UNSUPPORTED` is the first of B31's four kept gates** (added — §22, B31): the importing mod refuses a payload whose game version it has no dialect for, permanently, and D22's diagnostic-only rule does **not** retire it. `contract-a.md` **§21, A48** owns the mod-side statement — it keeps that document's §9.2 `VERSION_UNSUPPORTED` and its close `4002` as two of the four named exceptions, and states the diagnostic-only rule for `MIGRATE_OUT.gameVersion`, `parents[].gameVersion` and `MIGRATE_IN.gameVersion`; this row is the Contract B consequence and it is unchanged. |
 | Forwarded, then silence | none | **Nothing, and then a record** (amended — §25, B37). The frame is **not** re-forwarded, the entry is **not** re-routed and the organism is **not** brought home. At `forwardTimeoutMs` the entry becomes a `lost` tombstone and `stats.lostForwardTotal` increments (§9.3). ~~Hold, then bounce: retry the recorded `destSlot` on the retry cadence — flat toward a dark destination, backing off exponentially toward a live one (§14, B5, B8).~~ |
@@ -2839,10 +2963,11 @@ throws that signal away. ~~It is the accepted duplication case of §9.3 announci
 | Rule | Statement |
 |---|---|
 | The key never changes | The `migrationId` is preserved. A re-routed frame that races a late delivery is deduplicated at whichever peer sees it second (§6.6 step 1) — this is what makes a re-route safe even when the proof was, against all the rules above, wrong. |
-| The axis never changes | An entry that left through `E` stays on the east row walk, and one that left through `N` stays on the north column walk. For a never-sent/dark destination it uses the current `effective(edge)`. For a peer-local refusal from a live destination it **continues the walk after that destination**, skipping the source and every slot that has already refused this migration. The refused-slot set is durable with the journal so a restart cannot turn spillover into a loop. `exitEdge`, `exitPosition`, `velocity` and `heading` are untouched. |
-| Only `destSlot` is rewritten | Plus the informational `reroute` block (§6.6). `timestamp`, the annex and the body are the same bytes. |
-| It needs a lane | With no effective neighbour on that axis there is nowhere to re-route to. The entry waits, and bounces home after `bounceTimeoutMs` — M3's rule, unchanged, and now reached only when route-around has no answer either. |
-| It is bounded | `reroute.count` increments on each rewrite and **MUST NOT** exceed `maxReroutes` (4). Beyond that the entry bounces home. An organism circling a broken axis is a symptom, not a delivery strategy. |
+| The axis never changes | An entry that left through `E` stays on the east row walk, and one that left through `N` stays on the north column walk. For a never-sent or dark destination it uses the current `effective(edge)`. For a peer-local refusal or an exact queue refusal, it **continues the walk after that destination**. It skips the source and every tried or refused slot. The durable set prevents restart and compaction from creating a loop (amended — §31, B46). `exitEdge`, `exitPosition`, `velocity`, and `heading` are untouched. |
+| Only `destSlot` is rewritten | Plus the `reroute` block (§6.6). The relay reads only its `count` for queue-refusal correlation. The receiver does not act on it. `timestamp`, the annex, and the body are the same bytes. |
+| It needs a lane | With no effective neighbour on that axis there is nowhere to re-route to. An ordinary never-sent entry waits and bounces after `bounceTimeoutMs`. An exact queue-refusal chain bounces as soon as a complete current map proves that every compatible same-axis destination was tried. If the current map cannot prove exhaustion, it waits only for the first refusal deadline (amended — §31, B46). |
+| It is bounded | `reroute.count` increments on each rewrite and MUST NOT exceed `maxReroutes` (4). A present count MUST be positive. The tried set prevents a destination from repeating. The monotonic count makes every `(destSlot, rerouteCount)` pair unique inside the refusal chain. Beyond the bound, the entry bounces home. The chain also has one deadline: the first proven refusal time plus `bounceTimeoutMs`. The deadline and tried set MUST NOT reset on reroute, retry, reconnect, restart, or compaction (amended — §31, B46). |
+| A later send ends the safe bounce path for that attempt | Before the sidecar offers an original or re-routed payload to its socket writer, it durably records `sent` with fresh session and `sentAt` values. A crash or enqueue error after that record MUST NOT retry or bounce that attempt. The historical refusal deadline can remain, but it cannot move a `sent` entry. Only a matched refusal of this attempt, an answer, or the normal loss path applies (amended — §31, B46). |
 | It is reported | Each re-route is a log line and a metric, and the frame carries its own `reroute.proof`. Part 2 of the exit test requires every in-flight entry to state which answer it took and why. |
 
 **Why `pending` is worth a state of its own, and it matters MORE since §25's B37.** Without
@@ -2869,15 +2994,15 @@ the choice costs a restart and not a release.
 retry that fed it, the automatic bounce it ended in and the one duplication case at-most-once
 carried. This section is what replaced them, and it is shorter because it does less.
 
-An entry in `sent` is a forwarded organism with no proof of non-delivery. **The sender does
-nothing about it.** It cannot tell a delivery whose acknowledgement was lost from a delivery
+An entry in `sent` is an organism committed to one enqueue attempt with no proof of non-delivery.
+**The sender does nothing about it.** It cannot tell a delivery whose acknowledgement was lost from a delivery
 that never happened, it will not guess in either direction, and there is no action available
 to it that is safe in both cases. It waits for an answer, and if none comes it writes the
 organism off.
 
 | Rule | Statement |
 |---|---|
-| The deadline | `forwardTimeoutMs`, default **300 000 ms (5 minutes)** (amended — §27, B42; 24 hours until 2026-08-19), measured from `sentAt` — the wall clock at the **first and only** write of this entry to a live relay connection (§7.4). |
+| The deadline | `forwardTimeoutMs`, default **300 000 ms (5 minutes)** (amended — §27, B42; 24 hours until 2026-08-19), measured from `sentAt` — the wall clock at the durable commitment to the **current or most recent attempt's** socket enqueue (§7.4; amended — §31, B46). A proven refusal clears this value before a pending alternate is listed or replayed. |
 | **Nothing is re-sent** | A `sent` entry **MUST NOT** be forwarded again, to its recorded `destSlot` or to any other. One organism, one hand-over. The re-forward is what the bounded hold existed to bound, and removing it removes the bound's reason to exist. |
 | **Nothing comes home** | At the deadline the sidecar **MUST NOT** deliver the organism to its own mod. That bounce was the accepted duplication case; there is no accepted duplication case. |
 | At the deadline | The entry becomes a **`lost` tombstone**: `handoff: lost`, `status: done`, the reason recorded on the entry. The sidecar increments `stats.lostForwardTotal` (§6.3.1) and logs **one loud line at error level**, naming the `migrationId`, the `entityId`, the `destSlot`, the exit edge and whether a `FORWARD_RECEIPT` was ever held for it. |
@@ -2899,14 +3024,14 @@ already written off. **Exactly one organism exists** — nothing was bounced hom
 |---|---|---|
 | The destination took custody, died before its ACK, and never returned | Held 24 h, then bounced home. One organism, and it survived. | **Lost.** |
 | The destination took custody, died before its ACK, and returned after the timeout | Held 24 h, bounced home, then the far peer replayed its journal: **two organisms**. The accepted exception. | One organism, at the destination. The record says lost and a late ACK corrects it. |
-| A `sent` entry left by a sender that crashed between the write and the relay's answer | The retry re-asked, the relay answered `neverForwarded: true`, and the entry re-routed within a retry interval (§14, B5). | **Lost.** The retry was the proof's only conduit, and it is gone. |
+| A `sent` entry left by a sender that crashed after its durable send commit and before the relay's answer | The retry re-asked, the relay answered `neverForwarded: true`, and the entry re-routed within a retry interval (§14, B5). | **Lost unless the exact current-attempt proof was already journaled.** The sender does not retry after restart. A crash after enqueue but before the NACK remains `sent` (amended — §31, B46). |
 | A `pending` entry, or one refused by a statement | Re-routed. | **Re-routed, unchanged.** No custody moved, so nothing can duplicate. |
 
 **The third row is the real cost of this set and it is named rather than buried.** B5's whole
 argument was that the retry is how a non-delivery proof reaches a sender that already forwarded,
 so removing the retry makes `sent → refused → re-route` unreachable for an entry a *previous
 process* wrote. The window is narrow — the relay answers a declined forward in milliseconds, so
-only a crash between the write and the answer lands in it — and the owner took the trade
+only a crash between the durable send commit and the answer lands in it — and the owner took the trade
 knowingly on 2026-08-17, against the simplicity of a system with no duplication case in it at
 all. **A conforming implementation MUST NOT re-add the retry to recover it.**
 
@@ -2935,7 +3060,8 @@ guess and can never make a second organism (`contract-a.md` §13, A6, amended in
 
 | Situation | Origin sidecar's action |
 |---|---|
-| `MIGRATION_NACK` received, any code | **Bounce**, or re-route first where §9.2's table says so. A NACK is only ever sent before durable custody (§6.8), so it proves the organism is not at the destination. |
+| A sidecar `MIGRATION_NACK`, or a relay NACK with exact proof | **Bounce**, or re-route first where §9.2's table says so. A sidecar NACK is sent only before durable custody. A relay NACK proves no custody only under §9.2's exact current-attempt rules. |
+| An exact queue-refusal chain exhausts compatible untried same-axis destinations, reaches `maxReroutes`, or reaches its first refusal deadline (amended — §31, B46) | **Bounce once.** The tried set and first deadline are durable. A repeated or stale NACK, reconnect, restart, or compaction cannot create another bounce or restart the bound. |
 | The forward never reached a live peer — the relay link is down, or `destSlot` is vacant — for longer than `bounceTimeoutMs`, **and route-around has no lane to offer** | **Bounce.** The frame was never handed to anyone. |
 | The forward reached a live peer and no answer came back — destination **live** or **dark**, it makes no difference | **Nothing, then a `lost` record at `forwardTimeoutMs`** (§9.3). Not a re-forward, not a re-route, not a bounce. ~~Hold and re-forward toward a live destination, backing off to `forwardRetryMaxMs` (§14, B8); hold with §9.3's clock toward a dark one and bounce at the timeout.~~ **Superseded — §25, B37.** |
 | An operator runs `--release-inflight <id> bounce` on an entry in `sent` | **Bounce**, and it is the only bounce in this table that may duplicate an organism. The command prints the risk before it acts (§9.3). |
@@ -2965,9 +3091,10 @@ for everyone else (`m4_considerations.md`, Question 4):
    liveness change.
 2. **Replay the inbound entries.** Every un-acknowledged `MIGRATE_IN`, in journal order,
    through the rate limit (`contract-a.md` §7.5).
-3. **Re-evaluate the outbound entries under §9.2.** A `pending` entry re-routes; a `sent`
-   entry keeps its `sentAt` and waits for an answer it will probably not get (amended — §25,
-   B37: it used to retry its recorded destination and keep its accrued hold).
+3. **Re-evaluate the outbound entries under §9.2.** A `pending` entry re-routes. An exact
+   refusal chain keeps its tried set and first deadline (amended — §31, B46). A `sent` entry
+   keeps its `sentAt` and waits for an answer it will probably not get (amended — §25, B37:
+   it used to retry its recorded destination and keep its accrued hold).
 4. **Reassert custody against the mod.** A new `sessionId` triggers `contract-a.md` §7.4.
 
 **No backlog waits at a returning peer, and less than ever** (amended — §25, B37). Its
@@ -3260,15 +3387,15 @@ crossing" is now one of those claims.
 | `wireCompression` | `on` | relay | **New after `contract-b/4.0`** (added — §24, B35). Whether this relay **offers** `permessage-deflate` on a Contract B upgrade (§3). `--ws-compression`, `MULTIVERSE_RELAY_WS_COMPRESSION`. It is a knob for D20's reason — the transfer bill is a number only the operator can see — and it is a **complete** off switch on its own, because the extension needs both ends: a relay that stops offering it returns the whole map to uncompressed frames as each peer reconnects, with no participant action. **A client has no matching knob and MUST NOT be given one**, for the reason B23 gives its TLS verification none: nothing in a participant's hands measures this. |
 | `statsIntervalMs` | `5000` | sidecar | Minimum spacing between stats-bearing `PING`s (§6.11). |
 | `statsStaleMs` | `30000` | archive | Age at which a `stats` block renders as unknown rather than as state (§10.1). |
-| `forwardRetryMs` | `5000` | sidecar | Cadence at which an entry that has **not yet reached a live relay connection** is offered to one again (amended — §25, B37). It never re-sends a frame that was written: a written frame is written once (§9.3). |
+| `forwardRetryMs` | `5000` | sidecar | Cadence at which an entry with no durable send commitment is offered again (amended — §31, B46). It never retries a `sent` attempt, including after a socket enqueue error. A stale NACK MUST NOT postpone a pending current attempt. |
 | ~~`forwardRetryMaxMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** It capped a doubling backoff on the re-forward toward a live destination (§14, B8), and there is no re-forward to back off. |
-| `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it is bounced home (§9.2, §9.4). Unchanged: no custody moved, so this bounce cannot duplicate. |
+| `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it bounces home (§9.2, §9.4). It is also the one absolute deadline for an exact queue-refusal chain (amended — §31, B46). That deadline starts at the first proven refusal and never resets. Graceful drain does not start it. |
 | `migrationAckTimeoutMs` | `30000` | sidecar | Informational deadline for `MIGRATION_ACK`. **Purely informational since §25, B37**: expiry re-forwards nothing, and it never bounces (§9.4). |
 | `forwardTimeoutMs` | `300000` | sidecar | **New in `contract-b/4.1`** (added — §25, B37; default lowered from `86400000` — §27, B42). How long a forwarded entry waits for its answer before the sender records it **lost** — 5 minutes since 2026-08-19; it carried `holdTimeoutMs`'s 24 hours until the owner cut it (§27). It is a **wall clock measured from `sentAt`** and a bookkeeping deadline: nothing is re-sent at it and nothing comes home, so a sender that slept through it records a loss that had already happened (§9.3). |
 | ~~`holdTimeoutMs`~~ | ~~`86400000`~~ | — | **REMOVED — §25, B37**, with the bounded hold it timed. Its 24-hour value lives on in `forwardTimeoutMs`, which does something entirely different with it. |
 | ~~`holdAccrualFlushMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** There is no accrual to flush. |
-| `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home instead (§9.2). **A NEGATIVE value turns re-routing off entirely** (added — §25, B37): an entry that would have re-routed bounces home instead, which makes migration a single hop with no second destination. It is the owner's switch for that choice, and it costs a restart rather than a release. |
-| `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId`, in memory, for the `neverForwarded` proof — 48 hours. ~~Twice the default hold.~~ It is no longer sized against anything on the sending side (§25, B37); what it covers is a re-routed entry's later attempts and a sidecar older than B37 still retrying, and it matches `archiveDedupWindowMs` for the same reason (§25, B38). |
+| `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home (§9.2). The bound remains hard during an exact queue-refusal walk (amended — §31, B46). A NEGATIVE value turns re-routing off entirely (added — §25, B37). |
+| `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId` for the legacy migration-wide `neverForwarded` value. The attempt-scoped 4.2 queue proof comes from the rejected payload and does not weaken this record (amended — §31, B46). |
 | `archiveDedupWindowMs` | `172800000` | archive | **New in `contract-b/4.1`** (added — §25, B38). How long the archive remembers a record's §5.1 duplicate key — 48 hours. A duplicate that arrives inside the window is refused; one that arrives later is appended a second time. The retention is a **floor**: at least this, at most twice it, and the memory is at most two windows of keys. `--dedup-window`, `MULTIVERSE_ARCHIVE_DEDUP_WINDOW`. |
 | `inboundQueueMax` | `64` | sidecar | Shared with `contract-a.md` §10. Also the ceiling a paced backlog hits, which is what turns pacing into upstream backpressure (`contract-a.md` §7.5). |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Shared with `contract-a.md` §10. |
@@ -3318,10 +3445,12 @@ milliseconds. It writes `journal.log.tmp`, fsyncs it, renames it over
 `journal.log` and syncs the directory, which is the same discipline `contract-a.md`
 §11.1 already required of `Open`; a crash before the rename leaves the original whole and a
 crash after it leaves a journal that replays to the identical state. **Compaction
-must preserve `sentAt`** (§9.3, amended — §25 B37; it read `accruedHoldMs` before that set):
-`forwardTimeoutMs` is measured from it, and a rewrite that dropped it would silently restart
-every unresolved forward's deadline in the
-rig.
+must preserve `sentAt` for a `sent` entry** (§9.3, amended — §31 B46).
+`forwardTimeoutMs` is measured from it. A proven refusal or reroute MUST clear it before
+compaction. A pending entry MUST NOT list or replay the prior attempt's loss deadline.
+
+Compaction MUST also preserve the exact-refusal tried-slot set and first deadline (amended —
+§31, B46). Dropping either field can retry a full destination or restart a bounded chain.
 
 **What is still unbounded, and deliberately so:** the archive's
 `migrations.jsonl` ledger and its genome store are the record of what happened
@@ -3672,16 +3801,15 @@ way to tell a stalled migration from a refused one.
 | Frame | Fanned out? | Why |
 |---|---|---|
 | `MIGRATION_PAYLOAD`, `MIGRATION_ACK`, `MIGRATION_NACK` the relay **routes** | yes | Unchanged from M3. |
-| `MIGRATION_NACK` the relay **generates in answer to a `MIGRATION_PAYLOAD`** — `SLOT_VACANT`, `PEER_OFFLINE`, `NOT_FORWARDED` | **yes** | These three carry `neverForwarded` and `relaySessionId` (§5.2, §6.8). They are the only record a subscriber can have of a hop that reached no sidecar, and without them the status page cannot say why a lane is not flowing. |
+| `MIGRATION_NACK` the relay **generates in answer to a `MIGRATION_PAYLOAD`** — `SLOT_VACANT`, `PEER_OFFLINE`, `NOT_FORWARDED` | **yes** | Proof-bearing answers carry `neverForwarded` and `relaySessionId` (§5.2, §6.8). A 4.2 queue refusal also carries `refusedAttempt`. Graceful-drain `NOT_FORWARDED` is proof-free. Each answer records why the relay declined that attempt (amended — §31, B46). |
 | `NOT_A_MEMBER` — a payload from a subscriber | no | A **role** error about a connection. No migration was ever in question, and the offending frame was not forwarded to anybody. |
 | `PEER_UNKNOWN` — a routed `ACK`/`NACK` whose `destPeer` has gone | no | A **routing** error about a frame the archive already has a copy of, from the fan-out of the original. |
 
-**And the archive's dedup key for a NACK is the pair `migrationId` + `code`**, not
-`migrationId` alone. One migration legitimately produces several *different* refusals on its
-way to a lane — `PEER_OFFLINE` on the first attempt, then `NOT_FORWARDED` on the retry that
-finally collected the proof (B5). Those are two facts about two attempts. Deduplicating them
-into one would erase the sequence, and the sequence is the evidence a re-route has to be read
-against. A `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` still dedup on `migrationId` alone.
+**The archive's legacy NACK key is `migrationId` + `code`, not `migrationId` alone.** One
+migration can produce several different refusals. A field-present 4.2 queue refusal also adds
+its refused destination and reroute count to the key (amended — §31, B46). Thus, two queue
+refusals in one bounded walk remain separate facts. A proof-free drain and every older NACK keep
+the legacy key. A `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` still deduplicate on `migrationId`.
 
 **The key must be built in exactly one place**, and writing this amendment is what found the
 reason. The archive had two: the live path composed `migrationId` + `code`, while the restart
@@ -4342,7 +4470,7 @@ whatever the operator's shell redirect caught.
 | Rule | Statement |
 |---|---|
 | The journal compacts on a timer | A sidecar MUST rewrite its journal to the entries it still holds at least every `journalCompactMinutes`, not only at `Open`. The rewrite uses the same crash-safe discipline `contract-a.md` §11.1 already requires — scratch file, fsync, rename, directory sync — so a crash before the rename leaves the original whole and a crash after it leaves a journal that replays to the identical state. |
-| The deadline survives it | A compaction MUST preserve `sentAt` on every entry (§9.3, amended — §25 B37; it read `accruedHoldMs` before that set). `forwardTimeoutMs` is measured from it precisely so a restart can neither restart an unresolved forward's deadline nor resolve it early; a rewrite that dropped it would give every one of them a fresh day in the rig without a single log line. |
+| The deadline survives it | A compaction MUST preserve `sentAt` on every `sent` entry (§9.3, amended — §31 B46). `forwardTimeoutMs` is measured from it, so restart cannot move an unresolved attempt's deadline. A proven refusal or reroute clears the old value. A pending or refused entry MUST NOT replay the prior attempt's loss deadline. |
 | The purge record stays | A completed inbound entry with `ackedUpstream: false` is not expired and is not purgeable (amended — §28, B43; §6.7). For every eligible tombstone, `PurgeExpired` still appends a durable purge record even though the next compaction would erase it. `contract-a.md` §11.1 makes every journal write durable before it counts and keeps tombstones out of memory-only state. The saving does not justify an exception. A purge record is one short line per eligible tombstone. The growth term was each migration's payload-bearing `create` record. |
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
@@ -4360,8 +4488,8 @@ out of. A cleanup on the error path costs one syscall on a path already failing.
 **Enforced by:** the **sidecar**, for scheduling the compaction outside its
 custody lock and for treating a failed reopen after the rename as a reason to
 stop journaling rather than to keep appending to an unlinked file; the
-**journal**, for the rewrite's crash safety and for carrying `sentAt`
-through it; the **archive**, for the same all-or-nothing append on its ledger and
+**journal**, for the rewrite's crash safety, for carrying a sent attempt's `sentAt`, and for
+preserving its durable clearing on refusal or reroute; the **archive**, for the same all-or-nothing append on its ledger and
 for reading past a damaged line rather than stopping at one it can never rewrite;
 **every process**, for bounding a log it was given the path of; the
 **genome store**, for its error path and its sweep; and the **operator**, for
@@ -5473,13 +5601,13 @@ was built for. The rule changed.
 
 | Rule | Statement |
 |---|---|
-| **A forwarded frame is forwarded once** | Once a `MIGRATION_PAYLOAD` has been written to a live relay connection, a sidecar **MUST NOT** write it again — not to the recorded `destSlot`, not to any other slot, not on any cadence, not after any restart. The entry is `sent` and only an **answer** moves it. |
+| **A committed attempt is enqueued once** | Once a sidecar durably commits `sent` for one `(destSlot, rerouteCount)` attempt, it MUST NOT enqueue that attempt again. A matched proof can select a new alternate. Every cadence, handler, custody tick, and restart uses the current durable state (amended — §31, B46). |
 | **Silence resolves to a loss, never to an action** | An entry in `sent` with no terminal answer within `forwardTimeoutMs` becomes a **`lost` tombstone**: the organism is gone, `stats.lostForwardTotal` increments, and one error-level line names it (§9.3). Nothing is delivered to any mod. |
 | **The `held` state is removed** | A dark destination is no longer a state change for a forwarded entry. A journal written before this set replays a `held` entry as **`sent`**, which is what it always meant; an implementation that replayed it as an unknown string would leave the entry in no case of its own state machine. |
-| **Nothing accrues** | `holdTimeoutMs` and `holdAccrualFlushMs` are removed from §12, and `accruedHoldMs` from the journal entry. `sentAt` replaces it: a plain wall-clock instant, durable, written at the one write. A wall clock is safe **because expiry no longer moves an organism** — it closes a record, so a sender that slept through the deadline records a loss that had already happened. |
-| **Proof-based re-routing STAYS, in full** | §9.2's evidence table is untouched. A `pending` entry re-routes on the sender's own record; a `refused` entry re-routes under a peer-local NACK or a matched relay `neverForwarded`. **A statement is not silence**, and re-routing under one cannot duplicate an organism because the only party that could hold a second copy has said it holds none. Removing it as well would lose an organism every time a destination was merely busy — the ordinary case — for no gain. |
+| **Nothing accrues** | `holdTimeoutMs` and `holdAccrualFlushMs` are removed from §12, and `accruedHoldMs` from the journal entry. `sentAt` is a plain wall-clock instant for the current or most recent committed attempt. It is durable and written before socket enqueue. A proven refusal or reroute clears it before a pending alternate is recorded (amended — §31, B46). A wall clock is safe **because expiry no longer moves an organism** — it closes a record, so a sender that slept through the deadline records a loss that had already happened. |
+| **Proof-based re-routing STAYS, in full** | A `pending` entry re-routes on the sender's own record. A `refused` entry re-routes under a current peer NACK or matched relay proof. **A statement is not silence.** B46 requires exact queue-attempt correlation and a same-attempt receipt check (§31). |
 | **And it has an off switch, for an owner who wants one** | `maxReroutes` (§12) takes a **NEGATIVE** value meaning *never re-route*: an entry that would have re-routed bounces home instead. It is a knob rather than a code path precisely so this choice can be revisited without a release. |
-| **The remaining bounces are all proof-based** | §9.4's table keeps three rows and loses the timeout: a payload refusal, an entry that reached nobody and has no lane after `bounceTimeoutMs`, and the operator's `--release-inflight`. **No automatic bounce can duplicate an organism any more.** |
+| **The remaining bounces are all proof-based** | §9.4 loses the ambiguous timeout. It keeps a payload refusal, an entry that reached nobody and has no lane, and the operator's `--release-inflight`. B46 adds the bounded exact queue-refusal exhaustion path. **No automatic bounce can duplicate an organism.** |
 | **`--release-inflight` becomes the only duplication path** | It stays, unchanged in shape. Its printed risk text **MUST** say that it is the only way left to duplicate an organism on this map, rather than one of two ways (§9.3). |
 | **A late `MIGRATION_ACK` is good news and MUST still be read** | Against a `lost` tombstone it means the organism arrived and its answer outran the deadline. Exactly one organism exists. The sidecar logs it, counts it and names the remedy — raise `forwardTimeoutMs` — and `duplicateSuspected` is removed, because the case it counted cannot occur. |
 | **The stats block: one field added, two retired** | `lostForwardTotal` is added (§6.3.1). `heldDepth` and `bouncedTimeoutTotal` are **retired**: a `contract-b/4.1` sidecar stops sending them, a reader renders them unknown, and **their names are reserved and MUST NOT be reused**. |
@@ -5491,7 +5619,7 @@ alive now end with it lost:
 1. The destination took custody, died before its acknowledgement, and never came back.
 2. The destination took custody, died, and came back **before** the old 24-hour timeout — under
    the old rule the sender's retry would have found it. There is no retry.
-3. A `sent` entry left by a sender that **crashed between the write and the relay's answer**.
+3. A `sent` entry left by a sender that **crashed between its durable send commit and the relay's answer**.
    §14's B5 is the full argument: the retry was the proof's only conduit for an entry a
    previous process wrote, so `sent → refused → re-route` is unreachable for that entry. The
    window is milliseconds wide and the consequence is one organism.
@@ -5803,7 +5931,7 @@ load-bearing properties.
 | Identity rate | Physical migration writes are evenly spaced at `R = max(1, floor(F / 8))`. The identity owns that pace across reconnect overlap. |
 | Bounded control priority | Ordinary and control frames flow while no migration is due. After one becomes due, at most seven ready ordinary or control frames pass it. The migration then reserves the next write. |
 | Nonblocking source | The source handler performs final routing and queue admission without waiting for the destination pace. It creates no later source job. |
-| Safe full queue | A full migration queue returns `NOT_FORWARDED` without creating or updating a forwarding record. It does not close the destination. |
+| Safe full queue | A full migration queue returns `NOT_FORWARDED` without creating or updating a forwarding record. It does not close the destination. B46 adds exact attempt correlation for the bounded source-side progress path (§31). |
 | Attempted-write boundary | The relay first rejects a missing, empty, or invalid `migrationId` as malformed. For a valid frame, final target validation, forwarding-record insertion, and queue acceptance are atomic. Acceptance then triggers the best-effort receipt and archive fan-out. |
 | No later decision | An accepted queued frame never transfers to a replacement, re-routes, or produces a later NACK. Disconnect or process exit can lose it, and the forwarding record keeps the conservative ambiguity. |
 | Ordinary close | A connection error or replacement drains ordinary frames, but drops queued migrations promptly. At most one already-selected migration write can finish. |
@@ -5882,3 +6010,99 @@ no set and no version change.
 and honest fields.
 
 **Enforced by the operator:** the format-3 rebuild and the zero-overflow, zero-guard result.
+
+## 30. Exact transport refusal makes bounded progress (`contract-b/4.1`, 2026-08-23)
+
+Twelve public samples isolated a source-side wedge. Slot 7 was live, mod-connected, populated,
+and open on all four edges. It reported positive lane rates for six 30-second samples. It then
+reported zero on all four lanes for six samples while `custodyDepth` stayed at 64.
+
+The sidecar diagnostic reported `pendingAckDepth: 0`, `pacedDepth: 0`, and
+`unresolvedDepth: 0`. The journal was valid. Thus, the 64 entries were safe refused or pending
+outbound entries. They were not sent entries, a durable ACK drain, or an arrival pacing queue.
+
+**B45** gives that exact state one bounded progress rule. It also closes the local crash gap at
+the socket enqueue boundary.
+
+### B45 — Proven `NOT_FORWARDED` walks once, then bounces once (§3.3, §5.2, §6.8, §7.4, §9, §12, §28 B43)
+
+| Rule | Statement |
+|---|---|
+| **The proof is exact** | ~~The NACK MUST carry migration-wide `neverForwarded: true`, a matching relay session, and no same-session receipt.~~ **Narrowed — §31, B46.** Queue refusal now requires attempt correlation. The migration-wide value alone cannot prove a mixed-history attempt. |
+| **The first refusal is atomic** | In one durable journal update, the source records `refused`, the refused destination in the tried set, and the first refusal deadline. The deadline is the first refusal time plus `bounceTimeoutMs`. |
+| **Progress follows the original axis** | The source keeps the `migrationId`, body, annex, `exitEdge`, geometry, velocity, heading, and original timestamp. It walks after the refused destination and selects the next live, mod-connected, compatible, untried slot on that axis. Only `destSlot` and the `reroute` block change. Since B46, the relay reads only `reroute.count` for refusal correlation. |
+| **One destination, one try per chain** | The durable tried set includes relay transport refusals and peer-local refusals in the same chain. A reconnect, restart, or compaction MUST NOT remove a slot from it. |
+| **One deadline** | A reroute, retry, reconnect, restart, or compaction MUST NOT restart the first deadline. If the current map cannot prove that all alternatives are exhausted, the source waits only until this deadline. |
+| **The other bounds stay hard** | The source bounces when the compatible untried walk is exhausted, when `maxReroutes` is reached, or when the first deadline expires. A repeated NACK or custody tick MUST NOT create a second bounce. |
+| **Send commitment precedes enqueue** | Encoding, connection checks, and pace admission happen first. The source then fsyncs `sent`, `relaySessionId`, and `sentAt`. Only then does it offer the prepared frame to the local socket writer. A crash or enqueue error after the commit leaves the entry `sent`. It MUST NOT retry or bounce. It can only receive an answer or become `lost` at `forwardTimeoutMs`. |
+
+**Why the deadline is `bounceTimeoutMs`.** This chain has exact proof that custody did not move.
+It is the same safe class as a never-sent entry with no lane. Twenty seconds bounds the full
+attempt, not each destination. A per-destination deadline would multiply the wedge by the row or
+column length.
+
+**Why `NOT_FORWARDED` is separate from other relay proofs.** A full transport queue can remain
+live and selected as the current effective neighbour. Sending the entry back to that same queue
+does not make route progress. `SLOT_VACANT` and `PEER_OFFLINE` already cause the normal effective
+neighbour selection. They do not start this tried-destination chain.
+
+**What this costs.** The conservative pre-enqueue commit can record a migration as lost when the
+local writer rejects it before any byte leaves. Retrying that entry would reopen the crash window:
+the earlier process could have enqueued the frame before it died. At-most-once chooses possible
+loss over possible duplication.
+
+**Version.** No message, field, enum, code, close code, schema, URL path, or relay routing input
+changes. The new journal fields are private sidecar state. §4 answers neither major nor minor.
+The identifier stays at **`contract-b/4.1`**, and `/contract-b/v4` does not move. Contract A
+takes no set and no version change.
+
+**Enforced by the source sidecar:** proof validation, the durable update, same-axis selection,
+the one deadline, the hard reroute bound, the pre-enqueue commit, and one terminal bounce.
+
+## 31. Queue refusal proof identifies one attempt (`contract-b/4.2`, 2026-08-23)
+
+B45 used the migration-wide `neverForwarded` value as proof for `NOT_FORWARDED`. That works for
+the first attempt only. After any accepted attempt, the value stays false. A later queue can still
+refuse a different destination before acceptance. A peer refusal between two transport refusals
+has the same mixed-history shape.
+
+The proof must therefore identify the rejected payload, not the migration's full history. B46
+adds that correlation and preserves B45's bounded progress rule.
+
+### B46 — Queue refusal is correlated to the current attempt (§3.3, §4, §5, §5.1, §5.2, §6.6, §6.8, §6.12, §7.4, §9, §12, §30 B45)
+
+| Rule | Statement |
+|---|---|
+| **The wire addition is optional** | A queue-full relay `NOT_FORWARDED` adds `refusedAttempt: {destSlot, rerouteCount}`. `rerouteCount` is 0 when the payload has no `reroute` object. An older reader ignores it. An older relay omits it. |
+| **The legacy value stays migration-wide** | The same NACK keeps `neverForwarded` and `relaySessionId` for 4.1 readers. `neverForwarded` can be false after an earlier accepted attempt. Its value does not override an exact 4.2 attempt proof. Its presence distinguishes a proof-bearing queue refusal from graceful drain. |
+| **Only queue-full carries attempt proof** | A graceful-drain `NOT_FORWARDED` omits `refusedAttempt`, `neverForwarded`, and `relaySessionId`. Drain does not consume a destination, start a first-refusal deadline, re-route custody, or mass-bounce the map. |
+| **The source matches current durable state** | The NACK MUST be relay-generated `NOT_FORWARDED`. Its session, destination, and reroute count MUST match the current journal attempt. The source MUST reject missing, malformed, stale, delayed, duplicate, or mismatched correlation. Rejection leaves the entry and its scheduler unchanged. |
+| **A current receipt contradicts the proof** | A `FORWARD_RECEIPT` for the same relay session and destination keeps the entry `sent`. A receipt for an earlier destination or another session does not contradict this attempt. |
+| **A peer NACK is also current-attempt data** | `sourcePeer` MUST identify the peer that holds the current destination slot. A delayed NACK from an earlier destination cannot refuse, delay, reroute, or bounce the current attempt. |
+| **The refusal update is atomic and durable** | The source records `refused`, adds the current destination to the tried set, preserves or creates the one absolute deadline, and clears the old attempt's `relaySessionId` and `sentAt` in one update. Restart and compaction preserve that result. A pending alternate lists no stale loss deadline. |
+| **Pre-4.2 refused journals recover conservatively** | A replayed `refused` entry can carry the older migration-wide relay proof with no first-refusal deadline. It also retains the prior attempt's session and `sentAt`. That proof permits one retry of the recorded destination. The durable send commit replaces both stale values. Only a later exact 4.2 queue refusal starts the distinct-destination deadline and tried-set walk. |
+| **No stale clone can send** | Before a pending or refused entry becomes `sent`, the source refreshes its current journal state while holding the sidecar scheduler lock. A stale snapshot from `Create` cannot commit a second send after another custody tick advanced the entry. |
+| **Correlation pairs cannot repeat** | A present `reroute.count` MUST be a positive integer. Each rewrite increments it. The durable tried set prevents a destination from repeating inside the bounded refusal chain. Therefore, each `(destSlot, rerouteCount)` pair is unique in that chain. A zero, negative, or malformed present count closes the source with `4003`. |
+| **The relay reads one new value** | For `MIGRATION_PAYLOAD` only, the relay decodes `reroute.count` with `sourcePeer` and `destSlot`. It uses the count only to echo queue-refusal correlation. It does not route on it. `fromSlot`, `proof`, `atMs`, the body, lineage, and species remain opaque. |
+| **The absolute deadline wins over slow preparation** | Encoding, connection checks, and pace admission happen before the send commit. The source then checks the first-refusal deadline again. If it expired during preparation, the source bounces once and enqueues nothing. Otherwise it durably records fresh current-attempt session and `sentAt` values before enqueue. |
+| **The original bounds remain hard** | Migration id, body, axis, geometry, and original timestamp do not change. The first deadline and tried set never reset. Alternate exhaustion, `maxReroutes`, or deadline expiry bounces once. A sent attempt cannot bounce from the historical refusal deadline. |
+| **Archive keys preserve the sequence** | A field-present queue-full `NOT_FORWARDED` deduplicates on `migrationId + code + destSlot + rerouteCount`. A legacy, drain, or other NACK keeps the existing `migrationId + code` key. Live ingest and replay use the same rule. |
+
+**Mixed-version behavior and rollout.** A 4.1 source ignores `refusedAttempt` and continues to use
+the conservative migration-wide rule. A 4.2 source connected to a 4.1 relay receives no attempt
+object and leaves a mixed-history queue refusal `sent`. This is safe degradation. The bounded
+queue-refusal progress feature is unavailable until the relay is 4.2. Deploy the relay first,
+then sidecars. Do not raise `minContractVersion`; this feature does not require a fleet eviction.
+
+**Version.** `refusedAttempt` is an additive OPTIONAL field on an existing message. The relay's
+payload projection reads one additive nested field. No type, enum, code, close code, or path is
+removed or replaced. §4 answers minor. The identifier moves to **`contract-b/4.2`**, and
+`/contract-b/v4` does not move. Contract A takes no set and no version change.
+
+**Enforced by the relay:** positive count validation, queue-only echo, proof-free drain, atomic
+queue refusal, and byte-identical forwarding.
+
+**Enforced by the source sidecar:** current-attempt matching, receipt contradiction, durable state
+refresh, one deadline, no repeated destination, pre-enqueue commit, and one terminal bounce.
+
+**Enforced by the archive:** field persistence and identical attempt-aware live and replay keys.

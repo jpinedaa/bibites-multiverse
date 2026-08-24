@@ -18,7 +18,7 @@ without knowing which platform it was on would be guessing.
 
 | The test | Who applies it | What it decides |
 |---|---|---|
-| **The wire version** — `contract-b/4.1` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
+| **The wire version** — `contract-b/4.2` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
 | **The game version** — the build of The Bibites this machine runs, from Steam on Windows or from itch.io on Linux | **Your own machine**, through this matrix and the installer's check | Whether a mod and sidecar build exists that works with your game at all |
 
 The mod is a Harmony patch against a named game assembly, so the second test cannot be
@@ -30,15 +30,15 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected through shadow bring-up and controlled adaptive enforcement; initial enforcement verification had zero capacity sheds and discarded journal bytes |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction promoted the retained adaptive state to enforcement, every world retained its slot with mod and relay connected, and host verification passed |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. The candidate sidecar passed the full Go and race suites and its Windows cross-build on 2026-08-24; its production rollout is pending |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. The candidate sidecar passed the full Go and race suites and its Linux amd64 and arm64 cross-builds on 2026-08-24; its production rollout is pending |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
-same weight and the table does not pretend they do:** the Windows row covers a four-day continuous
-six-world run. The Linux row is one rehearsal session on one machine on one day. A build that is
-not in the table is not "probably fine": it is untested, and the installer treats untested as
-unsupported.
+same weight and the table does not pretend they do:** the Windows row covers five controlled worlds
+on the release machine. The Linux row covers six hosted worlds and a guarded runtime activation.
+A build that is not in the table is not "probably fine": it is untested, and the installer treats
+untested as unsupported.
 
 **What makes the Linux row trustworthy for the thing the mod actually does** is not session
 length. The mod is Harmony patches against named types, and a full decompile of both builds,
@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.8` |
 | `BibitesMultiverse.dll` SHA-256 | `c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc` |
 | `bibites-mod/` tree | `27baa92d9c66c043465d4dac3e736c25dcb2e8a0` |
-| `cmd/sidecar` source commit | `94a71b2b40978fb28f5a6393cd19e8919619a9a8` |
-| `cmd/sidecar` input digest | `4f4469bb93f13b86df9e8e55ef2939d675589f94dbd55ffc741b95a8906e3a04` |
-| Tested on | 2026-08-23 |
+| `cmd/sidecar` source commit | `642629292d2a2bc7a3dd539ea64e7db5363b689f` |
+| `cmd/sidecar` input digest | `58677ac6e6aaf69f365d1f258cdf0582241181bb2bd880609ca7fa7ed96f627d` |
+| Tested on | 2026-08-24 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -213,14 +213,12 @@ changes far more often than the mod, so a re-record often re-attests only the si
 the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
 as the `evidence` sentence says which leg proved what — and it must, including when the run
 happened on a host whose game or mod is not the one this matrix names. Today's record re-attests
-the sidecar half after the control-response pacing change. The full uncached Go and race suites
-passed. Linux and Windows vet passed. Targeted regressions covered fan-in, durable ACK priority,
-reconnects, replacement, fairness, and bounded drain. The Windows and Linux `amd64` sidecar
-cross-builds produced valid PE and static ELF binaries. On 2026-08-23, the Windows build ran in
-five local worlds and the Linux build ran in six hosted worlds. Every world rejoined its reserved
-slot, reported the mod and relay connected, and retained zero discarded journal bytes. The cloud
-host's installed sidecar matched the candidate hash, and the Windows installation matched its
-published package hash. The unchanged plugin values still rest on the 2026-08-17 test.
+the sidecar after the exact queue-refusal progress change. The full uncached Go and race suites,
+host and Windows vet, formatting, every shipped cross-build, the 64-entry pre-4.2 upgrade
+regression, and the release and deploy fixture suites passed. The Contract B 4.2 production
+rollout has not run yet. The unchanged plugin was rebuilt byte-identically and matches the plugin
+in the release machine's game. Its live Windows and Linux evidence remains the controlled
+deployment from 2026-08-23.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -268,16 +266,16 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.3.6",
-  "published": "2026-08-23",
+  "release": "0.3.7",
+  "published": "2026-08-24",
   "testedBuild": {
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
     "bibitesModTree": "27baa92d9c66c043465d4dac3e736c25dcb2e8a0",
-    "sidecarSourceCommit": "94a71b2b40978fb28f5a6393cd19e8919619a9a8",
-    "sidecarInputsSha256": "4f4469bb93f13b86df9e8e55ef2939d675589f94dbd55ffc741b95a8906e3a04",
-    "testedOn": "2026-08-23",
-    "evidence": "On 2026-08-23 candidate 94a71b2 passed the full uncached Go suite and vet, the fixed/adaptive controller, durable refusal replay, directional spillover, and three-live-world integration regressions, a release .NET build, and CGO-disabled Windows and Linux amd64 sidecar cross-builds that produced a valid PE and static ELF; the same mod 0.6.8 plugin and sidecar then ran in five Windows worlds and six hosted Linux worlds, all eleven retained their reserved slots with mod and relay connected through adaptive-shadow bring-up and the later controlled adaptive-enforcement promotion, with zero capacity sheds and zero discarded journal bytes at initial enforcement verification, and the guarded cloud runtime transaction and host verification completed successfully; not exercised: the Go race suite because this WSL image has no CGO compiler, crash replay, disk failure, private-map behavior, or a forced rollback"
+    "sidecarSourceCommit": "642629292d2a2bc7a3dd539ea64e7db5363b689f",
+    "sidecarInputsSha256": "58677ac6e6aaf69f365d1f258cdf0582241181bb2bd880609ca7fa7ed96f627d",
+    "testedOn": "2026-08-24",
+    "evidence": "On 2026-08-24 candidate 6426292 passed the full uncached Go and race suites, host and Windows vet, formatting, every shipped Windows/Linux amd64 and Linux arm64 cross-build, the 64-entry pre-4.2 refusal-upgrade regression, stale and repeated refusal races, crash/reconnect/compaction regressions, all 295 real-game Linux install/uninstall checks, and the release and deploy fixture suites; the release .NET build produced the unchanged mod 0.6.8 plugin byte-identical to both the recorded build and the plugin installed in the release machine game; not yet exercised in production: the Contract B 4.2 relay-first rollout, forced rollback, disk failure, or a private-map runtime"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -293,8 +291,8 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.1",
-      "tested": "five-world deployment on 2026-08-23; every world retained its slot with mod and relay connected through adaptive-shadow bring-up and controlled adaptive enforcement, with zero capacity sheds and discarded journal bytes at initial enforcement verification"
+      "contractB": "contract-b/4.2",
+      "tested": "the unchanged plugin ran in five worlds on 2026-08-23; the candidate sidecar passed the full Go and race suites and its Windows cross-build on 2026-08-24; its production rollout is pending"
     },
     {
       "gameVersion": "0.6.3.1",
@@ -307,8 +305,8 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.1",
-      "tested": "six hosted worlds on 2026-08-23; guarded runtime activation promoted retained adaptive state to enforcement, host verification passed, and every world retained its slot with mod and relay connected"
+      "contractB": "contract-b/4.2",
+      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23; the candidate sidecar passed the full Go and race suites and its Linux amd64 and arm64 cross-builds on 2026-08-24; its production rollout is pending"
     }
   ]
 }

@@ -474,7 +474,7 @@ func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer)
 			if e.SentAt.IsZero() {
 				fmt.Fprintf(stdout, "    never written to a live relay connection: no custody has moved\n")
 			} else {
-				fmt.Fprintf(stdout, "    forwarded %s   recorded lost in %s   (it is NOT re-sent and\n",
+				fmt.Fprintf(stdout, "    send committed %s   recorded lost in %s   (it is NOT re-sent and\n",
 					e.SentAt.UTC().Format(time.RFC3339), e.LostIn.Truncate(time.Second))
 				fmt.Fprintf(stdout, "    does not come home: migration is at-most-once)\n")
 			}

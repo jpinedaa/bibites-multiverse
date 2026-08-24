@@ -172,6 +172,10 @@ const (
 	// before MIGRATE_OUT_ACK is sent — the single most dangerous instant in
 	// the custody chain (D2).
 	FaultPostJournal = "post-journal"
+	// FaultPreForward blocks after the sidecar fsyncs HandoffSent and before it
+	// offers MIGRATION_PAYLOAD to the socket writer. A restart must treat this
+	// conservative boundary as sent and must not try the migration again.
+	FaultPreForward = "pre-forward"
 	// FaultPostForward blocks after MIGRATION_PAYLOAD has been handed to the
 	// relay.
 	FaultPostForward = "post-forward"

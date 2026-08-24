@@ -828,10 +828,10 @@ func New(cfg Config) (*Archive, error) {
 // lock; the Locked suffix says which lock its callers would need.
 func (a *Archive) replayRawLocked(rec Record, agg bool, now time.Time) {
 	if rec.MigrationID != "" {
-		// Rebuild the key the live path uses, not a lookalike. A NACK dedups on
-		// migrationId+code (§14, B7), so replaying it under migrationId alone
-		// would never match and every re-copied NACK would be recorded a second
-		// time after a restart.
+		// Rebuild the key the live path uses, not a lookalike. A legacy NACK
+		// dedups on migrationId+code (§14, B7). A field-present 4.2 queue refusal
+		// also includes destSlot and rerouteCount (§31, B46). Replaying either
+		// under migrationId alone would record a re-copied NACK after restart.
 		// THE REPLAY ONLY REBUILDS THE WINDOW, not the record (§25, B38). A key
 		// whose record is older than the window is not inserted at all: the live
 		// path would not have refused a copy of it either, and inserting it would
@@ -846,7 +846,7 @@ func (a *Archive) replayRawLocked(rec Record, agg bool, now time.Time) {
 		if at := time.UnixMilli(rec.RecordedAt); rec.RecordedAt > 0 &&
 			now.Sub(at) < a.cfg.DedupWindow {
 			a.seen.add(a.seen.fingerprint(rec.Type,
-				dedupKey(rec.Type, rec.MigrationID, rec.Code)), at)
+				dedupKey(rec.Type, rec.MigrationID, rec.Code, rec.RefusedAttempt)), at)
 		}
 	}
 	if rec.Type != RecordMigration {
@@ -1435,17 +1435,19 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 	// same code from another peer; peer matching in rejectHopAttempt ensures an
 	// old rejection cannot erase the newer destination attempt.
 	a.rejectHopAttempt(nack, time.Now().UnixMilli())
-	if a.markSeen(RecordNack, dedupKey(RecordNack, nack.MigrationID, nack.Code)) {
+	if a.markSeen(RecordNack,
+		dedupKey(RecordNack, nack.MigrationID, nack.Code, nack.RefusedAttempt)) {
 		return true
 	}
 	rec := Record{
-		Type:        RecordNack,
-		RecordedAt:  time.Now().UnixMilli(),
-		MigrationID: nack.MigrationID,
-		SourcePeer:  nack.SourcePeer,
-		DestPeer:    nack.DestPeer,
-		Code:        nack.Code,
-		Message:     nack.Message,
+		Type:           RecordNack,
+		RecordedAt:     time.Now().UnixMilli(),
+		MigrationID:    nack.MigrationID,
+		SourcePeer:     nack.SourcePeer,
+		DestPeer:       nack.DestPeer,
+		Code:           nack.Code,
+		Message:        nack.Message,
+		RefusedAttempt: nack.RefusedAttempt,
 	}
 	a.appendAndCount(rec, nack.MigrationID)
 	return true
@@ -1453,13 +1455,17 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 
 // dedupKey builds the §5.1 duplicate key for one record type. It is the single
 // definition both the live path and the restart replay use, so the two cannot
-// drift apart. A MIGRATION_NACK dedups on the pair migrationId + code, because
-// one migration legitimately produces several different refusals on its way to
-// a lane and each one is a separate fact (§14, B7). Everything else dedups on
-// migrationId alone.
-func dedupKey(typ, migrationID, code string) string {
+// drift apart. A legacy MIGRATION_NACK dedups on migrationId + code. From
+// contract-b/4.2, each field-present NOT_FORWARDED attempt is a distinct fact,
+// so its destination and reroute count extend that key. Everything else dedups
+// on migrationId alone.
+func dedupKey(typ, migrationID, code string, attempt ...*contractb.MigrationAttempt) string {
 	if typ == RecordNack {
-		return migrationID + "/" + code
+		key := migrationID + "/" + code
+		if code == contractb.NackNotForwarded && len(attempt) > 0 && attempt[0] != nil {
+			key += fmt.Sprintf("/%d/%d", attempt[0].DestSlot, attempt[0].RerouteCount)
+		}
+		return key
 	}
 	return migrationID
 }

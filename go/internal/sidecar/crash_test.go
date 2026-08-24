@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"multiverse/internal/contracta"
+	"multiverse/internal/journal"
 	"multiverse/internal/modtoken"
 	"multiverse/internal/peercred"
 )
@@ -195,6 +196,61 @@ func TestCrashCustodyExactlyOnce(t *testing.T) {
 	for _, fault := range []string{FaultPostJournal, FaultPostForward} {
 		t.Run(fault, func(t *testing.T) { runCrashCustody(t, fault) })
 	}
+}
+
+// TestCrashAfterSentCommitBeforeEnqueueDoesNotResend fixes the narrow boundary
+// between durable custody state and the local socket queue. The killed process
+// never enqueues the prepared frame. After restart, replay still sees sent and
+// does not manufacture a second attempt.
+func TestCrashAfterSentCommitBeforeEnqueueDoesNotResend(t *testing.T) {
+	relaySrv := startRelay(t)
+	dataDir := t.TempDir()
+	childA := startChildSidecar(t, dataDir, relaySrv, "peer-a", FaultPreForward)
+	childA.waitSlot(1, 20*time.Second)
+
+	cfgB := fastConfig(t, relaySrv, "peer-b")
+	sideB := startSidecar(t, cfgB)
+	waitSlot(t, sideB, 2)
+	worldB := newWorld()
+	modB := dialFakeMod(t, fakeModOptions{
+		url: sideB.URL(), world: worldB, heartbeat: 200 * time.Millisecond})
+
+	worldA := newWorld()
+	modA := dialFakeMod(t, fakeModOptions{
+		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond,
+		token: childA.contractAToken()})
+	modA.waitEdge(contracta.EdgeE, true, 20*time.Second)
+	modB.waitEdge(contracta.EdgeE, true, 20*time.Second)
+
+	migrationID := modA.migrateOut(testEntityID, contracta.EdgeE, 0.6031925)
+	childA.waitFault(20 * time.Second)
+	childA.sigkill()
+	modA.abort()
+
+	checkSent := func(where string) {
+		j, err := journal.Open(filepath.Join(dataDir, "journal"))
+		if err != nil {
+			t.Fatalf("%s: open journal: %v", where, err)
+		}
+		defer j.Close()
+		st, ok := j.Get(migrationID)
+		if !ok {
+			t.Fatalf("%s: migration disappeared", where)
+		}
+		if st.Handoff != journal.HandoffSent || st.Direction != journal.Out || st.BounceBack {
+			t.Fatalf("%s: state = %+v, want one sent outbound entry", where, st)
+		}
+	}
+	checkSent("after crash")
+
+	childA.start("")
+	childA.waitSlot(1, 20*time.Second)
+	time.Sleep(2 * time.Second)
+	if got := worldB.spawnCount(migrationID); got != 0 {
+		t.Fatalf("restart sent the pre-enqueue migration %d times, want 0", got)
+	}
+	childA.sigkill()
+	checkSent("after restart")
 }
 
 func runCrashCustody(t *testing.T, fault string) {

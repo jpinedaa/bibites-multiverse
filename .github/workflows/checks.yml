@@ -510,9 +510,10 @@ jobs:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
 
-      # One release string, in 48 places across 21 files. --check asserts they
-      # all agree, and fails when a version literal turns up in a file that is
-      # not on the allowlist — so the surface cannot silently grow.
+      # One release string, at every allow-listed location. --check reports the
+      # current count, asserts that they agree, and fails when a version literal
+      # turns up in a file that is not on the allowlist. The surface cannot grow
+      # silently.
       - name: the version surface agrees
         run: release/bump-version.sh --check
 

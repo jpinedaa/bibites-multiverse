@@ -99,6 +99,14 @@ func TestCheckProtocolComparesMajorOnly(t *testing.T) {
 	if err := CheckProtocol(ProtocolB, ProtocolB); err != nil {
 		t.Fatalf("contract B against itself: %v", err)
 	}
+	for _, pair := range [][2]string{
+		{"contract-b/4.1", "contract-b/4.2"},
+		{"contract-b/4.2", "contract-b/4.1"},
+	} {
+		if err := CheckProtocol(pair[0], pair[1]); err != nil {
+			t.Fatalf("minor-compatible %q against %q: %v", pair[0], pair[1], err)
+		}
+	}
 	// An older major against contract-b/4.0: close 4000, never a misrouted
 	// organism (contract-b-m4.md §4). contract-b/3 joins contract-b/2 on that
 	// list with §22 B32, and there is NO FIELD-LEVEL FALLBACK for it: the RULE

@@ -1,8 +1,8 @@
 # Project status
 
-Last updated: 2026-08-23 UTC.
+Last updated: 2026-08-24 UTC.
 
-Bibites Multiverse `0.3.6` is public. The first announced service period runs from
+Bibites Multiverse `0.3.7` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -36,56 +36,48 @@ The dashboard shows this known critical result without weakening or hiding it.
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
 history store. Its Coverage section names the missing tests and profilers.
 
-### Localized migration-flow correction rollout
+### Zero-lane refusal progress
 
 On 2026-08-22, protected five-minute lane samples showed a localized migration-flow problem.
-Specific live, populated sources had every open outbound lane at `0/min` in repeated samples.
-Aggregate migration across the map continued throughout the sampled period.
-One lane can normally show zero when no organism crosses during one window.
-Repeated zero values across every open outbound lane from a live, populated source need
-investigation.
+Specific live, populated sources had every open outbound lane at `0/min` in repeated samples,
+although aggregate migration across the map continued. One lane can normally show zero when no
+organism crosses during one window. Repeated zero values across every open outbound lane from a
+live, populated source are not a normal lull.
 
-The same period contained overload responses and relay capacity shedding from several destination
-paths.
-Code review found that migration traffic from many sources can aggregate at one destination.
-A destination response burst can then reach the per-connection frame limit.
-The relay can then close that destination connection.
-The protected observations correlate with this mechanism, but they do not prove that it caused
-every zero lane.
+An earlier correction paced relay writes and participant acknowledgements. It removed the burst
+and capacity-disconnect path. Five Windows worlds and six hosted Linux worlds retained their
+identities and journals when that correction was deployed. Two exact cloud closeout intervals had
+positive aggregate migration and no hosted source with every open outbound lane at zero.
 
-Public commit `5ca9bef` paces physical migration writes for each destination identity.
-The relay refuses a migration before it creates a forwarding record when the bounded destination
-queue is full. It keeps that destination connected.
+On 2026-08-24, a sanitized live diagnosis bounded the remaining fault on slot 7. All four open
+outbound lanes stayed at zero while the slot was live, populated, and connected to its mod. The
+map still recorded `729/min` in aggregate. The source's outbound custody depth stayed at its limit
+of 64, its paced depth was zero, and its cumulative lost-forward counter was 5,461. The source
+could not accept another export. This was a custody-capacity wedge, not an empty world or a slow
+delivery queue.
 
-On 2026-08-23, operators installed and activated this relay correction. The relay service stayed
-healthy, but the mandatory relay-only canary did not meet every gate. Later review assigned the
-failed signals to participant-owned sidecar state, not relay transport. Isolated tests reproduced
-the visible pattern with a saturated journal. They also confirmed that the current sidecar recovers
-it. The service did not inspect any external participant's executable, timeout, clock, or journal
-state. Thus, the exact participant-local cause remains open. Release `0.3.4` completes the
-correction on the participant side. It paces journal-backed payloads and acknowledgements, drains
-older acknowledgements first, and keeps ordinary control traffic responsive. The existing journals
-remain the custody record and must not be cleared.
+The cause was an ambiguity in the relay's old `neverForwarded` proof. That proof covered the whole
+migration. It could not identify a queue refusal for the current attempt after an earlier attempt
+had reached a different peer. The sidecar correctly refused to reroute on that ambiguous proof.
+Enough such entries could fill all 64 custody positions.
 
-Release `0.3.4` was published and then deployed on 2026-08-23. Five Windows worlds on the release
-machine retained their identities and journals through the upgrade; all five rejoined their
-reserved slots with the new sidecar binary. The guarded cloud runtime transaction then activated
-the same source on all six hosted worlds and verified the installed binary against the candidate
-hash. All eleven worlds were live, game-connected and relay-connected after their respective
-health windows. Every one reported zero relay capacity sheds and zero discarded journal bytes.
-One Windows world's 50-entry durable acknowledgement backlog drained to zero after restart, while
-the pacing deferral counters advanced. The public health and status routes returned HTTP `200`,
-and the status route reported a connected relay.
+Release `0.3.7` adds an optional Contract B 4.2 `refusedAttempt` proof. The proof binds the relay
+session, destination slot, and reroute count. The sidecar acts only when all three match its durable
+current attempt and no forwarding receipt contradicts the refusal. It records the tried slots and
+one refusal deadline, continues on the same axis to a distinct compatible destination, and bounces
+once when the bounded walk is exhausted. A relay-drain refusal carries no attempt proof and cannot
+move a migration.
 
-The release-machine sample also records why a paced delivery queue can remain nonzero without a
-new relay fault. Five concurrent games requested 10× speed, but some were achieving only about
-1.2× to 5.1×. Delivery pacing is deliberately measured in the receiving world's simulated time,
-so those CPU-limited worlds drain more slowly in wall-clock time. The new relay pacing prevents
-aggregate fan-in from becoming a burst or a capacity disconnect; it does not make an overloaded
-simulation advance faster and it does not erase its durable queue.
+The durable sent transition now occurs before socket enqueue. A crash can therefore lose one
+migration, which the at-most-once contract permits, but it cannot duplicate one. Restart,
+reconnect, replay, compaction, and a repeated or stale refusal cannot reset the bound. An upgrade
+regression starts with 64 pre-4.2 refused entries and proves that one exact 4.2 refusal advances
+each entry once to a different destination.
 
-Two exact five-minute cloud closeout intervals kept aggregate migration positive. All six hosted
-sources stayed live and mod-connected. None had every open outbound lane at zero.
+Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` endpoint. The
+hosted minimum remains unset, so 4.0 and 4.1 peers still join. The relay and archive must activate
+4.2 before participant sidecars so that an old relay can only withhold the new proof, never make a
+new client guess.
 
 ### Population-aware portal routing rollout
 
@@ -144,29 +136,37 @@ longer guesses arrivals from payload-derived counters if the hop feed is unavail
 rate remains explicitly labelled as migration offers, so routing pressure stays visible beside a
 closed gate without being presented as delivered population.
 
-That correction merged and deployed on 2026-08-24 as `3617390`; hosted checks run `32681067865`
-completed successfully. A fresh provider snapshot and local durable-file backup preceded the
-guarded restart. The archive replayed in 97 seconds, the peer gate held the participant outage to
-104 seconds, and the relay log proved the archive subscribed before any placement claim. At the
-60-second closeout the original 15 live and four dark slots were present and the relay was
-connected. The public page carried the confirmed-delivery wording and the bounded hop endpoint
-was active.
-
-The production regression interval then separated the two signals directly. During 15 seconds,
-slot 9's enforcing closed gate increased `admissionRejectedTotal` by 27, `/api/hops` contained 148
-new ACK-confirmed deliveries elsewhere, and none targeted slot 9. Its `pacedDepth` stayed at 12:
-those are arrivals accepted before the population gate closed, and they remain in custody until
-delivered. A later animation into a closed world can therefore still be correct, but only for that
-already-accepted backlog; the rejected new offers no longer animate.
-
-The service host then activated the archive and relay binaries built from `c321aad`. The guarded
-archive restart replayed for 75 seconds; the peer gate made the participant outage 78 seconds.
-The archive subscribed before any placement claim, so the receipt reports a complete record. At
-the 60-second closeout, the map had the same 15 live and four dark slots and a connected relay.
-All four public routes checked returned HTTP `200`. The public status reported 11 mod `0.6.8`
-worlds in `adaptive-shadow`, zero enforcing population gates, and the live page carried the new
-population-admission explanation. The announcements page published the planned window and its
+An earlier status entry attributed a separate service-host activation to `c321aad`. It reported a
+75-second archive replay, a 78-second participant outage, and archive subscription before every
+placement claim. Its 60-second closeout had the same 15 live and four dark slots and a connected
+relay. All four public routes returned HTTP `200`. The public status reported 11 mod `0.6.8`
+worlds in `adaptive-shadow` and zero enforcing population gates. The live page carried the new
+population-admission explanation, and the announcements page published the planned window and
 actual return time.
+
+A later direct binary audit identified `60dac3a` instead. Commit `c321aad` is not an ancestor of
+that source, and no retained receipt proves that `c321aad` ran. The earlier source attribution
+therefore remains unreconciled.
+
+The confirmed-hop correction merged and deployed on 2026-08-24 as `3617390`; GitHub checks run
+`32681067865` completed successfully. A fresh provider snapshot and local durable-file backup
+preceded the guarded restart. The archive replayed in 97 seconds, and the peer gate held the
+participant outage to 104 seconds. The relay log proved the archive subscribed before any
+placement claim. At the 60-second closeout, the original 15 live and four dark slots were present
+and the relay was connected. The public page carried the confirmed-delivery wording, and the
+bounded hop endpoint was active.
+
+At `2026-08-24T02:25Z`, a fresh read-only host receipt reported active relay and archive units.
+Their installed hashes exactly matched a clean `3617390` build, and the deployment gate passed all
+34 checks. Commit `3617390` is therefore the current service and rollback baseline before the
+Contract B 4.2 rollout.
+
+The production regression interval separated the two signals directly. During 15 seconds, slot
+9's enforcing closed gate increased `admissionRejectedTotal` by 27. The `/api/hops` endpoint
+contained 148 new ACK-confirmed deliveries elsewhere and none to slot 9. Its `pacedDepth` stayed
+at 12. Those arrivals entered custody before the population gate closed and remain there until
+delivery. A later animation into a closed world can therefore be correct only for that accepted
+backlog. The rejected new offers no longer animate.
 
 ### Species genealogy repair
 
@@ -204,7 +204,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | `contract-b/4.1`, which the current release speaks. An older world speaking `contract-b/4.0` still joins unchanged: every difference is optional |
+| Network protocol in force | `contract-b/4.1` remains live while the relay-first 4.2 rollout is pending. The current release speaks `contract-b/4.2`; older worlds speaking 4.0 or 4.1 still join because the new attempt proof is optional |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
@@ -228,11 +228,11 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.6`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.6) |
+| Release | [`v0.3.7`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.7) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
-| Network protocol | `contract-b/4.1` — what this release speaks, and what the hosted service speaks; see [Hosted service](#hosted-service). A world on `contract-b/4.0` still joins |
+| Network protocol | `contract-b/4.2` — what this release speaks. The hosted service remains on 4.1 until the relay-first rollout; see [Hosted service](#hosted-service). Worlds on `contract-b/4.0` and `contract-b/4.1` still join |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
 | Windows launcher | The shortcuts open `BibitesMultiverseLauncher.exe`, a window that lists every world on this computer with what is running, whether its mod has reached the map, its speed and its slot, and starts, stops, creates, clones, deletes and diagnoses them. A per-session switch runs one session with or without a window. The same launcher's commands and console menu ship beside it as `multiverse-launcher.exe`, which is what a script calls. One game folder supports five worlds at once |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
@@ -305,6 +305,10 @@ deployed in non-enforcing shadow mode while production evidence accumulates, and
 decision in local and live status views. Mod `0.6.8` reports requested speed separately from
 achieved speed so the estimator does not mistake a deliberately slower world for an overloaded
 machine.
+Release `0.3.7` prevents exact relay queue refusals from filling all 64 outbound custody positions.
+Contract B 4.2 identifies the refused attempt, and the participant records a bounded same-axis walk
+before it tries another compatible destination. The journal remains the custody record throughout
+an upgrade; no identity, save, or queued organism is cleared.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**

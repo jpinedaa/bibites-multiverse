@@ -1012,10 +1012,10 @@ func (d *diag) checkSaveHealth() CheckResult {
 	return pass(id, "saves are completing, on schedule, inside their stall budget", det...)
 }
 
-// checkDiskHeadroom. Nothing here shrinks a record: the durable files grow with
-// traffic, and a full disk has previously torn an append-only log and left
-// thousands of zero-byte scratch files at the moment inodes were what had run
-// out.
+// checkDiskHeadroom. The genome cache evicts to its cap, logs rotate, and the
+// journal compacts to its live entries. They still need their combined ceilings,
+// and a full disk has previously torn an append-only log and left thousands of
+// zero-byte scratch files when inodes ran out.
 func (d *diag) checkDiskHeadroom() CheckResult {
 	const id = "disk-headroom"
 	if d.verdict("data-dir") == VerdictFail {
@@ -1048,10 +1048,10 @@ func (d *diag) checkDiskHeadroom() CheckResult {
 	}
 	if free < promised {
 		return fail(id, "there is less room left than this install has already promised to write",
-			"free space on this volume and keep it free. Nothing on THIS machine shrinks a "+
-				"durable record: the genome cache, the journal and the logs grow with traffic, "+
-				"and a full disk has previously torn an append-only custody log",
-			ActorYou, []string{"LOCAL-DISK", "AOUT-JOURNAL_FULL", "AOUT-JOURNAL_ERROR"}, det...)
+			"free space on this volume and keep it free. Do not delete the custody journal. "+
+				"The genome cache evicts to its cap, logs rotate, and the journal compacts, but "+
+				"all three need room and a full disk can tear an append-only custody log",
+			ActorYou, []string{"LOCAL-DISK", "AOUT-JOURNAL_ERROR"}, det...)
 	}
 	// THE MULTIPLE OF THOSE CEILINGS THAT COUNTS AS HEADROOM IS WP3'S (spec §6),
 	// together with the per-participant growth arithmetic behind it. Above one

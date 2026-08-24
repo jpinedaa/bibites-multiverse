@@ -875,7 +875,7 @@ func TestMinContractVersionDefaultsToNoMinimum(t *testing.T) {
 func TestContractVersionFloorRefusesWithTheRightAxis(t *testing.T) {
 	// A floor one minor above what this build speaks, so the peer under test is
 	// this build itself — the honest shape of "a peer one release behind".
-	const floor = "contract-b/4.2"
+	const floor = "contract-b/4.3"
 	r := startCredRelay(t, credRelayOptions{minContractVersion: floor})
 	r.mint("peer-stale", peercred.GrantPeer)
 	r.mint("peer-current", peercred.GrantPeer)

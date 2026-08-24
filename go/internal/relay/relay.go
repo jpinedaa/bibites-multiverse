@@ -1994,7 +1994,7 @@ func (s *Server) enqueueMigration(destSlot int, migrationID string,
 // onMigrationPayload routes on data.destSlot and nothing else. The frame is
 // forwarded byte for byte; body.bb8 and data.lineage are never decoded (§5).
 func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bool {
-	var routing contractb.Routing
+	var routing contractb.MigrationRouting
 	if err := json.Unmarshal(env.Data, &routing); err != nil {
 		p.conn.Close(contractb.CloseMalformedFrame, "malformed routing fields")
 		return false
@@ -2028,17 +2028,25 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 		p.conn.Close(contractb.CloseMalformedFrame, "destSlot is not a slot")
 		return false
 	}
+	if routing.Reroute != nil && routing.Reroute.Count < 1 {
+		p.conn.Close(contractb.CloseMalformedFrame, "reroute.count is not positive")
+		return false
+	}
+	attempt := &contractb.MigrationAttempt{DestSlot: routing.DestSlot}
+	if routing.Reroute != nil {
+		attempt.RerouteCount = routing.Reroute.Count
+	}
 
 	result, res, dest, err := s.enqueueMigration(routing.DestSlot, id.MigrationID, frame)
 	switch result {
 	case migrationRelayDraining:
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackNotForwarded,
-			"the relay is draining and declined to hand this frame over")
+			"the relay is draining and declined to hand this frame over", nil, false)
 		return true
 	case migrationSlotVacant:
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackSlotVacant,
 			fmt.Sprintf("slot %d names no reservation; slot numbers are never reused, so it never returns",
-				routing.DestSlot))
+				routing.DestSlot), nil, true)
 		return true
 	case migrationPeerOffline:
 		msg := fmt.Sprintf("slot %d (%d,%d) is reserved to %s, which is not connected",
@@ -2052,12 +2060,12 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 			s.log.Warn("relay: destination transport queue stopped before migration admission",
 				"peer", res.PeerID, "migrationId", id.MigrationID, "err", err)
 		}
-		s.nackNoDelivery(p, id.MigrationID, contractb.NackPeerOffline, msg)
+		s.nackNoDelivery(p, id.MigrationID, contractb.NackPeerOffline, msg, nil, true)
 		return true
 	case migrationQueueFull:
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackNotForwarded,
 			fmt.Sprintf("slot %d (%s) has a full paced migration transport queue; "+
-				"the destination connection stays live", res.Slot, res.PeerID))
+				"the destination connection stays live", res.Slot, res.PeerID), attempt, true)
 		return true
 	case migrationEnqueued:
 		s.sendForwardReceipt(p, id.MigrationID, routing.DestSlot)
@@ -2145,7 +2153,8 @@ func (s *Server) ReceiptCounts() (sent, dropped int64) {
 // nackNoDelivery answers the SENDER rather than dropping the frame. A dropped
 // frame turns a bounded failure into a stall, and under M4 it also withholds
 // the evidence a sender needs to re-route (§5.2).
-func (s *Server) nackNoDelivery(p *peer, migrationID, code, message string) {
+func (s *Server) nackNoDelivery(p *peer, migrationID, code, message string,
+	refusedAttempt *contractb.MigrationAttempt, includeLegacyProof bool) {
 	never := !s.hasForwarded(migrationID)
 	nack := contractb.MigrationNack{
 		MigrationID:    migrationID,
@@ -2154,13 +2163,18 @@ func (s *Server) nackNoDelivery(p *peer, migrationID, code, message string) {
 		Code:           code,
 		Class:          contractb.ClassOf(code),
 		Message:        message,
-		NeverForwarded: &never,
-		RelaySessionID: s.sessionID,
+		RefusedAttempt: refusedAttempt,
+	}
+	if includeLegacyProof {
+		nack.NeverForwarded = &never
+		nack.RelaySessionID = s.sessionID
 	}
 	if nack.Class == contractb.ClassTransient {
 		nack.RetryAfterMs = 15000
 	}
-	if never {
+	if !includeLegacyProof {
+		nack.Message += "; relay drain carries no non-delivery proof"
+	} else if never {
 		nack.Message += "; this relay has never forwarded this migration"
 	} else {
 		nack.Message += "; this relay has already handed this migration to a peer at least once"

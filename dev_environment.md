@@ -71,7 +71,7 @@ broaden a source search to include custody directories.
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Contract A | `contract-a/2.4` |
-| Contract B | `contract-b/4.1` |
+| Contract B | `contract-b/4.2` |
 | Genome projection | `bb8-genome/1` |
 | Unity | `6000.0.44f1`, Mono backend |
 | BepInEx | `5.4.23.3`, Windows x64 |

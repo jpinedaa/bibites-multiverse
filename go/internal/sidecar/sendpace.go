@@ -165,7 +165,7 @@ type sendPace struct {
 	// unpaced, which is the exact failure this file exists to stop.
 	//
 	// It also closes a second hole in the same window: forwardLocked records
-	// s.relaySessionID against the entry at the first hand-over (§5.2, §9.2), and
+	// s.relaySessionID against the entry at the durable send commit (§5.2, §9.2), and
 	// that id arrives ON the HANDSHAKE_ACK. A frame sent before it stamps the
 	// entry with an EMPTY session, and an empty session is one no later proof of
 	// non-delivery can ever match.
@@ -290,7 +290,8 @@ func (p *sendPace) readyForBulk(now time.Time) bool {
 }
 
 // paceDeferred names the outbound types whose durable state can offer them
-// again. MIGRATION_PAYLOAD remains pending until it is sent. A journal-backed
+// again. MIGRATION_PAYLOAD remains pending until pace admission. It then commits
+// sent before the one socket enqueue. A journal-backed
 // MIGRATION_ACK remains unacknowledged upstream until it is sent. Immediate
 // duplicate ACKs and NACKs use the bounded reply path instead, because the
 // relay paces the migration arrivals that produce them.

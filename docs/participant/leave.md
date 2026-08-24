@@ -94,8 +94,10 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 For a world the launcher created, the data folder is that world's own.
 `multiverse-launcher.exe status --all` names it for every world on this computer.
 
-The list gives you the migration id, the organism, where it was going, when it was handed over,
-and how long is left before it is written off as lost. The release prints the entry and then
+The list always shows the migration id, organism, destination, and handoff state. A `sent` entry
+also shows its send time and remaining loss time. Pending and refused entries show neither.
+Version 4.2 stores one durable first-refusal deadline for a bounded queue-refusal walk. This
+command does not print that deadline. The release prints the entry and then
 **the duplication risk, before it acts**, and waits for you to type `YES`: an entry that was
 already written to a live relay connection may already be held by the far side, and bouncing
 that one home can leave the map holding two copies. **This command is the only way left to do

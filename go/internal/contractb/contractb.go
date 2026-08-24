@@ -1,5 +1,5 @@
 // Package contractb holds Contract B exactly as contracts/contract-b-m4.md
-// specifies it (`contract-b/4.0`): sidecar -> relay -> sidecar, a rectangular
+// specifies it (`contract-b/4.2`): sidecar -> relay -> sidecar, a rectangular
 // map of slots, a read-only AUTHORISED archive subscriber, a JSON envelope, and
 // an opaque bb8 body.
 //
@@ -125,8 +125,7 @@ const (
 	// permanent one can mean what it says.
 	NackPeerOffline = "PEER_OFFLINE"
 	// NackNotForwarded is the relay declining to hand the frame over for a
-	// reason of its own: outbound queue full, write failed before any byte left,
-	// or the relay is draining.
+	// reason of its own: the destination queue is full or the relay is draining.
 	NackNotForwarded       = "NOT_FORWARDED"
 	NackPeerUnknown        = "PEER_UNKNOWN"
 	NackNotAMember         = "NOT_A_MEMBER"
@@ -881,9 +880,9 @@ type Lineage struct {
 
 // Reroute is MIGRATION_PAYLOAD.reroute (§6.6), present exactly when this
 // frame's destSlot is not the one the entry was first journaled with.
-// Informational: the relay does not read it and the receiver does not act on
-// it. It is what lets the archive and the status page say WHY an organism took
-// the lane it took.
+// The relay reads only Count to correlate a queue-full refusal. The receiver
+// does not act on it. The other fields let the archive and status page explain
+// why an organism took the lane it took.
 type Reroute struct {
 	FromSlot int    `json:"fromSlot"`
 	Count    int    `json:"count"`
@@ -947,6 +946,9 @@ func (p *MigrationPayload) Validate() error {
 	if p.DestSlot < 1 {
 		return invalid("destSlot %d is not a slot", p.DestSlot)
 	}
+	if p.Reroute != nil && p.Reroute.Count < 1 {
+		return invalid("reroute.count %d is not positive", p.Reroute.Count)
+	}
 	if !contracta.ValidEdge(p.ExitEdge) {
 		// All four values, since D17 (§17, B13). The relay has never ROUTED on this
 		// field — routing is on destSlot — so it is carried for the record and
@@ -994,15 +996,29 @@ type MigrationNack struct {
 	Class        string `json:"class"`
 	Message      string `json:"message"`
 	RetryAfterMs int    `json:"retryAfterMs,omitempty"`
-	// NeverForwarded is present exactly on RELAY-generated NACKs. true means:
-	// this relay process has forwarded no frame carrying this migrationId to any
-	// peer, ever, during RelaySessionID. It is a PROOF, NOT A HINT (§5.2, §9.2),
-	// and a missing field is no proof at all.
+	// NeverForwarded is present exactly on RELAY-generated NACKs. It retains its
+	// pre-4.2, migration-wide meaning for mixed-version safety: true means this
+	// relay process has forwarded no frame carrying this migrationId to any peer,
+	// ever, during RelaySessionID. RefusedAttempt is the narrower proof for one
+	// current attempt.
 	NeverForwarded *bool `json:"neverForwarded,omitempty"`
 	// RelaySessionID is present exactly when NeverForwarded is. A sender MUST
 	// compare it against the session recorded on the journal entry before
 	// treating NeverForwarded: true as proof.
 	RelaySessionID string `json:"relaySessionId,omitempty"`
+	// RefusedAttempt is added in contract-b/4.2. On a relay-generated
+	// NOT_FORWARDED it identifies the exact MIGRATION_PAYLOAD that atomic queue
+	// admission rejected. Older relays omit it and older peers ignore it. Its
+	// absence is never proof.
+	RefusedAttempt *MigrationAttempt `json:"refusedAttempt,omitempty"`
+}
+
+// MigrationAttempt identifies one destination offer of a migration. The
+// migrationId is already on the surrounding frame. RerouteCount is zero when
+// MIGRATION_PAYLOAD.reroute is absent.
+type MigrationAttempt struct {
+	DestSlot     int `json:"destSlot"`
+	RerouteCount int `json:"rerouteCount"`
 }
 
 // ProvesNoCustody implements §9.2's evidence table for a RELAY-generated NACK:
@@ -1018,6 +1034,21 @@ func (n *MigrationNack) ProvesNoCustody(entrySession string) bool {
 		return false
 	}
 	return n.RelaySessionID == entrySession
+}
+
+// ProvesAttemptRefusal accepts only contract-b/4.2's attempt-scoped proof. A
+// migration-wide neverForwarded value is deliberately not consulted: it can be
+// false after an earlier attempt reached a peer while this exact attempt was
+// still refused before admission.
+func (n *MigrationNack) ProvesAttemptRefusal(entrySession string, destSlot, rerouteCount int) bool {
+	if n.Code != NackNotForwarded || n.NeverForwarded == nil || n.RefusedAttempt == nil {
+		return false
+	}
+	if n.RelaySessionID == "" || entrySession == "" || n.RelaySessionID != entrySession {
+		return false
+	}
+	return n.RefusedAttempt.DestSlot == destSlot &&
+		n.RefusedAttempt.RerouteCount == rerouteCount
 }
 
 // ForwardReceipt is FORWARD_RECEIPT (contract-b-m4.md §6.12, added — §22 B26):
@@ -1122,6 +1153,21 @@ type Routing struct {
 	SourcePeer string `json:"sourcePeer"`
 	DestPeer   string `json:"destPeer"`
 	DestSlot   int    `json:"destSlot"`
+}
+
+// MigrationRouting is the payload-only projection the relay reads since
+// contract-b/4.2. Keeping it separate from Routing prevents an ignorable
+// reroute field on ACK, NACK, or GENOME traffic from changing those handlers.
+type MigrationRouting struct {
+	SourcePeer string          `json:"sourcePeer"`
+	DestSlot   int             `json:"destSlot"`
+	Reroute    *RoutingReroute `json:"reroute,omitempty"`
+}
+
+// RoutingReroute is the one nested field the relay reads from a migration's
+// reroute block. All other reroute metadata remains opaque to routing.
+type RoutingReroute struct {
+	Count int `json:"count"`
 }
 
 // Identity is the little the relay reads to answer a frame it cannot route.

@@ -38,6 +38,43 @@ When every alternate is unavailable, the source honors the receiver's 15-second 
 may retry the current live world because population pressure is transient, but it does not reset
 the original bounce deadline.
 
+A relay transport refusal is a different event. A queue-full `NOT_FORWARDED` means the
+destination transport queue did not accept that exact attempt. The source uses its bounded
+progress path only when all these conditions are true:
+
+- `neverForwarded` is present for mixed-version discrimination;
+- `relaySessionId` matches the current committed attempt;
+- `refusedAttempt.destSlot` and `refusedAttempt.rerouteCount` match the current journal state;
+- no `FORWARD_RECEIPT` exists for that session and destination.
+
+The legacy `neverForwarded` value can be false after an earlier accepted attempt. The exact
+`refusedAttempt` still proves that the later queue rejected this attempt. A graceful-drain
+`NOT_FORWARDED` omits all three proof fields. It does not consume a destination or start the
+refusal deadline.
+
+The source records `refused`, the transport-refused slot, and the first deadline in one durable
+update. That update clears the old attempt's relay session and `sentAt`. It then tries the next
+compatible, untried world on the original axis. The migration ID, body, edge, geometry, velocity,
+heading, and lineage do not change. A present reroute count is positive and increments on every
+rewrite. The tried set prevents a destination from repeating. The increasing count makes each
+destination and count pair unique in the chain.
+
+The first deadline is `bounceTimeoutMs` after the first exact refusal. A reroute, retry, reconnect,
+restart, or journal compaction does not reset it. Exhausting the walk or `maxReroutes` also ends
+the chain. Each terminal condition bounces the migration once.
+
+Missing, stale, mismatched, or contradicted attempt proof leaves the durable state and scheduler
+unchanged. A delayed peer NACK from an earlier destination has the same result. Before a pending
+alternate sends, the sidecar refreshes current journal state under its scheduler lock. It checks
+the first-refusal deadline again after encoding and pace admission. It then fsyncs fresh
+current-attempt session and `sentAt` values before socket enqueue. A crash or enqueue error cannot
+cause another send. A committed entry can receive an answer or become lost. It cannot bounce on
+its earlier refusal deadline.
+
+This behavior needs a `contract-b/4.2` relay. A 4.2 sidecar with a 4.1 relay safely treats missing
+attempt correlation as no proof. Deploy the relay first, then sidecars. Graceful drain remains a
+wait-and-reconnect condition during the rollout.
+
 ## Admission modes
 
 | Mode | Behavior |
@@ -155,6 +192,17 @@ caused a regression. Preserve both baselines and investigate the missing ACK/NAC
 infer that a receipt proves destination custody, and do not loosen at-most-once routing to hide the
 counter.
 
+A later production-shaped discriminator isolated a separate source-side wedge. Twelve public
+samples used 30-second intervals. Slot 7 reported positive rates on all four lanes in samples
+1–6, then zero rates on all four lanes in samples 7–12. It stayed live, mod-connected, populated,
+and open on four edges while `custodyDepth` stayed at 64.
+
+During the zero period, its read-only journal diagnostic reported zero pending ACKs, zero paced
+arrivals, and zero unresolved sends. It also reported no discarded bytes. This combination
+identifies refused or pending outbound entries at the cap. It does not identify a sent timeout or
+an ACK drain. Contract B §31 defines the attempt-scoped correction without weakening the receipt
+rule.
+
 The immediate rollback is `adaptive-shadow`, which preserves estimator and journal state. If an
 enforcing fixed fallback is needed while the adaptive calculation is investigated, the reviewed
 starting points are 40 organisms for each hosted world and 10 for each world on the shared local
@@ -175,6 +223,21 @@ rollback.
   to the next peer, and require exactly one live-map hop at the peer that ACKs. A second regression
   observes that ACK before the rerouted payload copy and requires peer matching to keep it off the
   rejected destination.
+- `TestSixtyFourTransportRefusalsUseTheAlternateThenBounceOnce` starts with 64 outbound entries.
+  It proves two same-axis queues refused each entry, then verifies one bounce per migration. A
+  valid local acknowledgment clears total custody below the 64-entry cap.
+- `TestPre42RefusedReplayEntersAttemptScopedBoundedWalk` replays 64 pre-4.2 `refused` entries.
+  Each entry retains its old relay session and send clock but has no refusal deadline. After the
+  clock and session change, each old global proof permits one safe retry. The retry replaces the
+  stale attempt metadata and cannot enqueue twice. An exact 4.2 refusal then moves every entry to
+  a distinct pending alternate with a durable deadline.
+- `TestTransportRefusalProofSafetyMatrix` covers exact, missing, stale, mismatched,
+  receipt-contradicted, proof-free drain, legacy 4.1, and wrong-code input. Only exact current
+  attempt proof starts the bounded walk.
+- Mixed peer-to-transport and transport-to-peer-to-transport tests cover a migration-wide false
+  value with exact attempt proof. Delayed peer and relay NACK tests protect the pending alternate.
+- Restart, compaction, session rotation, deadline, `maxReroutes`, crash, and closed-writer tests
+  verify durable progress. They also verify that a committed alternate cannot retry or bounce.
 - On 2026-08-23, five Windows worlds and six hosted Linux worlds ran the candidate in
   `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
   requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds
