@@ -31,7 +31,9 @@ each static and dynamic visual. Full charts show UTC x-axis values and exact val
 or keyboard inspection.
 
 Production runs exact public feature commit [`c9e4f3a`](https://github.com/jpinedaa/bibites-multiverse/commit/c9e4f3a2601fda3dd631eec018758e99c0952162).
-It is published on `feat/health-dashboard-missing-metrics` but is not yet on public `main`.
+That exact build is live. Commit [`2564ea1`](https://github.com/jpinedaa/bibites-multiverse/commit/2564ea19f86898ffe756b4c9dfe08d910c45190e)
+makes a stopped traffic producer publish gaps instead of reusing an old request window.
+The correction is not yet deployed.
 The `2026-08-24T19:40Z` closeout verified Linux pressure, VM events, public request rate, and HTTP
 status classes. It also verified nginx p50 and p95 duration, fixed route groups, and archive input
 rate. Host verification passed 34 checks with no failure. All eight public routes returned HTTP
