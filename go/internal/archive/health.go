@@ -26,6 +26,8 @@ const (
 	monitorStaleAfter      = 11 * time.Minute
 	hostCadenceSeconds     = int64(60)
 	hostStaleAfter         = 3 * time.Minute
+	trafficAsOfLayout      = "2006-01-02T15:04:05Z"
+	trafficAsOfTolerance   = 30 * time.Second
 	hostHistorySamples     = 121 // two hours plus both endpoints at one-minute cadence
 	hostHistoryReadMaxByte = int64(1 << 20)
 )
@@ -148,6 +150,62 @@ type publicHostConntrack struct {
 	UsedPct *float64 `json:"usedPct"`
 }
 
+type rawPressureResource struct {
+	SomeUsec *int64 `json:"someUsec"`
+	FullUsec *int64 `json:"fullUsec"`
+}
+
+type rawHostPressure struct {
+	CPU    rawPressureResource `json:"cpu"`
+	Memory rawPressureResource `json:"memory"`
+	IO     rawPressureResource `json:"io"`
+}
+
+type rawHostVM struct {
+	SwapInPages  *int64 `json:"swapInPages"`
+	SwapOutPages *int64 `json:"swapOutPages"`
+	OOMKills     *int64 `json:"oomKills"`
+}
+
+type rawTrafficRoute struct {
+	ID        string   `json:"id"`
+	Requests  *int64   `json:"requests"`
+	Status1xx *int64   `json:"status1xx"`
+	Status2xx *int64   `json:"status2xx"`
+	Status3xx *int64   `json:"status3xx"`
+	Status4xx *int64   `json:"status4xx"`
+	Status5xx *int64   `json:"status5xx"`
+	P50Ms     *float64 `json:"p50Ms"`
+	P95Ms     *float64 `json:"p95Ms"`
+}
+
+type rawTrafficView struct {
+	AsOf          string            `json:"asOf"`
+	Available     bool              `json:"available"`
+	Complete      bool              `json:"complete"`
+	WindowSeconds *int64            `json:"windowSeconds"`
+	Requests      *int64            `json:"requests"`
+	Status1xx     *int64            `json:"status1xx"`
+	Status2xx     *int64            `json:"status2xx"`
+	Status3xx     *int64            `json:"status3xx"`
+	Status4xx     *int64            `json:"status4xx"`
+	Status5xx     *int64            `json:"status5xx"`
+	P50Ms         *float64          `json:"p50Ms"`
+	P95Ms         *float64          `json:"p95Ms"`
+	Routes        []rawTrafficRoute `json:"routes"`
+}
+
+type rawArchiveSample struct {
+	LedgerRecords                  *int64 `json:"ledgerRecords"`
+	LedgerRawBytes                 *int64 `json:"ledgerRawBytes"`
+	LedgerSegments                 *int64 `json:"ledgerSegments"`
+	LedgerSegmentsAwaitingColdCopy *int64 `json:"ledgerSegmentsAwaitingColdCopy"`
+	LedgerRetiredTotal             *int64 `json:"ledgerRetiredTotal"`
+	RollupCoveredRecords           *int64 `json:"rollupCoveredRecords"`
+	GenomeGaps                     *int64 `json:"genomeGaps"`
+	DuplicatesRefused              *int64 `json:"duplicatesRefused"`
+}
+
 type rawHostUnit struct {
 	Unit             string  `json:"unit"`
 	ActiveState      *string `json:"activeState"`
@@ -163,15 +221,60 @@ type rawHostUnit struct {
 }
 
 type rawHostSample struct {
-	At         string        `json:"at"`
-	CPUBusyPct *float64      `json:"cpuBusyPct"`
-	Load       hostLoad      `json:"load"`
-	Memory     hostMemory    `json:"memory"`
-	Disk       hostDisk      `json:"disk"`
-	TCP        hostTCP       `json:"tcp"`
-	Conntrack  hostConntrack `json:"conntrack"`
-	Units      []rawHostUnit `json:"units"`
+	At         string           `json:"at"`
+	CPUBusyPct *float64         `json:"cpuBusyPct"`
+	Load       hostLoad         `json:"load"`
+	Memory     hostMemory       `json:"memory"`
+	Disk       hostDisk         `json:"disk"`
+	TCP        hostTCP          `json:"tcp"`
+	Conntrack  hostConntrack    `json:"conntrack"`
+	Pressure   rawHostPressure  `json:"pressure"`
+	VM         rawHostVM        `json:"vm"`
+	Traffic    rawTrafficView   `json:"traffic"`
+	Archive    rawArchiveSample `json:"archive"`
+	Units      []rawHostUnit    `json:"units"`
 	parsedAt   time.Time
+}
+
+type publicPressureView struct {
+	WindowSeconds *int64   `json:"windowSeconds"`
+	CPUSomePct    *float64 `json:"cpuSomePct"`
+	CPUFullPct    *float64 `json:"cpuFullPct"`
+	MemorySomePct *float64 `json:"memorySomePct"`
+	MemoryFullPct *float64 `json:"memoryFullPct"`
+	IOSomePct     *float64 `json:"ioSomePct"`
+	IOFullPct     *float64 `json:"ioFullPct"`
+}
+
+type publicVMView struct {
+	WindowSeconds *int64 `json:"windowSeconds"`
+	SwapInPages   *int64 `json:"swapInPages"`
+	SwapOutPages  *int64 `json:"swapOutPages"`
+	OOMKills      *int64 `json:"oomKills"`
+}
+
+type publicTrafficRoute struct {
+	ID             string   `json:"id"`
+	Label          string   `json:"label"`
+	RequestsPerSec *float64 `json:"requestsPerSec"`
+	P50Ms          *float64 `json:"p50Ms"`
+	P95Ms          *float64 `json:"p95Ms"`
+	ServerErrorPct *float64 `json:"serverErrorPct"`
+}
+
+type publicTrafficView struct {
+	Available      bool                 `json:"available"`
+	Complete       bool                 `json:"complete"`
+	WindowSeconds  *int64               `json:"windowSeconds"`
+	RequestsPerSec *float64             `json:"requestsPerSec"`
+	P50Ms          *float64             `json:"p50Ms"`
+	P95Ms          *float64             `json:"p95Ms"`
+	Status1xxPct   *float64             `json:"status1xxPct"`
+	Status2xxPct   *float64             `json:"status2xxPct"`
+	Status3xxPct   *float64             `json:"status3xxPct"`
+	Status4xxPct   *float64             `json:"status4xxPct"`
+	ServerErrorPct *float64             `json:"serverErrorPct"`
+	Routes         []publicTrafficRoute `json:"routes"`
 }
 
 type hostUnitView struct {
@@ -194,22 +297,39 @@ type hostLatestView struct {
 	Disk       publicHostDisk      `json:"disk"`
 	TCP        hostTCP             `json:"tcp"`
 	Conntrack  publicHostConntrack `json:"conntrack"`
+	Pressure   publicPressureView  `json:"pressure"`
+	VM         publicVMView        `json:"vm"`
+	Traffic    publicTrafficView   `json:"traffic"`
 	Units      []hostUnitView      `json:"units"`
 }
 
 type hostHistoryPoint struct {
-	At                 string   `json:"at"`
-	CPUBusyPct         *float64 `json:"cpuBusyPct"`
-	MemoryAvailablePct *float64 `json:"memoryAvailablePct"`
-	DiskUsedPct        *float64 `json:"diskUsedPct"`
-	ArchiveAnonBytes   *int64   `json:"archiveAnonBytes"`
-	EstabResets        *int64   `json:"estabResets"`
-	AttemptFails       *int64   `json:"attemptFails"`
-	RetransSegs        *int64   `json:"retransSegs"`
-	OutResets          *int64   `json:"outResets"`
-	ListenOverflows    *int64   `json:"listenOverflows"`
-	ListenDrops        *int64   `json:"listenDrops"`
-	SynRetrans         *int64   `json:"synRetrans"`
+	At                    string   `json:"at"`
+	CPUBusyPct            *float64 `json:"cpuBusyPct"`
+	MemoryAvailablePct    *float64 `json:"memoryAvailablePct"`
+	DiskUsedPct           *float64 `json:"diskUsedPct"`
+	ArchiveAnonBytes      *int64   `json:"archiveAnonBytes"`
+	EstabResets           *int64   `json:"estabResets"`
+	AttemptFails          *int64   `json:"attemptFails"`
+	RetransSegs           *int64   `json:"retransSegs"`
+	OutResets             *int64   `json:"outResets"`
+	ListenOverflows       *int64   `json:"listenOverflows"`
+	ListenDrops           *int64   `json:"listenDrops"`
+	SynRetrans            *int64   `json:"synRetrans"`
+	CPUPressureSomePct    *float64 `json:"cpuPressureSomePct"`
+	MemoryPressureFullPct *float64 `json:"memoryPressureFullPct"`
+	IOPressureFullPct     *float64 `json:"ioPressureFullPct"`
+	OOMKills              *int64   `json:"oomKills"`
+	RequestsPerSec        *float64 `json:"requestsPerSec"`
+	HTTPP50Ms             *float64 `json:"httpP50Ms"`
+	HTTPP95Ms             *float64 `json:"httpP95Ms"`
+	HTTPStatus1xxPct      *float64 `json:"httpStatus1xxPct"`
+	HTTPStatus2xxPct      *float64 `json:"httpStatus2xxPct"`
+	HTTPStatus3xxPct      *float64 `json:"httpStatus3xxPct"`
+	HTTPStatus4xxPct      *float64 `json:"httpStatus4xxPct"`
+	HTTPServerErrorPct    *float64 `json:"httpServerErrorPct"`
+	ArchiveRecords        *int64   `json:"archiveRecords"`
+	ArchiveRecordsPerSec  *float64 `json:"archiveRecordsPerSec"`
 }
 
 func (a *Archive) productionHealthView(now time.Time) productionHealthView {
@@ -357,10 +477,18 @@ func readHostHealth(path string, now time.Time) hostHealthView {
 	if len(samples) > 1 {
 		view.WindowSeconds = nonnegativeSeconds(latest.parsedAt.Sub(samples[0].parsedAt))
 	}
-	view.Latest = publicHostLatest(latest)
+	var previous *rawHostSample
+	if len(samples) > 1 {
+		previous = &samples[len(samples)-2]
+	}
+	view.Latest = publicHostLatest(latest, previous)
 	view.History = make([]hostHistoryPoint, 0, len(samples))
-	for _, sample := range samples {
-		view.History = append(view.History, publicHostHistory(sample))
+	for i := range samples {
+		var before *rawHostSample
+		if i > 0 {
+			before = &samples[i-1]
+		}
+		view.History = append(view.History, publicHostHistory(samples[i], before))
 	}
 	return view
 }
@@ -444,7 +572,7 @@ var publicHostUnits = map[string]string{
 	"multiverse-stream":  "Stream origin",
 }
 
-func publicHostLatest(sample rawHostSample) *hostLatestView {
+func publicHostLatest(sample rawHostSample, previous *rawHostSample) *hostLatestView {
 	units := make([]hostUnitView, 0, len(sample.Units))
 	for _, unit := range sample.Units {
 		name, public := publicHostUnits[unit.Unit]
@@ -468,8 +596,166 @@ func publicHostLatest(sample rawHostSample) *hostLatestView {
 		},
 		Disk: publicHostDisk{DataUsedPct: sample.Disk.DataUsedPct}, TCP: sample.TCP,
 		Conntrack: publicHostConntrack{UsedPct: percentage(sample.Conntrack.Count, sample.Conntrack.Max)},
+		Pressure:  publicPressure(sample, previous),
+		VM:        publicVM(sample, previous),
+		Traffic:   publicTraffic(sample.Traffic, sample.parsedAt),
 		Units:     units,
 	}
+}
+
+var publicTrafficRoutes = []struct {
+	id    string
+	label string
+}{
+	{"pages", "Pages"},
+	{"api", "APIs"},
+	{"relay", "Relay"},
+	{"stream", "Stream"},
+}
+
+func publicTraffic(raw rawTrafficView, sampleAt time.Time) publicTrafficView {
+	view := publicTrafficView{
+		Available: raw.Available,
+		Routes:    []publicTrafficRoute{},
+	}
+	if raw.WindowSeconds == nil || *raw.WindowSeconds <= 0 || *raw.WindowSeconds > 3600 {
+		view.Complete = false
+		return view
+	}
+	window := *raw.WindowSeconds
+	view.WindowSeconds = &window
+	trafficFresh := false
+	if trafficAt, ok := canonicalTrafficAsOf(raw.AsOf); ok {
+		skew := trafficAt.Sub(sampleAt)
+		trafficFresh = skew >= -trafficAsOfTolerance && skew <= trafficAsOfTolerance
+	}
+	if !trafficFresh || !raw.Available || !raw.Complete {
+		return view
+	}
+	view.Complete = true
+	view.RequestsPerSec = perSecond(raw.Requests, raw.WindowSeconds)
+	view.P50Ms = nonnegativeFloat(raw.P50Ms)
+	view.P95Ms = nonnegativeFloat(raw.P95Ms)
+	view.Status1xxPct = countPercentage(raw.Status1xx, raw.Requests)
+	view.Status2xxPct = countPercentage(raw.Status2xx, raw.Requests)
+	view.Status3xxPct = countPercentage(raw.Status3xx, raw.Requests)
+	view.Status4xxPct = countPercentage(raw.Status4xx, raw.Requests)
+	view.ServerErrorPct = countPercentage(raw.Status5xx, raw.Requests)
+	routes := make(map[string]rawTrafficRoute, len(raw.Routes))
+	for _, route := range raw.Routes {
+		if _, seen := routes[route.ID]; !seen {
+			routes[route.ID] = route
+		}
+	}
+	for _, definition := range publicTrafficRoutes {
+		rawRoute := routes[definition.id]
+		view.Routes = append(view.Routes, publicTrafficRoute{
+			ID: definition.id, Label: definition.label,
+			RequestsPerSec: perSecond(rawRoute.Requests, raw.WindowSeconds),
+			P50Ms:          nonnegativeFloat(rawRoute.P50Ms),
+			P95Ms:          nonnegativeFloat(rawRoute.P95Ms),
+			ServerErrorPct: countPercentage(rawRoute.Status5xx, rawRoute.Requests),
+		})
+	}
+	return view
+}
+
+func canonicalTrafficAsOf(value string) (time.Time, bool) {
+	parsed, err := time.Parse(trafficAsOfLayout, value)
+	if err != nil || parsed.Format(trafficAsOfLayout) != value {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+func nonnegativeFloat(value *float64) *float64 {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+func perSecond(count, windowSeconds *int64) *float64 {
+	if count == nil || windowSeconds == nil || *count < 0 || *windowSeconds <= 0 {
+		return nil
+	}
+	value := float64(*count) / float64(*windowSeconds)
+	return &value
+}
+
+func countPercentage(part, total *int64) *float64 {
+	if part == nil || total == nil || *part < 0 || *total < 0 || *part > *total {
+		return nil
+	}
+	if *total == 0 {
+		value := float64(0)
+		return &value
+	}
+	value := float64(*part) * 100 / float64(*total)
+	return &value
+}
+
+func sampleWindow(sample rawHostSample, previous *rawHostSample) (*int64, time.Duration) {
+	if previous == nil {
+		return nil, 0
+	}
+	elapsed := sample.parsedAt.Sub(previous.parsedAt)
+	if elapsed <= 0 {
+		return nil, 0
+	}
+	seconds := int64(elapsed / time.Second)
+	if seconds <= 0 {
+		return nil, 0
+	}
+	return &seconds, elapsed
+}
+
+func counterDelta(current, previous *int64) *int64 {
+	if current == nil || previous == nil || *current < 0 || *previous < 0 || *current < *previous {
+		return nil
+	}
+	value := *current - *previous
+	return &value
+}
+
+func pressurePercentage(current, previous *int64, elapsed time.Duration) *float64 {
+	delta := counterDelta(current, previous)
+	if delta == nil || elapsed <= 0 {
+		return nil
+	}
+	value := float64(*delta) * 100 / float64(elapsed/time.Microsecond)
+	if value > 100 {
+		value = 100
+	}
+	return &value
+}
+
+func publicPressure(sample rawHostSample, previous *rawHostSample) publicPressureView {
+	window, elapsed := sampleWindow(sample, previous)
+	view := publicPressureView{WindowSeconds: window}
+	if previous == nil || elapsed <= 0 {
+		return view
+	}
+	view.CPUSomePct = pressurePercentage(sample.Pressure.CPU.SomeUsec, previous.Pressure.CPU.SomeUsec, elapsed)
+	view.CPUFullPct = pressurePercentage(sample.Pressure.CPU.FullUsec, previous.Pressure.CPU.FullUsec, elapsed)
+	view.MemorySomePct = pressurePercentage(sample.Pressure.Memory.SomeUsec, previous.Pressure.Memory.SomeUsec, elapsed)
+	view.MemoryFullPct = pressurePercentage(sample.Pressure.Memory.FullUsec, previous.Pressure.Memory.FullUsec, elapsed)
+	view.IOSomePct = pressurePercentage(sample.Pressure.IO.SomeUsec, previous.Pressure.IO.SomeUsec, elapsed)
+	view.IOFullPct = pressurePercentage(sample.Pressure.IO.FullUsec, previous.Pressure.IO.FullUsec, elapsed)
+	return view
+}
+
+func publicVM(sample rawHostSample, previous *rawHostSample) publicVMView {
+	window, _ := sampleWindow(sample, previous)
+	view := publicVMView{WindowSeconds: window}
+	if previous == nil {
+		return view
+	}
+	view.SwapInPages = counterDelta(sample.VM.SwapInPages, previous.VM.SwapInPages)
+	view.SwapOutPages = counterDelta(sample.VM.SwapOutPages, previous.VM.SwapOutPages)
+	view.OOMKills = counterDelta(sample.VM.OOMKills, previous.VM.OOMKills)
+	return view
 }
 
 func percentage(part, total *int64) *float64 {
@@ -512,12 +798,23 @@ func publicNamedState(value *string, allowed ...string) *string {
 	return nil
 }
 
-func publicHostHistory(sample rawHostSample) hostHistoryPoint {
+func publicHostHistory(sample rawHostSample, previous *rawHostSample) hostHistoryPoint {
 	var archiveAnon *int64
 	for _, unit := range sample.Units {
 		if unit.Unit == "multiverse-archive" {
 			archiveAnon = unit.AnonBytes
 			break
+		}
+	}
+	pressure := publicPressure(sample, previous)
+	vm := publicVM(sample, previous)
+	traffic := publicTraffic(sample.Traffic, sample.parsedAt)
+	var archiveRate *float64
+	if previous != nil {
+		_, elapsed := sampleWindow(sample, previous)
+		if delta := counterDelta(sample.Archive.LedgerRecords, previous.Archive.LedgerRecords); delta != nil && elapsed > 0 {
+			value := float64(*delta) / elapsed.Seconds()
+			archiveRate = &value
 		}
 	}
 	return hostHistoryPoint{
@@ -527,6 +824,14 @@ func publicHostHistory(sample rawHostSample) hostHistoryPoint {
 		EstabResets: sample.TCP.EstabResets, AttemptFails: sample.TCP.AttemptFails,
 		RetransSegs: sample.TCP.RetransSegs, OutResets: sample.TCP.OutResets,
 		ListenOverflows: sample.TCP.ListenOverflows, ListenDrops: sample.TCP.ListenDrops,
-		SynRetrans: sample.TCP.SynRetrans,
+		SynRetrans:         sample.TCP.SynRetrans,
+		CPUPressureSomePct: pressure.CPUSomePct, MemoryPressureFullPct: pressure.MemoryFullPct,
+		IOPressureFullPct: pressure.IOFullPct, OOMKills: vm.OOMKills,
+		RequestsPerSec: traffic.RequestsPerSec, HTTPP50Ms: traffic.P50Ms,
+		HTTPP95Ms: traffic.P95Ms, HTTPStatus1xxPct: traffic.Status1xxPct,
+		HTTPStatus2xxPct: traffic.Status2xxPct,
+		HTTPStatus3xxPct: traffic.Status3xxPct, HTTPStatus4xxPct: traffic.Status4xxPct,
+		HTTPServerErrorPct: traffic.ServerErrorPct,
+		ArchiveRecords:     sample.Archive.LedgerRecords, ArchiveRecordsPerSec: archiveRate,
 	}
 }

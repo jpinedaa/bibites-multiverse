@@ -250,7 +250,7 @@ The Windows side asks instead, and the service host answers.
 
 ```text
 GET https://<service-domain>/api/viewers
-{"watching":true,"hlsSessions":1,"lastViewerRequestAgeSec":4,"asOf":"2026-08-16T21:04:00Z"}
+{"watching":true,"hlsSessions":1,"lastViewerRequestAgeSec":4,"asOf":"2026-08-16T21:04:00Z","traffic":{"available":true,"complete":true,"windowSeconds":60,"requests":12,"status1xx":0,"status2xx":12,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":8,"p95Ms":21,"routes":[{"id":"pages","requests":12,"status1xx":0,"status2xx":12,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":8,"p95Ms":21},{"id":"api","requests":0,"status1xx":0,"status2xx":0,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":null,"p95Ms":null},{"id":"relay","requests":0,"status1xx":0,"status2xx":0,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":null,"p95Ms":null},{"id":"stream","requests":0,"status1xx":0,"status2xx":0,"status3xx":0,"status4xx":0,"status5xx":0,"p50Ms":null,"p95Ms":null}]}}
 ```
 
 | Field | Meaning |
@@ -259,6 +259,7 @@ GET https://<service-domain>/api/viewers
 | `hlsSessions` | MediaMTX HLS player sessions now |
 | `lastViewerRequestAgeSec` | Seconds since the most recent viewer request, or `null` for none |
 | `asOf` | The UTC time of the reading |
+| `traffic` | Sanitized public request counts, status classes, nginx duration, and normalized route groups |
 
 The response carries `Cache-Control: no-store`.
 A timer refreshes the document at least every 10 seconds.
@@ -277,8 +278,15 @@ person waiting at a `404` is exactly the audience that must start the publisher.
 Loopback requests are ignored, because the service's own health probes must not hold the publisher
 up with nobody watching.
 
-The presence document reports two aggregates.
-It does not record or publish a viewer address, a session identifier, or a request path.
+The publisher decision uses the two audience aggregates above. It does not use
+`traffic`. The traffic object feeds the production-health dashboard. A traffic
+window is complete only when timed log records span its start and current bounds.
+The document does not publish a viewer address, session identifier, raw path,
+or query string.
+
+HTTP `101` responses count in the 1xx class. Their request duration is the
+WebSocket session lifetime, not handshake latency. The p50 and p95 values
+therefore exclude `101` responses.
 
 ### What a viewer sees
 

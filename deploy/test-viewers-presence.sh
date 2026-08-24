@@ -32,6 +32,13 @@ line() { # addr seconds-ago "request" status
     "$request" "$status"
 }
 
+timed_line() { # addr seconds-ago "request" status request-seconds
+  local addr="$1" ago="$2" request="$3" status="$4" request_seconds="$5"
+  printf '%s - - [%s] "%s" %s 512 "-" "probe" mv_msec=%s.000 mv_request_time=%s\n' \
+    "$addr" "$(date -u -d "@$(( NOW - ago ))" '+%d/%b/%Y:%H:%M:%S +0000')" \
+    "$request" "$status" "$(( NOW - ago ))" "$request_seconds"
+}
+
 metrics() { # count
   printf '# HLS sessions\nhls_sessions %s\nhls_sessions_outbound_bytes 918273\n' "$1"
   printf 'hls_muxers{name="bibites"} 1\n'
@@ -139,6 +146,47 @@ printf 'hls_sessions 0\nhls_sessions_outbound_bytes 918273\n' >"$TMP/m-prefix.tx
 out="$(run_case 'prefix' "$TMP/quiet.log" "$TMP/m-prefix.txt")"
 expect prefix hlsSessions "$(field "$out" hlsSessions)" 0
 expect prefix watching    "$(field "$out" watching)" false
+
+# ------------------------------------------------------------ HTTP traffic
+# One timed row before the window proves that the bounded tail covers the full
+# minute. Loopback traffic is a monitor probe, not public demand, and stays out
+# of every total.
+{
+  timed_line 203.0.113.14 65 'GET /old HTTP/1.1' 200 0.010
+  timed_line 203.0.113.14 50 'GET / HTTP/1.1' 200 0.012
+  timed_line 203.0.113.14 40 'GET /api/status?token=top-secret HTTP/1.1' 500 0.100
+  timed_line 203.0.113.14 30 'GET /contract-b/ HTTP/1.1' 101 0.250
+  timed_line 203.0.113.14 20 'GET /stream/bibites/index.m3u8 HTTP/1.1' 404 0.040
+  timed_line 127.0.0.1     10 'GET /healthz HTTP/1.1' 200 0.900
+} >"$TMP/traffic.log"
+out="$(run_case 'traffic' "$TMP/traffic.log" "$TMP/m0.txt")"
+expect traffic available "$(printf '%s' "$out" | jq -r '.traffic.available')" true
+expect traffic complete "$(printf '%s' "$out" | jq -r '.traffic.complete')" true
+expect traffic requests "$(printf '%s' "$out" | jq -r '.traffic.requests')" 4
+expect traffic status1xx "$(printf '%s' "$out" | jq -r '.traffic.status1xx')" 1
+expect traffic status5xx "$(printf '%s' "$out" | jq -r '.traffic.status5xx')" 1
+expect traffic p50Ms "$(printf '%s' "$out" | jq -r '.traffic.p50Ms')" 40.000
+expect traffic p95Ms "$(printf '%s' "$out" | jq -r '.traffic.p95Ms')" 100.000
+expect traffic api-p95 "$(printf '%s' "$out" | jq -r '.traffic.routes[] | select(.id == "api") | .p95Ms')" 100.000
+expect traffic relay-p95 "$(printf '%s' "$out" | jq -r '.traffic.routes[] | select(.id == "relay") | .p95Ms')" null
+expect traffic stream-4xx "$(printf '%s' "$out" | jq -r '.traffic.routes[] | select(.id == "stream") | .status4xx')" 1
+if printf '%s' "$out" | grep -Eq '203\.0\.113\.14|top-secret|/api/status'; then
+  fail "traffic: the public document disclosed an address or raw request path"
+fi
+
+# A timed format that has not covered one full window is available but partial.
+# The dashboard must not read its partial counters as a full minute.
+timed_line 203.0.113.14 20 'GET / HTTP/1.1' 200 0.010 >"$TMP/traffic-partial.log"
+out="$(run_case 'traffic-partial' "$TMP/traffic-partial.log" "$TMP/m0.txt")"
+expect traffic-partial available "$(printf '%s' "$out" | jq -r '.traffic.available')" true
+expect traffic-partial complete "$(printf '%s' "$out" | jq -r '.traffic.complete')" false
+
+# An old timed row proves the format existed once, not that the current window
+# is observable. A stale log must stay unknown instead of reporting zero demand.
+timed_line 203.0.113.14 65 'GET /old HTTP/1.1' 200 0.010 >"$TMP/traffic-stale.log"
+out="$(run_case 'traffic-stale' "$TMP/traffic-stale.log" "$TMP/m0.txt")"
+expect traffic-stale available "$(printf '%s' "$out" | jq -r '.traffic.available')" true
+expect traffic-stale complete "$(printf '%s' "$out" | jq -r '.traffic.complete')" false
 
 # ------------------------------------------------------------------ degraded
 # An unreachable metrics endpoint reads as zero sessions rather than as an error.

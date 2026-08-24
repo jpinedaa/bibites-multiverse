@@ -39,6 +39,9 @@ grep -Fq 'proxy_set_header Upgrade' "$front"
 grep -Fq 'proxy_set_header Connection' "$front"
 grep -Fq 'proxy_set_header X-Forwarded-For   $remote_addr;' "$front"
 grep -Fq 'limit_req_zone  $binary_remote_addr zone=mvenroll:1m rate=2r/m;' "$front"
+grep -Fq "log_format multiverse_timed '" "$front"
+grep -Fq 'mv_msec=$msec mv_request_time=$request_time' "$front"
+grep -Fq 'front-door.access.log multiverse_timed buffer=32k flush=10s;' "$front"
 
 # The peer gate. Three properties matter and each is checked separately: the
 # map exists, loopback is pinned open by an EXACT key (a map consults exact keys

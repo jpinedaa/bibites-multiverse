@@ -27,17 +27,18 @@ Keep these records outside the public repository:
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `ce-reconcile.sh` | Reconciles the host's transfer counter against the invoice once a day. It runs on an operator machine, not on the host. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
-| `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
+| `service-host-sample` | Records CPU, load, memory, disk, PSI, VM events, TCP, service state, sanitized HTTP traffic, and fixed archive counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
 | `coldcopy.sh` | Copies each closed ledger segment to an object store, verifies it against the store, and writes the receipt without which the archive removes nothing. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
-| `viewers-presence.sh` | Publishes whether anyone is watching the broadcast, so the publisher can stop while nobody is. |
+| `viewers-presence.sh` | Publishes audience presence and sanitized public HTTP aggregates from one bounded access-log tail. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay, record-layer and swap arithmetic against fake counters, a fake status document and a fake clock. |
 | `test-coldcopy.sh` | Drives `coldcopy.sh` through a fake AWS CLI, including every way the store can disagree. It makes no API call and reads no credential. |
 | `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
+| `test-service-host-sample.sh` | Drives the host sampler against a fake `/proc` tree and fixed public input documents. |
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
@@ -299,9 +300,11 @@ It compares each reading with a threshold and keeps only the severity.
 The two tools below keep the reading instead, because a change to a live service asks a different
 question: is the service worse than it was fifteen minutes ago.
 
-`service-host-sample` records one sample of this host as a single JSON line.
-It runs unprivileged, reads `/proc`, `systemctl show` and the cgroup files only, and reports every
-value it cannot read as unknown instead of zero.
+`service-host-sample` records one host sample as a single JSON line. It runs
+unprivileged and reports every unreadable value as unknown instead of zero. It
+reads fixed `/proc`, cgroup, and `systemctl show` fields. It also reads the
+sanitized audience document and eight fixed counters from local `/api/status`.
+It does not copy raw request paths, client addresses, or arbitrary status fields.
 Each unit carries `memoryBytes` from `MemoryCurrent` and, beside it, `anonBytes` and `fileBytes`
 from the cgroup.
 `MemoryCurrent` includes page cache, so it moves with file activity and is the wrong field for a
@@ -332,9 +335,10 @@ sudo tail -n 3 /var/lib/multiverse/metrics/service-host.jsonl | jq
 Create the metrics directory before the timer runs.
 The unit confines its writes to that path, and it cannot start while the path is absent.
 
-The timer samples every minute, and one sample is about a kilobyte, so the file grows by roughly
-1.5 MB each day.
-Its TCP counters are cumulative, so compare two samples instead of reading one.
+The timer samples every minute. A populated sample is about two kilobytes, so
+the file grows by roughly 3 MB each day. TCP, PSI, VM, and archive counters are
+cumulative. Compare adjacent samples to derive interval values. HTTP counts
+already describe one complete bounded window.
 
 `health-snapshot.sh` reads the published map and prints one JSON record for each sample.
 It only sends GET requests, so it is safe against a live service and safe from a workstation.
@@ -765,6 +769,7 @@ Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
 Use `test-coldcopy.sh` after a `coldcopy.sh` change.
 Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
+Use `test-service-host-sample.sh` after a `service-host-sample` change.
 Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
 Use `test-ci-gate.sh` after a `ci-gate.sh` change.
 Use `test-deploy.sh` after a `deploy.sh` change.
@@ -867,6 +872,7 @@ deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
 deploy/test-viewers-presence.sh
+deploy/test-service-host-sample.sh
 deploy/test-ce-reconcile.sh
 deploy/test-ci-gate.sh
 deploy/test-deploy.sh
@@ -916,6 +922,11 @@ clock.
 Its cases are the four ways the signal has to be right: silence reads as nobody, a failed request
 still proves that a person is waiting, a loopback probe is not an audience, and a player that
 reached the stream counts whatever the log says.
+
+`test-service-host-sample.sh` also needs no root, network, or host service. It
+uses a fake `/proc` tree and fixed traffic and archive documents. It checks the
+PSI and VM fields, the fixed projections, unavailable sources, and the privacy
+boundary.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.

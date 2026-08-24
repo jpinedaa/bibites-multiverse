@@ -112,10 +112,11 @@ nginx, the relay, the archive and the stream origin had never sampled itself at
 all. When every peer dropped together, the one end common to every link was the
 one end with no record of its own state.
 
-Both samplers are unprivileged, read `/proc` and `systemctl show` only, and
-report anything they cannot read as unknown. Neither walks a directory: on a
-two-vCPU box a `du` over the genome store is the most expensive thing a monitor
-could do, and it is forbidden.
+Both samplers are unprivileged and report unreadable values as unknown. They
+read fixed `/proc` files and fixed `systemctl show` properties. The service
+host also reads two bounded local summaries: sanitized nginx traffic and fixed
+archive counters. Neither sampler walks a directory. A `du` over the genome
+store is forbidden because it can consume a full CPU on the service host.
 
 On the service host the fields that matter most are the **cumulative TCP
 counters** — `estabResets`, `retransSegs`, `outResets`, `listenOverflows`,
@@ -152,6 +153,40 @@ The `/proc` reads are taken for named single-process units only — the archive
 by default. A per-process resident set describes a unit truthfully only when
 the unit is one process, and nginx is a master with workers.
 
+### Public HTTP aggregation
+
+The front-door log keeps its combined-log fields and appends two machine fields.
+`mv_msec` gives a numeric UTC timestamp. `mv_request_time` gives nginx processing
+time in seconds. It does not measure DNS, connection setup, or browser rendering.
+
+`viewers-presence.sh` reads one bounded log tail. It excludes loopback requests
+and groups public paths as pages, APIs, relay, or stream. The output contains
+request counts, status classes, and p50 and p95 duration. It contains no client
+address, query string, or raw request path.
+
+A WebSocket upgrade returns HTTP `101`. Its nginx duration is the session
+lifetime, not handshake latency. Status results keep it in the 1xx class.
+Latency percentiles exclude it.
+
+A window is complete only when timed records span its start and current bounds.
+An incomplete window stays available but does not become a rate. The service
+sampler copies complete aggregates into its one-minute record. `/api/health`
+divides counts by the recorded window length.
+
+`asOf` records the time that `viewers-presence.sh` produced each document. It must
+use the exact `YYYY-MM-DDTHH:MM:SSZ` form, with a valid calendar date and UTC whole
+seconds. The sampler carries this timestamp into each host record. It rejects
+impossible dates, leap seconds, offsets, fractions, or fields without a leading zero.
+
+A traffic window is complete only when the producer time differs from the host time
+by 30 seconds or less. This tolerance applies equally to past and future timestamps.
+The API repeats both rules for each history point. It sets `complete` false and omits
+aggregate and route rates, percentiles, and status percentages from invalid points.
+
+The sampler also records the archive ledger count. The API differences adjacent
+counts and divides by elapsed sample time. Missing samples and counter resets
+become gaps, not negative archive rates.
+
 ### Utilisation is not saturation
 
 The most expensive lesson this service has produced. A host pinned at 96–99% CPU
@@ -160,9 +195,9 @@ times out of 48 while memory sat between 85 and 99 percent. Utilisation says how
 busy a resource is. It does not say whether anything is *waiting*, and waiting is
 what breaks a deadline.
 
-Pressure stall information says it directly. The world host samples it; the
-service host does not yet, which is a Layer 1 gap rather than a value the
-dashboard may infer from CPU and memory utilization:
+Pressure stall information says it directly. Both host samplers record the
+cumulative `some` and `full` counters. The service-host API converts adjacent
+counters into percentages for each one-minute interval:
 
 ```text
 /proc/pressure/cpu     full total    time no task could run for want of CPU
@@ -270,10 +305,11 @@ healthy archive. `monitor.sh` treats a zero `rollupSavedAtMs` beside zero
 segments as "not reported yet" rather than as "nothing there", and anything
 else reading these fields has to do the same.
 
-**The sampler is unaffected.** `service-host-sample` reads `/proc` and systemd
-unit properties and takes nothing from `/api/status`, so none of the above
-changes it, its interval, or its file. Layer 1 is where the archive's memory and
-its replay peak are recorded, and it records them the same way it did before.
+**The sampler reads a fixed status summary.** `service-host-sample` requests
+`/api/status` once and selects eight archive counters. It does not copy the
+full status object or run archive maintenance. The request does not change the
+one-minute interval or the output file. Layer 1 still records archive memory
+and its replay peak from system and process files.
 
 Two things this layer does not yet answer, both of which are the difference
 between a disconnect that explains itself and one that does not:
@@ -449,28 +485,30 @@ decoration.
 
 ## The production-health dashboard
 
-`/health` joins the live results that already reach the service host. It does
-not add a collector and does not invent a new severity model:
+`/health` joins live results that reach the service host. It uses the existing
+severity model and adds only bounded local aggregation:
 
 - `/api/status` supplies current world, routing, and archive state.
-- `/api/viewers` supplies the ten-second broadcast audience signal.
+- `/api/viewers` supplies the ten-second audience signal. Its producer also
+  summarizes complete nginx traffic windows without client addresses or raw paths.
 - `/api/health` supplies the scheduled monitor's current verdicts and at most
   the newest 121 service-host samples: about two hours at the sampler's
-  one-minute cadence.
+  one-minute cadence. Each sample includes host PSI, traffic aggregates, and
+  fixed archive counters.
 
 The page uses one visual model of the production system:
 
 1. The system map shows hosts, services, traffic paths, data paths, and current flow.
 2. Eight headline signals show checks, worlds, migrations, records, gaps, CPU, memory, and disk.
-3. Compute shows aligned host charts, saturation gauges, service memory, and missing instruments.
-4. Cloud and services shows monitor checks, systemd state, route verdicts, and provider verdicts.
-5. Application and traffic shows worlds, relay state, TCP events, audience state, and HTTP gaps.
-6. Archive and data shows the record pipeline, integrity counters, replay cost, storage, and retention.
+3. Compute shows host use, PSI stalls, saturation gauges, and service memory.
+4. Cloud and services shows checks, systemd state, route traffic, latency, failures, and provider verdicts.
+5. Application and traffic shows HTTP history, relay state, TCP events, worlds, and audience state.
+6. Archive and data shows record-rate history, the pipeline, integrity, replay, storage, and retention.
 7. Data coverage shows the age, cadence, and boundary of each source.
 
-All host charts use the same two-hour range. A gap means unknown data, not zero. Tooltips explain
-each chart, status mark, metric, path, stage, and coverage source. They work with a pointer or
-keyboard focus.
+All host charts use the same two-hour range. A gap means unknown data, not zero.
+Chart axes show UTC time. Pointer movement and arrow keys show exact sample values.
+Tooltips identify the measure, unit, source, and correct interpretation.
 
 ### View the dashboard
 
@@ -514,15 +552,13 @@ through fixed lists. Adding a monitor file does not make it public; adding a
 public field requires an explicit code change and a test.
 
 The dashboard names its missing coverage beside its results. World-host
-performance and PSI still live only in `performance.jsonl`; service-host PSI
-is not sampled; private daily and per-deployment verification does not feed the
-public host; deployment health windows remain in their receipts; raw provider
-metrics and costs remain private even though their safe monitor verdicts are
-shown; no external front-door dead-man exists; the audience signal is not a
-synthetic publisher-start or video-playback test; and there is no continuous
-CPU or heap profiler. Showing those as unavailable is part of the result. It
-prevents an on-host dashboard from being mistaken for the off-host
-observability tier this standard still requires.
+performance and PSI still live only in `performance.jsonl`. Private daily and
+per-deployment verification does not feed the public host. Deployment health
+windows remain in their receipts. Raw provider metrics and costs remain
+private, although the dashboard shows their safe verdicts. No external
+front-door dead-man exists. The audience signal is not a synthetic playback
+test. No continuous CPU or heap profiler exists. These unavailable results
+prevent confusion between the on-host dashboard and the required off-host tier.
 
 ## Deployment tracking
 
@@ -753,12 +789,16 @@ what is actually running.
 - **Both host samplers.** The world host's sampler now also records PSI,
   `/proc/vmstat` and per-world resident memory, keeping every field it already
   had. The service host's sampler and its one-minute timer are installed and
-  enabled. Layer 1's table gives the interval and the path for each.
+  enabled. The repository sampler now also collects PSI, VM events, sanitized
+  nginx traffic, and fixed archive counters. That extension is not a production
+  result until its revision is deployed. Layer 1 lists each interval and path.
 - **The production-health dashboard.** The public
   [`/health`](https://bibitesmultiverse.com/health) page joins the current monitor results,
   service state, archive state, audience state, and a bounded tail of service-host samples. The
   page organizes them into a system map and four visual layers. Its fixed
   [`/api/health`](https://bibitesmultiverse.com/api/health) projection excludes private values.
+  The repository page adds PSI, HTTP, route, and archive-rate charts. Those
+  panels require the matching sampler revision and are not live before deployment.
   The dashboard remains on-host. It is not an off-host store or a dead-man check. Deployment
   identity remains in the private source lock and deployment receipts.
 - **The deployment health window.** `deploy/health-snapshot.sh` is in the
@@ -836,10 +876,11 @@ what is actually running.
   `bibites-game@%i` wants `bibites-timescale@%i`, so a world that systemd brings
   back applies its target scale again instead of running silently at `x1`.
 
-Most readings above are files on the host that produced them. The dashboard now reads the
-scheduled monitor results and a bounded service-host sample tail. A person still reads the
-world-host files and deployment windows. The reconciliation is produced elsewhere and read by
-the monitor. The monitor must therefore report when it does not arrive.
+Most readings above are files on the host that produced them. The dashboard
+reads scheduled monitor results and a bounded service-host sample tail. A
+person still reads world-host files and deployment windows. The reconciliation
+is produced elsewhere and read by the monitor. The monitor must report when it
+does not arrive.
 
 ### What does not exist yet
 
