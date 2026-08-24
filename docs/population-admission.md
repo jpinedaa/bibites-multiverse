@@ -38,6 +38,27 @@ When every alternate is unavailable, the source honors the receiver's 15-second 
 may retry the current live world because population pressure is transient, but it does not reset
 the original bounce deadline.
 
+A relay transport refusal is a different event. `NOT_FORWARDED` means the destination's bounded
+transport queue did not accept that attempt. The source uses its bounded progress path only when
+all these conditions are true:
+
+- `neverForwarded` is present and true;
+- `relaySessionId` matches the session recorded on the migration;
+- no `FORWARD_RECEIPT` contradicts the proof under that same session.
+
+The source records `refused`, the transport-refused slot, and the first deadline in one durable
+update. It then tries the next compatible, untried world on the original axis. The migration ID,
+body, edge, geometry, velocity, heading, and lineage do not change.
+
+The first deadline is `bounceTimeoutMs` after the first exact refusal. A reroute, retry, reconnect,
+restart, or journal compaction does not reset it. Exhausting the walk or `maxReroutes` also ends
+the chain. Each terminal condition bounces the migration once.
+
+False, missing, mismatched, or contradicted proof leaves the migration `sent`. The same rule
+applies after an alternate is selected. The sidecar fsyncs `sent` before socket enqueue, so a
+crash or enqueue error cannot cause another send. The entry can receive an answer or become lost;
+it cannot bounce on its earlier refusal deadline.
+
 ## Admission modes
 
 | Mode | Behavior |
@@ -149,6 +170,16 @@ caused a regression. Preserve both baselines and investigate the missing ACK/NAC
 infer that a receipt proves destination custody, and do not loosen at-most-once routing to hide the
 counter.
 
+A later production-shaped discriminator isolated a separate source-side wedge. Twelve public
+samples used 30-second intervals. Slot 7 reported positive rates on all four lanes in samples
+1–6, then zero rates on all four lanes in samples 7–12. It stayed live, mod-connected, populated,
+and open on four edges while `custodyDepth` stayed at 64.
+
+During the zero period, its read-only journal diagnostic reported zero pending ACKs, zero paced
+arrivals, and zero unresolved sends. It also reported no discarded bytes. This combination
+identifies refused or pending outbound entries at the cap. It does not identify a sent timeout or
+an ACK drain. Contract B §30 defines the bounded correction without weakening the receipt rule.
+
 The immediate rollback is `adaptive-shadow`, which preserves estimator and journal state. If an
 enforcing fixed fallback is needed while the adaptive calculation is investigated, the reviewed
 starting points are 40 organisms for each hosted world and 10 for each world on the shared local
@@ -169,6 +200,13 @@ rollback.
   to the next peer, and require exactly one live-map hop at the peer that ACKs. A second regression
   observes that ACK before the rerouted payload copy and requires peer matching to keep it off the
   rejected destination.
+- `TestSixtyFourTransportRefusalsUseTheAlternateThenBounceOnce` starts with 64 outbound entries.
+  It proves two same-axis queues refused each entry, then verifies one bounce per migration. A
+  valid local acknowledgment clears total custody below the 64-entry cap.
+- `TestTransportRefusalProofSafetyMatrix` covers true, false, missing, mismatched, contradicted,
+  and wrong-code proof. Only the exact proof starts the bounded walk.
+- Restart, compaction, deadline, `maxReroutes`, crash, and closed-writer tests verify durable
+  progress. They also verify that a committed alternate cannot retry or bounce.
 - On 2026-08-23, five Windows worlds and six hosted Linux worlds ran the candidate in
   `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
   requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds
