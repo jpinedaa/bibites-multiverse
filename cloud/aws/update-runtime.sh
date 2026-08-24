@@ -80,7 +80,8 @@ validation="$repo/cloud/aws/lib/validation.sh"
 # a missing receipt field fall back to the caller environment or artifacts.env.
 unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX STAGING_SCOPE \
   RUNTIME_OBJECT RUNTIME_SHA256 GAME_OBJECT GAME_SHA256 \
-  BEPINEX_OBJECT BEPINEX_SHA256 MANIFEST_OBJECT MANIFEST_SHA256
+  BEPINEX_OBJECT BEPINEX_SHA256 MANIFEST_OBJECT MANIFEST_SHA256 \
+  MANIFEST_PREIMAGE_ETAG
 # shellcheck source=/dev/null
 . "$dist/staged.env"
 
@@ -91,6 +92,7 @@ unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX STAGING_SCOPE \
 for setting in AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX \
   RUNTIME_OBJECT RUNTIME_SHA256 GAME_OBJECT GAME_SHA256 \
   BEPINEX_OBJECT BEPINEX_SHA256 MANIFEST_OBJECT MANIFEST_SHA256 \
+  MANIFEST_PREIMAGE_ETAG \
   BIBITES_AWS_ACCOUNT_ID BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX; do
   [ -n "${!setting:-}" ] || {
     printf 'Set %s before the runtime update.\n' "$setting" >&2
@@ -119,6 +121,10 @@ done
 }
 [ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
   echo 'MANIFEST_OBJECT does not match the pinned manifest digest' >&2
+  exit 1
+}
+[[ "$MANIFEST_PREIMAGE_ETAG" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]] || {
+  echo 'MANIFEST_PREIMAGE_ETAG must be one quoted S3 ETag' >&2
   exit 1
 }
 bibites_require_s3_key "$expected_prior_runtime_object" \
@@ -314,7 +320,7 @@ jq -e --arg instance "$instance" '
 
 read -r -d '' remote_script <<'REMOTE' || true
 set -euo pipefail
-[ "$#" -eq 20 ] || { echo 'runtime update received the wrong argument count' >&2; exit 2; }
+[ "$#" -eq 21 ] || { echo 'runtime update received the wrong argument count' >&2; exit 2; }
 
 aws_region="$1"
 expected_account="$2"
@@ -329,13 +335,14 @@ bepinex_object="${10}"
 bepinex_sha256="${11}"
 manifest_object="${12}"
 manifest_sha256="${13}"
-pointer_credential_prefix="${14}"
-relay_private_ip="${15}"
-relay_domain="${16}"
-runtime_root="${17}"
-expected_prior_runtime_object="${18}"
-expected_prior_runtime_sha256="${19}"
-expected_prior_pointer_etag="${20}"
+manifest_preimage_etag="${14}"
+pointer_credential_prefix="${15}"
+relay_private_ip="${16}"
+relay_domain="${17}"
+runtime_root="${18}"
+expected_prior_runtime_object="${19}"
+expected_prior_runtime_sha256="${20}"
+expected_prior_pointer_etag="${21}"
 runtime_key="$artifact_prefix/$runtime_object"
 
 archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
@@ -363,7 +370,8 @@ set +e
   "$new_runtime" "$archive" "$aws_region" "$expected_account" "$data_volume_id" \
   "$artifact_bucket" "$artifact_prefix" "$runtime_object" "$runtime_sha256" \
   "$game_object" "$game_sha256" "$bepinex_object" "$bepinex_sha256" \
-  "$manifest_object" "$manifest_sha256" "$pointer_credential_prefix" \
+  "$manifest_object" "$manifest_sha256" "$manifest_preimage_etag" \
+  "$pointer_credential_prefix" \
   "$relay_private_ip" "$relay_domain" "$runtime_root" \
   "$expected_prior_runtime_object" "$expected_prior_runtime_sha256" \
   "$expected_prior_pointer_etag"
@@ -386,6 +394,7 @@ remote_arguments=(
   "$BEPINEX_SHA256"
   "$MANIFEST_OBJECT"
   "$MANIFEST_SHA256"
+  "$MANIFEST_PREIMAGE_ETAG"
   "$BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX"
   "$relay_private_ip"
   "$relay_domain"
