@@ -5,6 +5,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 runner="$here/run-windows.ps1"
 stopper="$here/stop-windows.ps1"
 watcher="$here/watch-viewers.ps1"
+updater_windows_helper="$here/update-sidecar-windows.ps1"
 profile_ini="$here/obs-basic.ini"
 encoder_json="$here/obs-stream-encoder.json"
 installer="$here/install.sh"
@@ -639,8 +640,11 @@ if run_hls_fixture invalid-segment; then fail 'HLS readiness accepted a parent s
   fail 'an unsafe HLS segment reached a media request'
 assert_hls_fixture_clean
 
+# The reusable updater fixtures exercise the complete sidecar-only transaction.
+"$here/test-update-sidecar.sh"
+
 if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
-  for script in "$runner" "$stopper" "$watcher"; do
+  for script in "$runner" "$stopper" "$watcher" "$updater_windows_helper"; do
     windows_script="$(wslpath -w "$script")"
     powershell.exe -NoProfile -Command '& {
       param($path)
@@ -655,6 +659,11 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
       }
     }' "$windows_script"
   done
+
+  updater_windows_helper_path="$(wslpath -w "$updater_windows_helper")"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation AssertNoReparse \
+    -Path "$updater_windows_helper_path"
 
   # The ACL fixture uses a Windows-local path. It checks the effective rule set.
   windows_acl_root="$(powershell.exe -NoProfile -Command \
@@ -677,6 +686,27 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
     }
   }' "$windows_acl_root"
 
+  # File.Replace needs a real backup path on Windows PowerShell/.NET. Exercise
+  # the same NTFS operation as the updater, not only the shell transaction mock.
+  atomic_wsl="$windows_acl_wsl/atomic-replace"
+  mkdir -p "$atomic_wsl"
+  printf 'old executable fixture\n' >"$atomic_wsl/destination.exe"
+  printf 'new executable fixture\n' >"$atomic_wsl/source.exe"
+  atomic_source_sha="$(sha256sum "$atomic_wsl/source.exe" | awk '{print $1}')"
+  atomic_old_sha="$(sha256sum "$atomic_wsl/destination.exe" | awk '{print $1}')"
+  [ "$atomic_source_sha" != "$atomic_old_sha" ] || fail 'the NTFS replacement fixture hashes are equal'
+  atomic_source_windows="$(wslpath -w "$atomic_wsl/source.exe")"
+  atomic_destination_windows="$(wslpath -w "$atomic_wsl/destination.exe")"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+    "$updater_windows_helper_path" -Operation AtomicReplace \
+    -Source "$atomic_source_windows" -Destination "$atomic_destination_windows"
+  [ ! -e "$atomic_wsl/source.exe" ] || fail 'the NTFS replacement kept its source file'
+  [ "$(sha256sum "$atomic_wsl/destination.exe" | awk '{print $1}')" = "$atomic_source_sha" ] ||
+    fail 'the NTFS replacement destination does not contain the source bytes'
+  [ "$(find "$atomic_wsl" -maxdepth 1 -type f | wc -l)" -eq 1 ] ||
+    fail 'the NTFS replacement kept a temporary backup file'
+  printf 'Windows NTFS atomic replacement: PASS\n'
+
   runner_windows="$(wslpath -w "$runner")"
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
     "$runner_windows" -ArgumentQuotingSelfTest
@@ -687,4 +717,4 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   "$here/test-watch-viewers.sh"
 fi
 
-printf 'broadcast presentation, identity, lock, ACL, argv, map, and HLS readiness: PASS\n'
+printf 'broadcast presentation, identity, lock, ACL, argv, map, HLS, and sidecar update: PASS\n'

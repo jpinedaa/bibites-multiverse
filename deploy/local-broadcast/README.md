@@ -146,13 +146,17 @@ The installer can find a pending record beside a completed identity.
 It removes the pending record only when its peer ID and secret match the completed identity.
 If they do not match, the installer keeps both records and stops.
 
-Three files below `%LOCALAPPDATA%\BibitesMultiverse\broadcast\multiverse\` carry the identity:
+The installer manages three identity files below
+`%LOCALAPPDATA%\BibitesMultiverse\broadcast\multiverse\`:
 
 | File | Contents |
 |---|---|
 | `peer-secret.txt` | The map credential secret |
 | `enrollment.json` | The peer identity and relay address |
 | `data\peer-id` | The durable peer identity that the sidecar uses |
+
+The sidecar later writes `data\contract-a.token` below the same directory.
+This token is a static identity file.
 
 The private OBS profile contains the RTMP publish password.
 The installer reads the password from the origin through SSH.
@@ -163,7 +167,7 @@ The installer keeps an existing password and generates one only when none exists
 The watcher reads it from that file, so no obs-websocket password reaches a command line either.
 
 Do not print, copy, or commit the OBS `service.json` file, the obs-websocket `config.json` file,
-`peer-secret.txt`, or `enrollment.json`.
+`peer-secret.txt`, `enrollment.json`, or `data\contract-a.token`.
 
 ## Requirements
 
@@ -276,8 +280,106 @@ The line `contract B: slot granted` reports the world's place on the map.
 The `modConnected` value shows that the game mod reached the sidecar.
 The `exportEdges` value must contain the configured map edges.
 
+### Update only the sidecar
+
+If you change only the sidecar executable, use `update-sidecar.sh`.
+Do not run `install.sh` for this procedure.
+
+Get the old values from the protected installation record.
+Get the new values from the published release assets.
+Use lowercase hashes and complete 40-character Git revisions.
+
+Prepare the sealed transaction:
+
+```sh
+windows_local_app_data="$(
+  powershell.exe -NoProfile -Command \
+    '[Environment]::GetFolderPath("LocalApplicationData")' | tr -d '\r'
+)"
+broadcast_root="$(wslpath -u "$windows_local_app_data")/BibitesMultiverse/broadcast"
+
+update_args=(
+  --root "$broadcast_root"
+  --candidate '/absolute/wsl/path/to/multiverse-sidecar.exe'
+  --expected-old-sha256 '<installed-sidecar-lowercase-sha256>'
+  --expected-new-sha256 '<candidate-sidecar-lowercase-sha256>'
+  --expected-old-revision '<installed-sidecar-40-character-git-revision>'
+  --expected-new-revision '<candidate-sidecar-40-character-git-revision>'
+  --expected-peer-id '<sealed-public-peer-id>'
+  --expected-slot 7
+  --status-url 'https://<service-domain>/api/status'
+)
+```
+
+Run the read-only preflight first:
+
+```sh
+./deploy/local-broadcast/update-sidecar.sh "${update_args[@]}" --dry-run
+```
+
+The preflight holds the shared installation lock.
+If a legacy installation has no lock file, it creates one empty owner-only lock.
+It compares the exact paths, hashes, clean VCS stamps, slot, identity, and map state.
+It also rejects symbolic links and Windows reparse points.
+It runs an owner-only temporary copy of the Windows helper.
+It verifies the fixed helper SHA-256 before each use.
+The command does not print the sealed peer identity.
+
+Run the transaction with the same sealed values:
+
+```sh
+./deploy/local-broadcast/update-sidecar.sh "${update_args[@]}"
+```
+
+The updater saves only the old sidecar executable.
+It keeps the backup in a protected `.sidecar-update-backups` directory on the broadcast volume.
+It never backs up or restores custody, journal, or save data.
+Those files continue forward during an update or rollback.
+
+The updater keeps these static items unchanged:
+
+- The identity record, secret, peer ID, and `data\contract-a.token` file.
+- The Multiverse plugin.
+- The installed runner, stopper, watcher, configuration, and WSL control scripts.
+- The OBS profile, encoder, publish, scene, and obs-websocket configuration files.
+- The ACLs on all static files, the broadcast root, `multiverse`, and `multiverse\data`.
+
+The updater stages the candidate on the same NTFS volume.
+It stops the installed service and makes sure that all private processes and supervisors are down.
+It then replaces the executable atomically and reapplies the exact saved ACL.
+
+After the start, the updater requires exactly one private runtime set.
+It also requires the expected tmux session, tunnel, slot, map connection, and four export directions.
+It compares the sidecar ACL again after the start and at each observation boundary.
+
+The final observation uses 21 samples at 30-second intervals.
+It requires cumulative source migrations to increase in each exact five-minute window.
+It also rejects two consecutive samples where all naturally open outbound lanes report zero.
+Naturally closed lanes are outside this rule.
+The receipt shows the cumulative start, midpoint, and end totals.
+
+If the shell receives HUP, INT, QUIT, or TERM, the updater uses the same recovery path.
+The updater starts a runtime only after its executable and static-file seals pass.
+It does not start from an unsealed script, plugin, configuration, or executable.
+An uncatchable process or machine failure cannot run automatic recovery.
+After such a failure, do not start the broadcaster until you identify its executable and process state.
+Use the protected backup and sealed hashes for manual recovery.
+
+The updater uses these exit statuses:
+
+| Status | Meaning |
+|---|---|
+| `0` | The dry-run or update completed. |
+| `20` | The transaction stopped before service stop or executable replacement. |
+| `30` | A pre-replacement stop or check failed, and bounded recovery made the old runtime healthy. |
+| `40` | A later step failed, and executable-only rollback made the old runtime healthy. |
+| `50` | Recovery did not reach a known healthy state. Manual recovery is necessary. |
+
+If the status is `50`, stop and inspect the private installation.
+Do not continue the rollout automatically.
+
 The website names this world only when the hosted archive is told which peer it is.
-Set `MV_BROADCAST_PEER_ID` to the value printed above, then run
+Set `MV_BROADCAST_PEER_ID` to the sealed public peer ID, then run
 `provision.sh --only envfiles` on the service host and restart the archive.
 Read the [live broadcast design](../../docs/live-broadcast.md), *Naming the world on the pages*.
 Until then both pages say the world is unknown.
