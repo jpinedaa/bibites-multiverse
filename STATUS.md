@@ -26,19 +26,30 @@ The production-health dashboard is live. It organizes production into one system
 visual layers: Compute, Cloud and services, Application and traffic, and Archive and data. Eight
 headline signals show checks, worlds, migration flow, records, gaps, CPU, memory, and disk. Host
 and TCP charts use the bounded two-hour service-host window. Check matrices, world grids, service
-memory bars, pipeline stages, and a coverage strip show the other live results. Every visual has a
-hover and keyboard-focus tooltip.
+memory bars, pipeline stages, and a coverage strip show the other live results. Tooltips explain
+each static and dynamic visual. Full charts show UTC x-axis values and exact values under pointer
+or keyboard inspection.
 
-At the `2026-08-22T00:06Z` closeout check, availability and record-integrity checks passed.
-All six public routes returned HTTP `200`. Sixteen slots were live, and one previously dark slot
-stayed dark. The dashboard reports the overall result as critical because the old archive-memory
-check still models every permanent record as resident memory. The current archive uses bounded
-roll-up and duplicate-window state, so that model does not describe its current memory shape.
-The dashboard shows this known critical result without weakening or hiding it.
+Production runs exact public feature commit [`c9e4f3a`](https://github.com/jpinedaa/bibites-multiverse/commit/c9e4f3a2601fda3dd631eec018758e99c0952162).
+It is published on `feat/health-dashboard-missing-metrics` but is not yet on public `main`.
+The `2026-08-24T19:40Z` closeout verified Linux pressure, VM events, public request rate, and HTTP
+status classes. It also verified nginx p50 and p95 duration, fixed route groups, and archive input
+rate. Host verification passed 34 checks with no failure. All eight public routes returned HTTP
+`200`. Two complete post-change samples passed the API shape and privacy checks.
+
+The newest complete sample reported CPU busy at `13.1%` and available memory at `40.84%`.
+Public traffic was `2.53 requests/s`, with p50 at `1 ms`, p95 at `5 ms`, and no server errors.
+The archive received `33.88 records/s`. The guarded activation gated participants for 71 seconds.
+Twelve of 19 slots were live after reconnection.
+
+The overall result remains critical. Data-volume use is `90%`. The old archive-memory check also
+models every permanent record as resident memory. The current archive uses bounded roll-up and
+duplicate-window state, so that model does not describe its current memory shape. The dashboard
+shows both critical results.
 
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
-history store. Gray gaps identify request telemetry, public probes, centralized world-host
-performance, pressure stalls, and continuous profiles that no current feed supplies.
+history store. Gray gaps identify public probes, centralized world-host performance, and
+continuous profiles that no current feed supplies.
 
 ### Zero-lane refusal progress
 
