@@ -859,7 +859,8 @@ func TestPageShowsPopulationAdmissionOnEachLiveMapCell(t *testing.T) {
 func TestPageReplaysARefusalBeforeTheConfirmedReroute(t *testing.T) {
 	page := statusPageHTML
 	for _, want := range []string{
-		"hp.refusedSlots", "function hopPlan", "function hopAttempt",
+		"raw = hp.refusedSlots || []", "refused.push(slot)", "function hopPlan",
+		"function hopAttempt",
 		"function hopSteps", "function materializeHopAttempt", "function startHopAttempt",
 		"function rejectCell", `label.textContent = "REFUSED · → SLOT " + next`,
 		"HOPTRYMS", "HOPREJECTMS", ".hoproute{", ".hoprejected .hopring",
@@ -883,6 +884,43 @@ func TestPageReplaysARefusalBeforeTheConfirmedReroute(t *testing.T) {
 	if !strings.Contains(page, "rejectCell(q.refused[i]") ||
 		!strings.Contains(page, "q.attempts.length-1") {
 		t.Fatal("reduced motion hides the refusal chain or uses the rejected endpoint")
+	}
+}
+
+// TestPageDoesNotInferARefusalFromLaterStatus protects the event-time boundary.
+// onHops plans an ACK-confirmed delivery against the newest status snapshot. An
+// intervening slot can connect or close after that ACK. That later state can
+// change route geometry, but it is not proof that the slot refused this hop.
+func TestPageDoesNotInferARefusalFromLaterStatus(t *testing.T) {
+	const startMark = "function hopPlan("
+	const endMark = "\nfunction onHops("
+	start := strings.Index(statusPageHTML, startMark)
+	if start < 0 {
+		t.Fatalf("the page is missing %q", startMark)
+	}
+	rest := statusPageHTML[start:]
+	end := strings.Index(rest, endMark)
+	if end < 0 {
+		t.Fatalf("the page is missing %q after hopPlan", endMark)
+	}
+	plan := rest[:end]
+
+	// The refusal list has one source: the event evidence in /api/hops. Current
+	// admission and lane state must not synthesize a refused stop or label.
+	for _, forbidden := range []string{
+		"admissionEnforcing", "admissionClosed", "hopLane(", "lane.toSlot",
+	} {
+		if strings.Contains(plan, forbidden) {
+			t.Fatalf("hopPlan infers a refusal from later status: found %q", forbidden)
+		}
+	}
+	if !strings.Contains(plan, "raw = hp.refusedSlots || []") ||
+		!strings.Contains(plan, "refused.push(slot)") ||
+		strings.Count(plan, "refused.push(") != 1 {
+		t.Fatal("hopPlan does not take its refusal chain only from explicit hop evidence")
+	}
+	if !strings.Contains(plan, "var delivered = hopAttempt(d, hp, hp.toSlot, false)") {
+		t.Fatal("a hop with no refusal evidence loses its ACK-confirmed delivery route")
 	}
 }
 
