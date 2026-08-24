@@ -601,6 +601,11 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 		!*refused.NeverForwarded {
 		t.Fatalf("unique full-queue refusal = %+v, want NOT_FORWARDED with neverForwarded:true", refused)
 	}
+	if refused.RefusedAttempt == nil || refused.RefusedAttempt.DestSlot != reservation.Slot ||
+		refused.RefusedAttempt.RerouteCount != 0 {
+		t.Fatalf("unique full-queue attempt = %+v, want slot %d reroute 0",
+			refused.RefusedAttempt, reservation.Slot)
+	}
 	if got := r.srv.ForwardedCount(); got != 8 {
 		t.Fatalf("full queue produced %d forwarding records, want exactly 8 accepted enqueues", got)
 	}
@@ -627,6 +632,10 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 		SourceSlot:  2,
 		DestSlot:    reservation.Slot,
 		ExitEdge:    contracta.EdgeE,
+		Reroute: &contractb.Reroute{
+			FromSlot: reservation.Slot, Count: 3,
+			Proof: contractb.ProofPeerRefused, AtMs: time.Now().UnixMilli(),
+		},
 	})
 	deadline = time.Now().Add(5 * time.Second)
 	for {
@@ -634,6 +643,11 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 			if got.NeverForwarded == nil || *got.NeverForwarded {
 				t.Fatalf("already-recorded queue refusal carried neverForwarded=%v, want false",
 					got.NeverForwarded)
+			}
+			if got.RefusedAttempt == nil || got.RefusedAttempt.DestSlot != reservation.Slot ||
+				got.RefusedAttempt.RerouteCount != 3 {
+				t.Fatalf("already-forwarded queue refusal attempt = %+v, want slot %d reroute 3",
+					got.RefusedAttempt, reservation.Slot)
 			}
 			break
 		}

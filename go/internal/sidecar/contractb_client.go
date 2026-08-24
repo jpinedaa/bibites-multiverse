@@ -1032,10 +1032,15 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 		return true
 	}
 	relayGenerated := nack.SourcePeer == ""
+	peerAttempt := relayGenerated || s.peerNackMatchesCurrentDestinationLocked(st, nack.SourcePeer)
+	attemptProof := nack.ProvesAttemptRefusal(
+		st.RelaySessionID, st.Entry.DestSlot, st.RerouteCount)
 	s.log.Warn("contract B: MIGRATION_NACK", "migrationId", nack.MigrationID,
 		"code", nack.Code, "class", nack.Class, "relayGenerated", relayGenerated,
 		"neverForwarded", nack.NeverForwarded, "relaySessionId", nack.RelaySessionID,
-		"entrySession", st.RelaySessionID, "handoff", st.Handoff, "message", nack.Message)
+		"refusedAttempt", nack.RefusedAttempt, "attemptProof", attemptProof,
+		"entrySession", st.RelaySessionID, "entryDestSlot", st.Entry.DestSlot,
+		"entryRerouteCount", st.RerouteCount, "handoff", st.Handoff, "message", nack.Message)
 
 	now := s.now()
 	sc := s.schedFor(nack.MigrationID)
@@ -1046,6 +1051,16 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	sc.nextForward = now.Add(retry)
 
 	switch {
+	case !relayGenerated && !peerAttempt:
+		// Peer NACKs predate attempt correlation, but sourcePeer still names the
+		// destination that emitted one. A duplicate from a destination already
+		// left behind cannot refuse or bounce the current alternate.
+		s.log.Warn("contract B: peer MIGRATION_NACK came from a destination other than the CURRENT attempt; "+
+			"leaving the entry sent",
+			"migrationId", nack.MigrationID, "nackSourcePeer", nack.SourcePeer,
+			"entryDestSlot", st.Entry.DestSlot)
+		return true
+
 	case !relayGenerated && contractb.PayloadRefusal(nack.Code):
 		// Refused for a payload reason: every slot refuses this organism, so the
 		// map is not the answer. A sidecar NACK is only ever sent BEFORE durable
@@ -1062,6 +1077,45 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 			sc.bounceAt = time.Time{}
 			sc.nextForward = time.Time{}
 		}
+		return true
+
+	case relayGenerated && nack.Code == contractb.NackNotForwarded && attemptProof &&
+		st.ForwardedAttemptUnder(nack.RelaySessionID, st.Entry.DestSlot):
+		// contract-b/4.2 makes NOT_FORWARDED proof attempt-scoped. A receipt for
+		// an earlier destination in the same session is therefore not a
+		// contradiction. A receipt for THIS destination is, and the safe answer
+		// is still to leave the entry sent.
+		s.log.Error("contract B: an attempt-scoped NOT_FORWARDED contradicts a FORWARD_RECEIPT "+
+			"for the same relay session and destination — refusing the proof and LEAVING SENT",
+			"migrationId", nack.MigrationID, "relaySessionId", nack.RelaySessionID,
+			"destSlot", st.Entry.DestSlot, "rerouteCount", st.RerouteCount,
+			"receipts", st.ForwardReceipts)
+		return true
+
+	case relayGenerated && nack.Code == contractb.NackNotForwarded && attemptProof:
+		// The relay atomically refused this exact destination/reroute attempt.
+		// Earlier attempts may have reached peers; the durable refused set and
+		// current attempt correlation keep those facts separate.
+		if !s.markTransportRefusedLocked(st, now) {
+			return true
+		}
+		if s.rerouteLocked(st, contractb.ProofRelayNeverForwarded, now) {
+			sc.bounceAt = time.Time{}
+			sc.nextForward = time.Time{}
+		}
+		return true
+
+	case relayGenerated && nack.Code == contractb.NackNotForwarded:
+		// A 4.1 or older relay omits refusedAttempt. A delayed NACK can carry a
+		// destination or reroute count from an earlier offer. Neither is proof
+		// for the entry's current attempt, even when legacy neverForwarded is
+		// true. Missing, stale, mismatched, and cross-session answers all leave
+		// the entry sent.
+		s.log.Warn("contract B: NOT_FORWARDED did not prove refusal of the CURRENT attempt; "+
+			"leaving the entry sent",
+			"migrationId", nack.MigrationID, "nackSession", nack.RelaySessionID,
+			"entrySession", st.RelaySessionID, "refusedAttempt", nack.RefusedAttempt,
+			"entryDestSlot", st.Entry.DestSlot, "entryRerouteCount", st.RerouteCount)
 		return true
 
 	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID) &&
@@ -1093,28 +1147,6 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 			"meaning", "one of the two statements is wrong and this sender cannot tell which; "+
 				"possible loss is safer than re-routing on a bad proof and duplicating an organism "+
 				"(contract-b-m4.md §9.2, §6.12, §22 B26)")
-		return true
-
-	case relayGenerated && nack.Code == contractb.NackNotForwarded &&
-		nack.ProvesNoCustody(st.RelaySessionID):
-		// A full or draining relay transport queue refused this exact attempt,
-		// and the session-scoped proof says that the migration reached no peer in
-		// this relay process. The receipt-contradiction case above is deliberately
-		// before this one. These three conditions together are the only safe entry
-		// into the bounded transport-refusal walk.
-		//
-		// Persist the refused destination and the FIRST deadline in the same
-		// record that changes sent -> refused. A crash after this fsync can resume
-		// the walk without retrying a known-full destination or starting a fresh
-		// bounce clock. A later alternate send changes the entry back to sent, so
-		// this deadline can never bounce a frame whose custody may have moved.
-		if !s.markTransportRefusedLocked(st, now) {
-			return true
-		}
-		if s.rerouteLocked(st, contractb.ProofRelayNeverForwarded, now) {
-			sc.bounceAt = time.Time{}
-			sc.nextForward = time.Time{}
-		}
 		return true
 
 	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID):
@@ -1156,6 +1188,18 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	return true
 }
 
+func (s *Sidecar) peerNackMatchesCurrentDestinationLocked(st *journal.State, sourcePeer string) bool {
+	if sourcePeer == "" {
+		return false
+	}
+	for _, slot := range s.status.Slots {
+		if slot.Slot == st.Entry.DestSlot {
+			return slot.PeerID != "" && slot.PeerID == sourcePeer
+		}
+	}
+	return false
+}
+
 func (s *Sidecar) markTransportRefusedLocked(st *journal.State, now time.Time) bool {
 	refused := appendRefusedSlot(st.RefusedSlots, st.Entry.DestSlot)
 	deadline := st.RefusalDeadlineMs
@@ -1163,11 +1207,15 @@ func (s *Sidecar) markTransportRefusedLocked(st *journal.State, now time.Time) b
 		deadline = now.Add(s.cfg.BounceTimeout).UnixMilli()
 	}
 	proof := contractb.ProofRelayNeverForwarded
+	empty := ""
+	zero := int64(0)
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
 		Handoff:           journal.HandoffRefused,
 		RerouteProof:      &proof,
 		RefusedSlots:      refused,
 		RefusalDeadlineMs: &deadline,
+		RelaySessionID:    &empty,
+		SentAtMs:          &zero,
 		Note:              "relay NOT_FORWARDED proof: no custody moved; trying distinct same-axis destinations",
 	}); err != nil {
 		s.log.Error("contract B: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
@@ -1177,6 +1225,8 @@ func (s *Sidecar) markTransportRefusedLocked(st *journal.State, now time.Time) b
 	st.RerouteProof = proof
 	st.RefusedSlots = refused
 	st.RefusalDeadlineMs = deadline
+	st.RelaySessionID = ""
+	st.SentAtMs = 0
 	return true
 }
 
@@ -1185,15 +1235,19 @@ func (s *Sidecar) markRefusedLocked(st *journal.State, proof, note string) {
 	if proof == contractb.ProofPeerRefused {
 		refused = appendRefusedSlot(refused, st.Entry.DestSlot)
 	}
+	empty := ""
+	zero := int64(0)
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
 		Handoff: journal.HandoffRefused, RerouteProof: &proof,
-		RefusedSlots: refused, Note: note}); err != nil {
+		RefusedSlots: refused, RelaySessionID: &empty, SentAtMs: &zero, Note: note}); err != nil {
 		s.log.Error("contract B: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
 		return
 	}
 	st.Handoff = journal.HandoffRefused
 	st.RerouteProof = proof
 	st.RefusedSlots = refused
+	st.RelaySessionID = ""
+	st.SentAtMs = 0
 }
 
 func appendRefusedSlot(slots []int, slot int) []int {

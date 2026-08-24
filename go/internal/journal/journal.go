@@ -183,10 +183,9 @@ type State struct {
 
 	// Handoff is §9.2's state. Outbound entries only.
 	Handoff Handoff `json:"handoff,omitempty"`
-	// RelaySessionID is the relay session in force at the FIRST write to a live
-	// relay connection. A relay-generated neverForwarded: true counts as proof
-	// only when its relaySessionId equals this one (§5.2): a link flap keeps the
-	// id and keeps the proof; a relay restart changes it and the sender holds.
+	// RelaySessionID is the relay session of the current committed attempt. A
+	// safe reroute clears it; the next sent transition records the session then
+	// in force. Attempt proof counts only when its session equals this one.
 	RelaySessionID string `json:"relaySessionId,omitempty"`
 	// ForwardReceipts is how many FORWARD_RECEIPTs this sender has recorded for
 	// this migration (contract-b-m4.md §6.12, §22 B26). ONE FORWARD, ONE
@@ -213,10 +212,9 @@ type State struct {
 	// because a correctness decision on another machine's clock is what the
 	// session id exists to avoid.
 	ReceiptForwardedAtMs int64 `json:"receiptForwardedAt,omitempty"`
-	// SentAtMs is the wall clock at the durable commitment to this entry's FIRST
-	// socket enqueue. It is the only clock an outbound entry carries since §25's B37
-	// removed the hold, and it decides one thing: when an unanswered forward
-	// stops being in flight and is recorded LOST (forwardTimeoutMs, §9.3).
+	// SentAtMs is the wall clock at the durable commitment to the current sent
+	// attempt. A safe reroute clears it before the alternate is sent. It decides
+	// when that unanswered attempt is recorded LOST (forwardTimeoutMs, §9.3).
 	//
 	// A plain wall-clock instant is enough BECAUSE OF WHAT EXPIRY NOW DOES. The
 	// accrual it replaces existed so that a sender which had never observed the
@@ -282,6 +280,15 @@ func (s *State) Clone() *State {
 // statements can be about.
 func (s *State) ForwardedUnder(session string) bool {
 	return s.ForwardReceipts > 0 && session != "" && s.ReceiptSessionID == session
+}
+
+// ForwardedAttemptUnder reports a receipt that contradicts a relay refusal for
+// the current destination attempt. Receipts before contract-b/4.2 do not carry
+// rerouteCount, but a bounded refusal walk never revisits a refused destination,
+// so the session and destination identify the attempt conservatively.
+func (s *State) ForwardedAttemptUnder(session string, destSlot int) bool {
+	return s.ForwardReceipts > 0 && session != "" &&
+		s.ReceiptSessionID == session && s.ReceiptDestSlot == destSlot
 }
 
 type record struct {

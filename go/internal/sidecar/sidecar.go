@@ -149,7 +149,13 @@ type Sidecar struct {
 	// genomeServed counts GENOME_REQUESTs answered per requester in the current
 	// minute (contract-b-m4.md §10's rate limit, answering side).
 	genomeServed map[string]*rateWindow
-	closed       bool
+	// Test-only interleaving hooks. Production leaves both nil. They let a
+	// regression stop at the two custody boundaries that must be deterministic:
+	// after Create returns a clone, and after frame preparation but before the
+	// durable sent transition.
+	afterOutboundCreate func()
+	afterForwardPrepare func()
+	closed              bool
 }
 
 type sched struct {
@@ -608,6 +614,16 @@ func (s *Sidecar) hasPendingAckLocked() bool {
 // — are the ones where NO CUSTODY CAN HAVE MOVED, so what they do cannot
 // duplicate an organism.
 func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
+	// Journal Create/List/Get return snapshots. A caller can release Sidecar.mu
+	// after taking one, and a custody tick can durably advance the real entry
+	// before that caller resumes. Always decide from the current journal state
+	// while the caller holds Sidecar.mu; a stale pending clone must never commit
+	// a second send after the scheduler already committed the first.
+	current, ok := s.jr.Get(st.Entry.MigrationID)
+	if !ok {
+		return
+	}
+	st = current
 	if st.Status != journal.StatusOpen && st.Status != journal.StatusInFlight {
 		return
 	}
@@ -752,7 +768,7 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 }
 
 // sentAt is when the forward-resolution deadline of §9.3 started running for
-// this entry. SentAtMs is written at the durable commitment to the first socket enqueue;
+// this entry. SentAtMs is written at the durable commitment to the current socket enqueue;
 // a journal an older sidecar left behind has no such field, so the entry's own
 // journaling time stands in. It is earlier than the forward it stands for, which
 // is the safe direction for a deadline that only ever closes a record.
@@ -921,6 +937,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 	count := st.RerouteCount + 1
 	at := now.UnixMilli()
 	empty := ""
+	zero := int64(0)
 	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
 		Handoff:        journal.HandoffPending,
 		DestSlot:       &dest,
@@ -929,6 +946,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 		RerouteProof:   &proof,
 		RerouteAtMs:    &at,
 		RelaySessionID: &empty,
+		SentAtMs:       &zero,
 		Note: fmt.Sprintf("re-routed from slot %d to slot %d on the %s axis under %s",
 			from, dest, st.Entry.Edge, proof),
 	}); err != nil {
@@ -942,6 +960,7 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 	st.RerouteProof = proof
 	st.RerouteAtMs = at
 	st.RelaySessionID = ""
+	st.SentAtMs = 0
 	s.log.Warn("sidecar: re-routed a journaled hop under a proof of non-delivery",
 		"migrationId", st.Entry.MigrationID, "fromSlot", from, "destSlot", dest,
 		"axis", st.Entry.Edge, "proof", proof, "rerouteCount", count)
@@ -1228,10 +1247,22 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 	if !ok {
 		return false
 	}
+	if s.afterForwardPrepare != nil {
+		s.afterForwardPrepare()
+	}
+	// Encoding and pace admission can take time. Re-read the sidecar clock after
+	// both and enforce the absolute first-refusal bound before the durable sent
+	// transition. Crossing the bound at this boundary bounces once; it never
+	// commits or enqueues an out-of-bounds alternate.
+	if st.RefusalDeadlineMs != 0 {
+		now = s.now()
+		if s.provenRefusalDeadlineExpiredLocked(st, now) {
+			return false
+		}
+	}
 	// §9.2: pending/refused -> sent, RECORDING THE relaySessionId IN FORCE BEFORE
-	// THIS ENQUEUE. That id is what scopes every later proof: a link flap keeps it and
-	// keeps the proof, a relay restart changes it and the sender has no proof at
-	// all.
+	// THIS ATTEMPT'S ENQUEUE. A safe reroute cleared the preceding attempt's
+	// session and sentAt, so every later proof is scoped to this attempt.
 	//
 	// THE DURABLE TRANSITION PRECEDES THE SOCKET QUEUE. If the process crashes,
 	// or the local queue rejects the prepared frame, replay sees `sent` and can
@@ -1240,9 +1271,8 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 	// still invited a retry.
 	session := s.relaySessionID
 	sentAt := now.UnixMilli()
-	u := journal.Update{Handoff: journal.HandoffSent, SentAtMs: &sentAt}
-	if st.RelaySessionID == "" {
-		u.RelaySessionID = &session
+	u := journal.Update{
+		Handoff: journal.HandoffSent, SentAtMs: &sentAt, RelaySessionID: &session,
 	}
 	if st.Status != journal.StatusInFlight {
 		u.Status = journal.StatusInFlight
@@ -1253,9 +1283,7 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 	}
 	st.Handoff = journal.HandoffSent
 	st.SentAtMs = sentAt
-	if st.RelaySessionID == "" {
-		st.RelaySessionID = session
-	}
+	st.RelaySessionID = session
 
 	s.faultPoint(FaultPreForward)
 	if !s.sendPreparedRelayFrameLocked(contractb.TypeMigrationPayload, frame) {

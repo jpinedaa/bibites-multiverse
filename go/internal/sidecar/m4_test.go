@@ -943,6 +943,38 @@ func TestRelayProofFieldsAreExact(t *testing.T) {
 	if perfect.ProvesNoCustody("") {
 		t.Fatal("a proof was accepted against an entry with no recorded session")
 	}
+	attemptCases := []struct {
+		name string
+		nack contractb.MigrationNack
+		want bool
+	}{
+		{"exact attempt with migration-wide true", contractb.MigrationNack{
+			Code: contractb.NackNotForwarded, NeverForwarded: contractb.BoolPtr(true),
+			RelaySessionID: session,
+			RefusedAttempt: &contractb.MigrationAttempt{DestSlot: 7, RerouteCount: 2}}, true},
+		{"exact attempt with migration-wide false", contractb.MigrationNack{
+			Code: contractb.NackNotForwarded, NeverForwarded: contractb.BoolPtr(false),
+			RelaySessionID: session,
+			RefusedAttempt: &contractb.MigrationAttempt{DestSlot: 7, RerouteCount: 2}}, true},
+		{"missing attempt", contractb.MigrationNack{
+			Code: contractb.NackNotForwarded, NeverForwarded: contractb.BoolPtr(true),
+			RelaySessionID: session}, false},
+		{"stale destination", contractb.MigrationNack{
+			Code: contractb.NackNotForwarded, NeverForwarded: contractb.BoolPtr(true),
+			RelaySessionID: session,
+			RefusedAttempt: &contractb.MigrationAttempt{DestSlot: 6, RerouteCount: 2}}, false},
+		{"stale count", contractb.MigrationNack{
+			Code: contractb.NackNotForwarded, NeverForwarded: contractb.BoolPtr(true),
+			RelaySessionID: session,
+			RefusedAttempt: &contractb.MigrationAttempt{DestSlot: 7, RerouteCount: 1}}, false},
+	}
+	for _, tc := range attemptCases {
+		t.Run("attempt/"+tc.name, func(t *testing.T) {
+			if got := tc.nack.ProvesAttemptRefusal(session, 7, 2); got != tc.want {
+				t.Fatalf("ProvesAttemptRefusal = %v, want %v", got, tc.want)
+			}
+		})
+	}
 	// The taxonomy itself: SLOT_VACANT is PERMANENT from M4, and the two new
 	// codes are transient.
 	if got := contractb.ClassOf(contractb.NackSlotVacant); got != contractb.ClassPermanent {

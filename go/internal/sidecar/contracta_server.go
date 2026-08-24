@@ -749,6 +749,12 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 		"exitEdge", out.ExitEdge, "destSlot", destSlot, "genomeHash", genomeHash,
 		"parents", len(parents), "species", wire.SpeciesName(species))
 
+	s.mu.Lock()
+	afterCreate := s.afterOutboundCreate
+	s.mu.Unlock()
+	if afterCreate != nil {
+		afterCreate()
+	}
 	s.faultPoint(FaultPostJournal)
 
 	// 7. Custody has moved. Tell the mod to destroy the organism.

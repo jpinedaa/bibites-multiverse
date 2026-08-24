@@ -119,7 +119,8 @@ func markAlternateSent(t *testing.T, h *refusalHarness, id string) {
 	}
 }
 
-func refusalNackEnvelope(t *testing.T, id, code, session string, never *bool) wire.Envelope {
+func refusalNackEnvelope(t *testing.T, id, code, session string, never *bool,
+	attempt *contractb.MigrationAttempt) wire.Envelope {
 	t.Helper()
 	data, err := json.Marshal(contractb.MigrationNack{
 		MigrationID:    id,
@@ -130,6 +131,7 @@ func refusalNackEnvelope(t *testing.T, id, code, session string, never *bool) wi
 		RetryAfterMs:   15000,
 		NeverForwarded: never,
 		RelaySessionID: session,
+		RefusedAttempt: attempt,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,9 +141,55 @@ func refusalNackEnvelope(t *testing.T, id, code, session string, never *bool) wi
 
 func sendExactTransportRefusal(t *testing.T, h *refusalHarness, id string) {
 	t.Helper()
+	st := journalEntry(t, h.side, id)
+	attempt := &contractb.MigrationAttempt{
+		DestSlot: st.Entry.DestSlot, RerouteCount: st.RerouteCount,
+	}
 	if !h.side.onMigrationNack(refusalNackEnvelope(t, id, contractb.NackNotForwarded,
-		refusalTestSession, contractb.BoolPtr(true))) {
+		st.RelaySessionID, contractb.BoolPtr(true), attempt)) {
 		t.Fatal("the sidecar did not consume the transport refusal")
+	}
+}
+
+func sendPeerRefusal(t *testing.T, h *refusalHarness, id string) {
+	t.Helper()
+	st := journalEntry(t, h.side, id)
+	sourcePeer := ""
+	for _, slot := range h.side.status.Slots {
+		if slot.Slot == st.Entry.DestSlot {
+			sourcePeer = slot.PeerID
+			break
+		}
+	}
+	if sourcePeer == "" {
+		t.Fatal("current destination has no peer identity")
+	}
+	data, err := json.Marshal(contractb.MigrationNack{
+		MigrationID: id,
+		SourcePeer:  sourcePeer,
+		DestPeer:    "peer-source",
+		Code:        contractb.NackOverloaded,
+		Class:       contractb.ClassTransient,
+		Message:     "test destination refused before custody",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.side.onMigrationNack(wire.Envelope{Data: data})
+}
+
+func recordReceipt(t *testing.T, h *refusalHarness, id string, dest int) {
+	t.Helper()
+	st := journalEntry(t, h.side, id)
+	count := st.ForwardReceipts + 1
+	at := h.clock.Now().UnixMilli()
+	if _, err := h.side.jr.Apply(id, journal.Update{
+		ForwardReceipts:      &count,
+		ReceiptSessionID:     stringPointer(st.RelaySessionID),
+		ReceiptDestSlot:      &dest,
+		ReceiptForwardedAtMs: &at,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -163,9 +211,8 @@ func completeLocalBounce(t *testing.T, side *Sidecar, id string, entityID int32)
 	}
 }
 
-func closedRelayWriter(t *testing.T) *wsutil.Conn {
+func openRelayWriter(t *testing.T, stub *stubRelay) *wsutil.Conn {
 	t.Helper()
-	stub := newStubRelay(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ws, _, err := websocket.Dial(ctx, stub.url(), &websocket.DialOptions{
@@ -175,7 +222,16 @@ func closedRelayWriter(t *testing.T) *wsutil.Conn {
 		t.Fatal(err)
 	}
 	conn := wsutil.New(ws, 1)
+	t.Cleanup(conn.CloseNow)
+	return conn
+}
+
+func closedRelayWriter(t *testing.T) *wsutil.Conn {
+	t.Helper()
+	conn := openRelayWriter(t, newStubRelay(t))
 	conn.CloseNow()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	select {
 	case <-conn.Done():
 	case <-ctx.Done():
@@ -260,21 +316,30 @@ func TestTransportRefusalProofSafetyMatrix(t *testing.T) {
 		code            string
 		never           *bool
 		session         string
+		attempt         *contractb.MigrationAttempt
 		receipt         bool
 		wantBoundedWalk bool
 	}{
 		{"exact proof", contractb.NackNotForwarded, contractb.BoolPtr(true),
-			refusalTestSession, false, true},
-		{"neverForwarded false", contractb.NackNotForwarded, contractb.BoolPtr(false),
-			refusalTestSession, false, false},
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, false, true},
+		{"migration-wide false but exact attempt", contractb.NackNotForwarded, contractb.BoolPtr(false),
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, false, true},
 		{"missing neverForwarded", contractb.NackNotForwarded, nil,
-			refusalTestSession, false, false},
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, false, false},
+		{"missing attempt from older relay", contractb.NackNotForwarded, contractb.BoolPtr(true),
+			refusalTestSession, nil, false, false},
+		{"stale destination attempt", contractb.NackNotForwarded, contractb.BoolPtr(true),
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 3}, false, false},
+		{"stale reroute count", contractb.NackNotForwarded, contractb.BoolPtr(true),
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2, RerouteCount: 1}, false, false},
 		{"different relay session", contractb.NackNotForwarded, contractb.BoolPtr(true),
-			otherSession, false, false},
-		{"contradictory same-session receipt", contractb.NackNotForwarded, contractb.BoolPtr(true),
-			refusalTestSession, true, false},
+			otherSession, &contractb.MigrationAttempt{DestSlot: 2}, false, false},
+		{"contradictory same-attempt receipt", contractb.NackNotForwarded, contractb.BoolPtr(true),
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, true, false},
+		{"relay drain has no attempt proof", contractb.NackNotForwarded, contractb.BoolPtr(true),
+			refusalTestSession, nil, false, false},
 		{"different relay code", contractb.NackPeerOffline, contractb.BoolPtr(true),
-			refusalTestSession, false, false},
+			refusalTestSession, &contractb.MigrationAttempt{DestSlot: 2}, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,7 +357,8 @@ func TestTransportRefusalProofSafetyMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h.side.onMigrationNack(refusalNackEnvelope(t, id, tc.code, tc.session, tc.never))
+			h.side.onMigrationNack(refusalNackEnvelope(
+				t, id, tc.code, tc.session, tc.never, tc.attempt))
 			st := journalEntry(t, h.side, id)
 			gotBoundedWalk := st.RefusalDeadlineMs != 0 || len(st.RefusedSlots) != 0
 			if gotBoundedWalk != tc.wantBoundedWalk {
@@ -310,9 +376,69 @@ func TestTransportRefusalProofSafetyMatrix(t *testing.T) {
 	}
 }
 
+func TestAttemptProofProgressesAcrossMixedPeerAndTransportRefusals(t *testing.T) {
+	t.Run("peer then transport", func(t *testing.T) {
+		h := newRefusalHarness(t, 4)
+		id := seedRefusalEntry(t, h, 2)
+		recordReceipt(t, h, id, 2)
+		sendPeerRefusal(t, h, id)
+		if st := journalEntry(t, h.side, id); st.Entry.DestSlot != 3 || st.RerouteCount != 1 {
+			t.Fatalf("peer refusal progress = %+v, want destination 3 reroute 1", st)
+		}
+		markAlternateSent(t, h, id)
+		st := journalEntry(t, h.side, id)
+		attempt := &contractb.MigrationAttempt{DestSlot: 3, RerouteCount: 1}
+		h.side.onMigrationNack(refusalNackEnvelope(t, id, contractb.NackNotForwarded,
+			st.RelaySessionID, contractb.BoolPtr(false), attempt))
+		got := journalEntry(t, h.side, id)
+		if got.Entry.DestSlot != 4 || got.RerouteCount != 2 || got.RefusalDeadlineMs == 0 ||
+			!reflect.DeepEqual(got.RefusedSlots, []int{2, 3}) {
+			t.Fatalf("peer->transport progress = %+v, want distinct destination 4", got)
+		}
+	})
+
+	t.Run("transport then peer then transport", func(t *testing.T) {
+		h := newRefusalHarness(t, 5)
+		id := seedRefusalEntry(t, h, 2)
+		seenAttempts := map[[2]int]bool{}
+		remember := func(dest, count int) {
+			key := [2]int{dest, count}
+			if seenAttempts[key] {
+				t.Fatalf("bounded refusal chain repeated attempt %v", key)
+			}
+			seenAttempts[key] = true
+		}
+
+		remember(2, 0)
+		sendExactTransportRefusal(t, h, id)
+		markAlternateSent(t, h, id)
+		recordReceipt(t, h, id, 3)
+		sendPeerRefusal(t, h, id)
+		middle := journalEntry(t, h.side, id)
+		if middle.Entry.DestSlot != 4 || middle.RerouteCount != 2 {
+			t.Fatalf("transport->peer progress = %+v, want destination 4 reroute 2", middle)
+		}
+		remember(3, 1)
+		markAlternateSent(t, h, id)
+		current := journalEntry(t, h.side, id)
+		remember(current.Entry.DestSlot, current.RerouteCount)
+		attempt := &contractb.MigrationAttempt{
+			DestSlot: current.Entry.DestSlot, RerouteCount: current.RerouteCount,
+		}
+		h.side.onMigrationNack(refusalNackEnvelope(t, id, contractb.NackNotForwarded,
+			current.RelaySessionID, contractb.BoolPtr(false), attempt))
+		got := journalEntry(t, h.side, id)
+		if got.Entry.DestSlot != 5 || got.RerouteCount != 3 ||
+			!reflect.DeepEqual(got.RefusedSlots, []int{2, 3, 4}) {
+			t.Fatalf("transport->peer->transport progress = %+v, want destination 5", got)
+		}
+	})
+}
+
 func TestMaxReroutesBoundsTransportRefusalProgress(t *testing.T) {
 	h := newRefusalHarness(t, 4)
 	h.side.cfg.MaxReroutes = 1
+	h.cfg.MaxReroutes = 1
 	id := seedRefusalEntry(t, h, 2)
 	sendExactTransportRefusal(t, h, id)
 	if st := journalEntry(t, h.side, id); st.Entry.DestSlot != 3 || st.RerouteCount != 1 {
@@ -320,6 +446,16 @@ func TestMaxReroutesBoundsTransportRefusalProgress(t *testing.T) {
 			st.Entry.DestSlot, st.RerouteCount)
 	}
 	markAlternateSent(t, h, id)
+	if err := h.side.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(h.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	setRefusalMap(reopened, 4)
+	h.side = reopened
 	sendExactTransportRefusal(t, h, id)
 	st := journalEntry(t, h.side, id)
 	if st.Direction != journal.In || !st.BounceBack {
@@ -327,6 +463,110 @@ func TestMaxReroutesBoundsTransportRefusalProgress(t *testing.T) {
 	}
 	if st.Entry.DestSlot == 4 {
 		t.Fatal("the entry exceeded maxReroutes and reached slot 4")
+	}
+}
+
+func TestRerouteClearsAttemptClockAndRestampsRotatedRelaySession(t *testing.T) {
+	h := newRefusalHarness(t, 3)
+	id := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, id)
+	pending := journalEntry(t, h.side, id)
+	if pending.RelaySessionID != "" || pending.SentAtMs != 0 {
+		t.Fatalf("pending alternate retained prior attempt metadata: session=%q sentAt=%d",
+			pending.RelaySessionID, pending.SentAtMs)
+	}
+	if _, _, err := h.side.jr.Compact(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.side.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(h.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	setRefusalMap(reopened, 3)
+	replayed := journalEntry(t, reopened, id)
+	if replayed.RelaySessionID != "" || replayed.SentAtMs != 0 ||
+		replayed.Handoff != journal.HandoffPending {
+		t.Fatalf("replayed alternate metadata = session %q sentAt %d handoff %q",
+			replayed.RelaySessionID, replayed.SentAtMs, replayed.Handoff)
+	}
+
+	rotated := "a3cdb4a8-4eeb-474e-9b27-aa2cb92363f9"
+	stub := newStubRelay(t)
+	reopened.mu.Lock()
+	reopened.relayConn = openRelayWriter(t, stub)
+	reopened.relayReady = true
+	reopened.relaySessionID = rotated
+	reopened.sendPace.acked = true
+	if !reopened.forwardLocked(replayed, h.clock.Now()) {
+		reopened.mu.Unlock()
+		t.Fatal("the pending alternate was not enqueued under the rotated session")
+	}
+	reopened.mu.Unlock()
+	sent := journalEntry(t, reopened, id)
+	if sent.RelaySessionID != rotated || sent.SentAtMs == 0 || sent.Handoff != journal.HandoffSent {
+		t.Fatalf("alternate attempt metadata = session %q sentAt %d handoff %q",
+			sent.RelaySessionID, sent.SentAtMs, sent.Handoff)
+	}
+
+	// A duplicate NACK for the prior destination/session is stale after the
+	// alternate is committed. It cannot consume another destination or bounce.
+	oldAttempt := &contractb.MigrationAttempt{DestSlot: 2, RerouteCount: 0}
+	reopened.onMigrationNack(refusalNackEnvelope(t, id, contractb.NackNotForwarded,
+		refusalTestSession, contractb.BoolPtr(true), oldAttempt))
+	after := journalEntry(t, reopened, id)
+	if after.Handoff != journal.HandoffSent || after.Entry.DestSlot != 3 ||
+		after.RerouteCount != 1 || after.RelaySessionID != rotated {
+		t.Fatalf("stale prior-attempt NACK moved the committed alternate: %+v", after)
+	}
+	peerData, err := json.Marshal(contractb.MigrationNack{
+		MigrationID: id, SourcePeer: "peer-b", DestPeer: "peer-source",
+		Code: contractb.NackOverloaded, Class: contractb.ClassTransient,
+		Message: "duplicate peer refusal from the prior destination",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.onMigrationNack(wire.Envelope{Data: peerData})
+	after = journalEntry(t, reopened, id)
+	if after.Handoff != journal.HandoffSent || after.Entry.DestSlot != 3 ||
+		after.RerouteCount != 1 || after.RelaySessionID != rotated {
+		t.Fatalf("stale peer NACK moved the committed alternate: %+v", after)
+	}
+}
+
+func TestRefusalDeadlineIsRecheckedAfterForwardPreparation(t *testing.T) {
+	h := newRefusalHarness(t, 3)
+	id := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, id)
+	pending := journalEntry(t, h.side, id)
+	stub := newStubRelay(t)
+
+	h.side.mu.Lock()
+	h.side.relayConn = openRelayWriter(t, stub)
+	h.side.relayReady = true
+	h.side.sendPace.acked = true
+	h.side.afterForwardPrepare = func() {
+		h.clock.Advance(h.cfg.BounceTimeout + time.Millisecond)
+	}
+	forwarded := h.side.forwardLocked(pending, h.clock.Now())
+	h.side.mu.Unlock()
+	if forwarded {
+		t.Fatal("an alternate crossed the first-refusal deadline and was enqueued")
+	}
+	st := journalEntry(t, h.side, id)
+	if st.Direction != journal.In || !st.BounceBack || st.Handoff == journal.HandoffSent {
+		t.Fatalf("post-preparation deadline state = %+v, want one safe bounce", st)
+	}
+	time.Sleep(50 * time.Millisecond)
+	stub.mu.Lock()
+	gotPayloads := len(stub.payloads)
+	stub.mu.Unlock()
+	if gotPayloads != 0 {
+		t.Fatalf("relay received %d payloads after the refusal deadline, want 0", gotPayloads)
 	}
 }
 

@@ -233,6 +233,15 @@ func TestB26TheRecordedReceiptSurvivesARestartAndACompaction(t *testing.T) {
 		t.Fatal("a receipt answered ForwardedUnder for NO session; an empty session is not a " +
 			"session two statements can be about")
 	}
+	if !st.ForwardedAttemptUnder(session, destSlot) {
+		t.Fatal("a replayed receipt did not contradict its own destination attempt")
+	}
+	if st.ForwardedAttemptUnder(session, destSlot+1) {
+		t.Fatal("a receipt for a prior destination contradicted a later attempt")
+	}
+	if st.ForwardedAttemptUnder(wire.NewUUID(), destSlot) {
+		t.Fatal("a receipt contradicted an attempt in another relay session")
+	}
 }
 
 // TestB26ARecordedReceiptIsNotEvidenceUnderANewRelaySession is the asymmetry

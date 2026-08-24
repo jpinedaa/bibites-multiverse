@@ -56,6 +56,90 @@ func TestEachRecordTypeDedupsOnItsOwnKey(t *testing.T) {
 	}
 }
 
+func TestAttemptScopedQueueRefusalsRemainDistinctAcrossReplay(t *testing.T) {
+	dir := t.TempDir()
+	ledger, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	const id = "f7fe2a70-3333-4000-8000-00000000b451"
+	first := &contractb.MigrationAttempt{DestSlot: 2, RerouteCount: 0}
+	second := &contractb.MigrationAttempt{DestSlot: 3, RerouteCount: 1}
+	for i, attempt := range []*contractb.MigrationAttempt{first, second} {
+		if err := ledger.Append(Record{
+			Type: RecordNack, RecordedAt: now + int64(i), MigrationID: id,
+			Code: contractb.NackNotForwarded, RefusedAttempt: attempt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	for _, attempt := range []*contractb.MigrationAttempt{first, second} {
+		key := dedupKey(RecordNack, id, contractb.NackNotForwarded, attempt)
+		if !a.markSeen(RecordNack, key) {
+			t.Fatalf("replay did not rebuild the key for attempt %+v", attempt)
+		}
+	}
+	third := &contractb.MigrationAttempt{DestSlot: 4, RerouteCount: 2}
+	if a.markSeen(RecordNack,
+		dedupKey(RecordNack, id, contractb.NackNotForwarded, third)) {
+		t.Fatal("a distinct field-present NOT_FORWARDED attempt collapsed after replay")
+	}
+
+	legacy := dedupKey(RecordNack, id, contractb.NackNotForwarded)
+	if a.markSeen(RecordNack, legacy) {
+		t.Fatal("a legacy absent-attempt NACK collided with a 4.2 attempt record")
+	}
+	if !a.markSeen(RecordNack, legacy) {
+		t.Fatal("a repeated legacy absent-attempt NACK was not deduplicated")
+	}
+}
+
+func TestLiveNackIngestPersistsAttemptScopedIdentity(t *testing.T) {
+	a := quietArchive(t)
+	const id = "bf8cda70-4444-4000-8000-00000000b452"
+	for _, attempt := range []*contractb.MigrationAttempt{
+		{DestSlot: 2, RerouteCount: 0},
+		{DestSlot: 3, RerouteCount: 1},
+	} {
+		data, err := json.Marshal(contractb.MigrationNack{
+			MigrationID: id, Code: contractb.NackNotForwarded,
+			Class: contractb.ClassTransient, RefusedAttempt: attempt,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !a.onNack(wire.Envelope{Data: data}) {
+			t.Fatal("archive did not consume the NACK")
+		}
+	}
+	recs, damage, err := ReadLedger(a.cfg.DataDir)
+	if err != nil || damage != (LedgerDamage{}) {
+		t.Fatalf("read live NACK records: damage=%+v err=%v", damage, err)
+	}
+	if len(recs) != 2 || recs[0].RefusedAttempt == nil || recs[1].RefusedAttempt == nil ||
+		recs[0].RefusedAttempt.DestSlot != 2 || recs[1].RefusedAttempt.DestSlot != 3 {
+		t.Fatalf("live archive records = %+v, want both attempt identities", recs)
+	}
+
+	// A field on another NACK code is not allowed to manufacture archive facts.
+	otherA := &contractb.MigrationAttempt{DestSlot: 8, RerouteCount: 8}
+	otherB := &contractb.MigrationAttempt{DestSlot: 9, RerouteCount: 9}
+	if dedupKey(RecordNack, id, contractb.NackPeerOffline, otherA) !=
+		dedupKey(RecordNack, id, contractb.NackPeerOffline, otherB) {
+		t.Fatal("attempt correlation widened the key for a non-NOT_FORWARDED NACK")
+	}
+}
+
 // TestAnEmptyKeyIsNeverSeen is the rule a GENOME record depends on. It carries
 // no migrationId, cannot be deduplicated at all, and answering "duplicate" for
 // it would drop every one of them after the first.

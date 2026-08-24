@@ -93,13 +93,16 @@ type Record struct {
 	//
 	// A record written before this field existed has "" here. That is honest and
 	// it is handled at display time rather than guessed at: see StatusView.
-	ExitEdge   string `json:"exitEdge,omitempty"`
-	Timestamp  int64  `json:"timestamp,omitempty"`
-	Duplicate  bool   `json:"duplicate,omitempty"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
-	GenomeHash string `json:"genomeHash,omitempty"`
-	ServedBy   string `json:"servedBy,omitempty"`
+	ExitEdge  string `json:"exitEdge,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
+	Duplicate bool   `json:"duplicate,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Message   string `json:"message,omitempty"`
+	// RefusedAttempt preserves contract-b/4.2's attempt-scoped queue refusal.
+	// Older NACK records omit it and retain their migrationId+code identity.
+	RefusedAttempt *contractb.MigrationAttempt `json:"refusedAttempt,omitempty"`
+	GenomeHash     string                      `json:"genomeHash,omitempty"`
+	ServedBy       string                      `json:"servedBy,omitempty"`
 }
 
 // Ledger is the append-only record file: the LIVE segment of the record.
