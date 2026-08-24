@@ -14,10 +14,38 @@ cp "$repo/cloud/aws/update-runtime.sh" "$fixture_cloud/update-runtime.sh"
 cp "$repo/cloud/aws/lib/validation.sh" "$fixture_cloud/lib/validation.sh"
 chmod 0755 "$fixture_cloud/update-runtime.sh"
 
-runtime_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+remote_runtime_tree="$test_root/remote-runtime"
+remote_runtime_archive="$test_root/remote-runtime.tar.gz"
+remote_runtime_root="$test_root/remote-root"
+transaction_log="$test_root/transaction.log"
+remote_output="$test_root/remote-command.out"
+install -d "$remote_runtime_tree" "$remote_runtime_root"
+cat >"$remote_runtime_tree/bibites-update-runtime-transaction" <<'REMOTE_TRANSACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+{
+  printf '%s\n' "$#"
+  printf '%s\n' "$@"
+} >"$MOCK_TRANSACTION_LOG"
+REMOTE_TRANSACTION
+for remote_executable in bibites-activate-runtime install-host bibites-stop-worlds; do
+  cat >"$remote_runtime_tree/$remote_executable" <<'REMOTE_EXECUTABLE'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+REMOTE_EXECUTABLE
+done
+printf 'true\n' >"$remote_runtime_tree/validate-world-manifest.jq"
+chmod 0755 "$remote_runtime_tree/bibites-update-runtime-transaction" \
+  "$remote_runtime_tree/bibites-activate-runtime" \
+  "$remote_runtime_tree/install-host" \
+  "$remote_runtime_tree/bibites-stop-worlds"
+tar -czf "$remote_runtime_archive" -C "$remote_runtime_tree" .
+runtime_sha="$(sha256sum "$remote_runtime_archive" | awk '{print $1}')"
 game_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 bepinex_sha=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 manifest_sha=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+manifest_preimage_etag='"22222222222222222222222222222222"'
 prior_sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 prior_etag='"11111111111111111111111111111111"'
 pointer_prefix=/bibites/cloud/runtime-pointer/fixture
@@ -47,6 +75,7 @@ BEPINEX_OBJECT=runtime-inputs/bepinex/$bepinex_sha.zip
 BEPINEX_SHA256=$bepinex_sha
 MANIFEST_OBJECT=worlds.$manifest_sha.json
 MANIFEST_SHA256=$manifest_sha
+MANIFEST_PREIMAGE_ETAG=$(printf '%q' "$manifest_preimage_etag")
 STAGING_SCOPE=$scope
 EOF
 }
@@ -54,6 +83,16 @@ write_staged_receipt runtime-only
 
 aws_log="$test_root/aws.log"
 command_log="$test_root/command.log"
+cat >"$fixture_bin/mktemp" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = -d ] && [ "${2:-}" = /opt/bibites-runtime.new.XXXXXX ]; then
+  exec /usr/bin/mktemp -d "$MOCK_REMOTE_ROOT/bibites-runtime.new.XXXXXX"
+fi
+exec /usr/bin/mktemp "$@"
+MOCK
+chmod 0755 "$fixture_bin/mktemp"
+
 cat >"$fixture_bin/aws" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -109,6 +148,21 @@ case "$joined" in
       "InstanceId":"i-0123456789abcdef0","PingStatus":"Online",
       "PlatformType":"Linux"}]}'
     ;;
+  *' s3 cp '*)
+    [ "$MOCK_SCENARIO" = execute_remote ] || exit 64
+    source=''
+    destination=''
+    for ((index=0; index < ${#args[@]}; index++)); do
+      if [ "${args[$index]}" = cp ]; then
+        source="${args[$((index + 1))]}"
+        destination="${args[$((index + 2))]}"
+        break
+      fi
+    done
+    [ "$source" = "s3://fixture-artifacts/cloud/v1/runtime/$MOCK_RUNTIME_SHA.tar.gz" ] ||
+      exit 64
+    cp "$MOCK_REMOTE_RUNTIME_ARCHIVE" "$destination"
+    ;;
   *' ssm send-command '*)
     if [ "$MOCK_SCENARIO" = send_failure ]; then
       echo 'transport response lost' >&2
@@ -122,18 +176,25 @@ case "$joined" in
       fi
     done
     [ -n "$parameters" ] || exit 64
-    jq -er '.commands | if length == 1 then .[0] else error("commands") end' \
-      <<<"$parameters" \
-      >"$MOCK_COMMAND_LOG"
+    parameters_command="$(jq -er \
+      '.commands | if length == 1 then .[0] else error("commands") end' \
+      <<<"$parameters")"
+    printf '%s\n' "$parameters_command" >"$MOCK_COMMAND_LOG"
     if grep -Fq "$MOCK_RAW_SECRET_CANARY" "$MOCK_COMMAND_LOG"; then
       echo 'raw pointer credential entered command metadata' >&2
       exit 64
+    fi
+    if [ "$MOCK_SCENARIO" = execute_remote ]; then
+      if ! bash -c "$parameters_command" >"$MOCK_REMOTE_OUTPUT" 2>&1; then
+        echo 'generated remote command failed execution' >&2
+        exit 64
+      fi
     fi
     printf '11111111-1111-1111-1111-111111111111\n'
     ;;
   *' ssm get-command-invocation '*)
     case "$MOCK_SCENARIO" in
-      success|legacy_domain|legacy_prefix)
+      success|legacy_domain|legacy_prefix|execute_remote)
         printf '%s\n' '{"Status":"Success","ResponseCode":0,
           "StandardOutputContent":"transaction complete","StandardErrorContent":""}'
         ;;
@@ -196,9 +257,13 @@ run_case() {
     MOCK_SCENARIO="$scenario" MOCK_AWS_LOG="$aws_log" \
     MOCK_COMMAND_LOG="$command_log" \
     MOCK_RAW_SECRET_CANARY="$raw_secret_canary" \
+    MOCK_REMOTE_RUNTIME_ARCHIVE="$remote_runtime_archive" \
+    MOCK_RUNTIME_SHA="$runtime_sha" MOCK_REMOTE_ROOT="$remote_runtime_root" \
+    MOCK_TRANSACTION_LOG="$transaction_log" MOCK_REMOTE_OUTPUT="$remote_output" \
     BIBITES_RELAY_DOMAIN="${BIBITES_TEST_RELAY_DOMAIN:-}" \
     BIBITES_CREDENTIAL_PARAMETER_PREFIX="${BIBITES_TEST_CREDENTIAL_PREFIX:-}" \
     RUNTIME_SHA256="${BIBITES_TEST_AMBIENT_RUNTIME_SHA256:-}" \
+    MANIFEST_PREIMAGE_ETAG="${BIBITES_TEST_AMBIENT_MANIFEST_PREIMAGE_ETAG:-}" \
     "$fixture_cloud/update-runtime.sh" \
       --expected-prior-runtime-object "$selected_prior_object" \
       --expected-prior-runtime-sha256 "$selected_prior_sha" \
@@ -216,6 +281,7 @@ for expected in \
   "runtime-inputs/game/$game_sha.zip" \
   "runtime-inputs/bepinex/$bepinex_sha.zip" \
   "worlds.$manifest_sha.json" \
+  "${manifest_preimage_etag//\"/}" \
   "runtime/$prior_sha.tar.gz" \
   "$prior_sha" \
   "${prior_etag//\"/}" \
@@ -230,6 +296,40 @@ if grep -Fq "$raw_secret_canary" "$command_log" ||
   echo 'raw pointer credential escaped into command metadata or output' >&2
   exit 1
 fi
+
+# Decode and run the generated host command. This proves every internal
+# argument position through the extracted transaction entry point.
+: >"$transaction_log"
+: >"$remote_output"
+execute_output="$(run_case execute_remote 2>&1)"
+grep -Fq 'transaction complete' <<<"$execute_output"
+mapfile -t dispatched_transaction <"$transaction_log"
+[ "${#dispatched_transaction[@]}" -eq 24 ]
+[ "${dispatched_transaction[0]}" -eq 23 ]
+[[ "${dispatched_transaction[1]}" == "$remote_runtime_root"/bibites-runtime.new.* ]]
+[[ "${dispatched_transaction[2]}" == /tmp/bibites-runtime.*.tar.gz ]]
+[ "${dispatched_transaction[3]}" = us-east-1 ]
+[ "${dispatched_transaction[4]}" = 123456789012 ]
+[ "${dispatched_transaction[5]}" = vol-0123456789abcdef0 ]
+[ "${dispatched_transaction[6]}" = fixture-artifacts ]
+[ "${dispatched_transaction[7]}" = cloud/v1 ]
+[ "${dispatched_transaction[8]}" = "runtime/$runtime_sha.tar.gz" ]
+[ "${dispatched_transaction[9]}" = "$runtime_sha" ]
+[ "${dispatched_transaction[10]}" = "runtime-inputs/game/$game_sha.zip" ]
+[ "${dispatched_transaction[11]}" = "$game_sha" ]
+[ "${dispatched_transaction[12]}" = "runtime-inputs/bepinex/$bepinex_sha.zip" ]
+[ "${dispatched_transaction[13]}" = "$bepinex_sha" ]
+[ "${dispatched_transaction[14]}" = "worlds.$manifest_sha.json" ]
+[ "${dispatched_transaction[15]}" = "$manifest_sha" ]
+[ "${dispatched_transaction[16]}" = "$manifest_preimage_etag" ]
+[ "${dispatched_transaction[17]}" = "$pointer_prefix" ]
+[ "${dispatched_transaction[18]}" = 10.1.2.3 ]
+[ "${dispatched_transaction[19]}" = relay.example.test ]
+[ "${dispatched_transaction[20]}" = /opt/bibites-runtime ]
+[ "${dispatched_transaction[21]}" = "runtime/$prior_sha.tar.gz" ]
+[ "${dispatched_transaction[22]}" = "$prior_sha" ]
+[ "${dispatched_transaction[23]}" = "$prior_etag" ]
+grep -Eq '^/tmp/bibites-runtime\..*\.tar\.gz: OK$' "$remote_output"
 
 : >"$aws_log"
 set +e
@@ -427,20 +527,57 @@ fi
 
 # Missing receipt fields cannot be supplied by artifacts.env or the ambient
 # environment. Receipt validation must fail before the first AWS call.
-write_staged_receipt runtime-only
-sed -i '/^RUNTIME_SHA256=/d' "$fixture_dist/staged.env"
-: >"$aws_log"
-set +e
-ambient_output="$(BIBITES_TEST_AMBIENT_RUNTIME_SHA256="$runtime_sha" \
-  run_case success 2>&1)"
-ambient_status=$?
-set -e
-[ "$ambient_status" -ne 0 ]
-[ ! -s "$aws_log" ] || {
-  echo 'ambient value supplied a missing staged receipt field' >&2
-  exit 1
-}
-grep -Fq 'Set RUNTIME_SHA256 before the runtime update' <<<"$ambient_output"
+for ambient_field in RUNTIME_SHA256 MANIFEST_PREIMAGE_ETAG; do
+  write_staged_receipt runtime-only
+  sed -i "/^$ambient_field=/d" "$fixture_dist/staged.env"
+  : >"$aws_log"
+  set +e
+  case "$ambient_field" in
+    RUNTIME_SHA256)
+      ambient_output="$(BIBITES_TEST_AMBIENT_RUNTIME_SHA256="$runtime_sha" \
+        run_case success 2>&1)"
+      ;;
+    MANIFEST_PREIMAGE_ETAG)
+      ambient_output="$(BIBITES_TEST_AMBIENT_MANIFEST_PREIMAGE_ETAG="$manifest_preimage_etag" \
+        run_case success 2>&1)"
+      ;;
+  esac
+  ambient_status=$?
+  set -e
+  [ "$ambient_status" -ne 0 ]
+  [ ! -s "$aws_log" ] || {
+    echo "ambient value supplied missing $ambient_field receipt data" >&2
+    exit 1
+  }
+  grep -Fq "Set $ambient_field before the runtime update" <<<"$ambient_output"
+done
+
+# The mutable-manifest preimage ETag must keep the exact quoted S3 form.
+for malformed_manifest_etag in missing-quotes invalid-digest; do
+  write_staged_receipt runtime-only
+  case "$malformed_manifest_etag" in
+    missing-quotes)
+      sed -i 's/^MANIFEST_PREIMAGE_ETAG=.*/MANIFEST_PREIMAGE_ETAG=22222222222222222222222222222222/' \
+        "$fixture_dist/staged.env"
+      ;;
+    invalid-digest)
+      sed -i 's/^MANIFEST_PREIMAGE_ETAG=.*/MANIFEST_PREIMAGE_ETAG=\\"short\\"/' \
+        "$fixture_dist/staged.env"
+      ;;
+  esac
+  : >"$aws_log"
+  set +e
+  malformed_manifest_output="$(run_case success 2>&1)"
+  malformed_manifest_status=$?
+  set -e
+  [ "$malformed_manifest_status" -ne 0 ]
+  [ ! -s "$aws_log" ] || {
+    echo "$malformed_manifest_etag manifest ETag reached AWS" >&2
+    exit 1
+  }
+  grep -Fq 'MANIFEST_PREIMAGE_ETAG must be one quoted S3 ETag' \
+    <<<"$malformed_manifest_output"
+done
 
 write_staged_receipt runtime-only
 : >"$aws_log"

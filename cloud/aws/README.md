@@ -216,13 +216,15 @@ They reject a missing, stale, runtime-only, or ambient-substituted value.
 `stage-artifacts.sh --runtime-only` pins every input used by an in-place runtime transaction.
 It checks the locally built runtime, game, and BepInEx archives.
 It also reads and validates the current private `worlds.json` object.
+One S3 request returns the manifest bytes and their quoted ETag.
+The receipt binds both values as the mutable manifest preimage.
 It then creates and verifies four digest-derived objects: the runtime, game, BepInEx, and manifest
 snapshot.
 The manifest snapshot stays beside `worlds.json`, so its relative save keys keep the same meaning.
 
 Runtime-only staging does not read a local save directory or replace a mutable artifact, save, or
 `worlds.json`.
-It writes an owner-only receipt with every exact object and digest.
+It writes an owner-only receipt with every exact object, digest, and mutable manifest ETag.
 Use this mode only when the protected inputs are unchanged and the transaction will install a
 script, plugin, or sidecar change.
 
@@ -510,10 +512,16 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 `update-runtime.sh` accepts only a runtime-only staging record.
 That record pins immutable copies of the current game, BepInEx, and manifest inputs for candidate
 activation and automatic rollback.
+The record also binds the SHA-256 and quoted ETag of the mutable `worlds.json` staging preimage.
 It does not overwrite an existing save or replace mutable `worlds.json` in S3.
 Activation reapplies the pinned manifest, current credentials, environment files, and unit state.
 If an installed save is missing, the installer restores it from the object named in that manifest.
 Use [Apply a manifest update](#apply-a-manifest-update) for a manifest or save change.
+
+CAUTION: Do not overlap this procedure with complete artifact staging or `sync-host.sh`.
+The host runtime lock serializes runtime activations only.
+It does not lock S3 or manifest synchronization.
+If a manifest operation is necessary, complete it before runtime-only staging.
 
 Before authorization, read `runtime/current.json` and its ETag with one authenticated
 `s3api get-object` call.
@@ -585,14 +593,19 @@ Before it stops a service, the transaction completes these checks:
 - The host AWS CLI supports conditional encrypted pointer publication.
 - The candidate and prior runtime archives match their SHA-256 values.
 - The pinned game, BepInEx, and manifest objects match the staging receipt.
-- The manifest passes the public schema validator.
+- The pinned manifest passes the public schema validator.
+- The final preflight reads mutable `worlds.json` and matches the receipt SHA-256 and ETag.
+- This final read passes schema validation and matches the pinned manifest bytes.
 - The host configuration names the ordinary `worlds.json` object exactly once.
 - The live region and relay URL match the transaction target.
 
 The transaction keeps the verified prior archive in a temporary host file during the command.
 Automatic rollback during that command does not depend on a second download of the object.
-If an expected-prior value differs, the transaction returns `26` before it stops a service.
+The final manifest preflight occurs immediately before candidate activation.
+Only local variable assignments occur between this preflight and the activation command.
+If the pointer or manifest preimage differs, the transaction returns `26` before it stops a service.
 It does not install a runtime or write the pointer in this state.
+If mutable `worlds.json` changed, run runtime-only staging again before the update.
 
 If installation fails, the activator stops partial candidate services.
 It keeps the failed runtime and archive below `/opt` with a dated `failed` name.
@@ -619,7 +632,7 @@ The transaction uses these distinct terminal results:
 | `23` | Pointer state is unknown or names a third runtime. The candidate stays active for reconciliation |
 | `24` | Prior-runtime or manifest-configuration recovery failed |
 | `25` | Systems Manager acceptance or final state is unknown; do not retry blindly |
-| `26` | The locked pointer differs from the expected prior object, SHA-256 value, or ETag. No service stopped |
+| `26` | The locked pointer or final mutable manifest differs from its sealed preimage. No service stopped |
 | `73` | Another runtime transaction held the host lock until the bounded wait ended |
 
 CAUTION: A candidate activation stops and starts every configured game, sidecar, and time-scale

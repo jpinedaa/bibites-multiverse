@@ -155,6 +155,7 @@ write_staged_settings() {
       printf 'BEPINEX_SHA256=%q\n' "$BEPINEX_SHA256"
       printf 'MANIFEST_OBJECT=%q\n' "$manifest_object"
       printf 'MANIFEST_SHA256=%q\n' "$manifest_sha256"
+      printf 'MANIFEST_PREIMAGE_ETAG=%q\n' "$manifest_preimage_etag"
     else
       # Keep these names separate from artifacts.env. Consumers must compare
       # the completed stage with the current build before they call AWS.
@@ -187,13 +188,17 @@ if [ "$runtime_only" = true ]; then
   # input. Runtime activation can then use one coherent set of exact bytes.
   manifest_snapshot="$(mktemp)"
   chmod 0600 "$manifest_snapshot"
-  if ! aws --profile "$profile" --region "$region" s3 cp \
-    "s3://$bucket/$prefix/worlds.json" "$manifest_snapshot" \
-    --only-show-errors; then
+  if ! manifest_preimage_etag="$(aws --profile "$profile" --region "$region" \
+    s3api get-object --bucket "$bucket" --key "$prefix/worlds.json" \
+    "$manifest_snapshot" --query ETag --output text)"; then
     echo 'cannot read the current staged world manifest' >&2
     exit 1
   fi
   chmod 0600 "$manifest_snapshot"
+  if [[ ! "$manifest_preimage_etag" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]]; then
+    echo 'the current staged world manifest returned an invalid ETag' >&2
+    exit 1
+  fi
   if ! jq -e -f "$manifest_validator" "$manifest_snapshot" >/dev/null; then
     echo 'the current staged world manifest is invalid' >&2
     exit 1

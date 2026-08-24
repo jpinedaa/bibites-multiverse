@@ -2,7 +2,7 @@
 # Serialize one host runtime activation with its guarded bootstrap-pointer update.
 set -euo pipefail
 
-[ "$#" -eq 22 ] || {
+[ "$#" -eq 23 ] || {
   echo 'runtime transaction received the wrong argument count' >&2
   exit 2
 }
@@ -22,13 +22,14 @@ bepinex_object="${12}"
 bepinex_sha256="${13}"
 manifest_object="${14}"
 manifest_sha256="${15}"
-pointer_credential_prefix="${16}"
-relay_private_ip="${17}"
-relay_domain="${18}"
-runtime_root="${19}"
-expected_prior_runtime_object="${20}"
-expected_prior_runtime_sha256="${21}"
-expected_prior_pointer_etag="${22}"
+manifest_preimage_etag="${16}"
+pointer_credential_prefix="${17}"
+relay_private_ip="${18}"
+relay_domain="${19}"
+runtime_root="${20}"
+expected_prior_runtime_object="${21}"
+expected_prior_runtime_sha256="${22}"
+expected_prior_pointer_etag="${23}"
 lock_file="${BIBITES_RUNTIME_LOCK_FILE:-/run/lock/bibites-runtime-update.lock}"
 cloud_conf="${BIBITES_CLOUD_CONF:-/etc/bibites-cloud.conf}"
 
@@ -95,6 +96,8 @@ done
   die 'BepInEx object does not match its digest'
 [ "$manifest_object" = "worlds.$manifest_sha256.json" ] ||
   die 'manifest object does not match its digest'
+[[ "$manifest_preimage_etag" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]] ||
+  die 'invalid manifest preimage ETag'
 valid_key "$expected_prior_runtime_object" ||
   die 'invalid expected prior runtime object'
 [[ "$expected_prior_runtime_sha256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -147,6 +150,7 @@ pointer_error=
 prior_archive=
 prior_runtime=
 manifest_snapshot=
+ordinary_manifest_snapshot=
 game_snapshot=
 bepinex_snapshot=
 candidate_activator_copy=
@@ -252,6 +256,7 @@ transaction_exit() {
   [ -z "$prior_archive" ] || rm -f "$prior_archive"
   [ -z "$prior_runtime" ] || rm -rf "$prior_runtime"
   [ -z "$manifest_snapshot" ] || rm -f "$manifest_snapshot"
+  [ -z "$ordinary_manifest_snapshot" ] || rm -f "$ordinary_manifest_snapshot"
   [ -z "$game_snapshot" ] || rm -f "$game_snapshot"
   [ -z "$bepinex_snapshot" ] || rm -f "$bepinex_snapshot"
   [ -z "$candidate_activator_copy" ] || rm -f "$candidate_activator_copy"
@@ -357,6 +362,40 @@ fetch_pointer() {
   pointer_canonical="$(jq -cS . <<<"$pointer_document")" || return 1
 }
 
+prove_manifest_preimage() {
+  local metadata etag sha256 match=1
+  ordinary_manifest_snapshot="$(mktemp)"
+  metadata="$(aws --region "$aws_region" s3api get-object \
+    --bucket "$artifact_bucket" --key "$ordinary_manifest_key" \
+    "$ordinary_manifest_snapshot" --output json)" ||
+    die 'ordinary manifest lookup failed'
+  etag="$(jq -er '
+    .ETag |
+    select(type == "string" and
+      test("^\\\"[0-9A-Fa-f]{32}(-[0-9]+)?\\\"$"))
+  ' <<<"$metadata")" ||
+    die 'ordinary manifest lookup returned an invalid ETag'
+  sha256="$(sha256sum "$ordinary_manifest_snapshot" | awk '{print $1}')"
+  [ "$etag" = "$manifest_preimage_etag" ] || {
+    echo 'runtime transaction: the final manifest does not match the staged ETag' >&2
+    match=0
+  }
+  [ "$sha256" = "$manifest_sha256" ] || {
+    echo 'runtime transaction: the final manifest does not match the staged SHA-256' >&2
+    match=0
+  }
+  if ! jq -e -f "$staged_runtime/validate-world-manifest.jq" \
+    "$ordinary_manifest_snapshot" >/dev/null; then
+    echo 'runtime transaction: the final manifest failed schema validation' >&2
+    match=0
+  fi
+  [ "$match" -eq 1 ] || exit 26
+  cmp -s "$ordinary_manifest_snapshot" "$manifest_snapshot" || {
+    echo 'runtime transaction: the final and pinned manifest snapshots differ' >&2
+    exit 26
+  }
+}
+
 # This is the authoritative pointer snapshot. It occurs only after this
 # transaction owns the same lock used by every runtime activation.
 fetch_pointer "$pointer_path" || die 'runtime pointer lookup failed'
@@ -450,6 +489,9 @@ reactivate_prior() {
   restore_after_activation
 }
 
+# This is the final remote preflight. The host lock does not lock S3 writers.
+# Keep this read beside the first service-changing command.
+prove_manifest_preimage
 candidate_status=0
 manifest_restore_pending=1
 BIBITES_RUNTIME_LOCK_FD="$transaction_lock_fd" \

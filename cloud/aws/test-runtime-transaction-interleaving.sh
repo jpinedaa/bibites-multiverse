@@ -30,6 +30,7 @@ secret_access_key=ssssssssssssssssssssssssssssssssssssssss
 session_token=tttttttttttttttttttttttttttttttt
 credential_prefix=/bibites/cloud/runtime-pointer/fixture
 initial_pointer_etag='"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+manifest_preimage_etag='"cccccccccccccccccccccccccccccccc"'
 third_pointer_sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 game_snapshot="$test_root/game.zip"
 bepinex_snapshot="$test_root/bepinex.zip"
@@ -54,6 +55,11 @@ JSON
 manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
 manifest_object="worlds.$manifest_sha.json"
 cp "$manifest" "$object_store/cloud/v1/$manifest_object"
+cp "$manifest" "$object_store/cloud/v1/worlds.json"
+manifest_sha_drift="$test_root/worlds-sha-drift.json"
+sed 's/Fixture-World/Changed-World/g' "$manifest" >"$manifest_sha_drift"
+manifest_schema_drift="$test_root/worlds-schema-drift.json"
+sed 's/"schema":1/"schema":2/' "$manifest" >"$manifest_schema_drift"
 
 cat >"$mock_bin/systemctl" <<'MOCK'
 #!/usr/bin/env bash
@@ -194,17 +200,6 @@ case "$joined" in
     fi
     ;;
   *' s3api get-object '*)
-    if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-      [ "$AWS_ACCESS_KEY_ID" = "$MOCK_ACCESS_KEY_ID" ] || exit 64
-      if [ "$MOCK_SCENARIO" = expired_after_activation ] &&
-         [ -e "$MOCK_CANDIDATE_ACTIVE" ]; then
-        echo 'ExpiredToken' >&2
-        exit 254
-      fi
-    else
-      [ "$MOCK_SCENARIO" = expired_after_activation ] &&
-        [ -e "$MOCK_CANDIDATE_ACTIVE" ] || exit 64
-    fi
     destination=
     key=
     for ((index=0; index < ${#args[@]}; index++)); do
@@ -221,9 +216,40 @@ case "$joined" in
           ;;
       esac
     done
-    [ "$key" = cloud/v1/runtime/current.json ] && [ -n "$destination" ] || exit 64
-    cp "$MOCK_POINTER_STATE" "$destination"
-    jq -nc --arg etag "$(<"$MOCK_ETAG_STATE")" '{ETag:$etag}'
+    [ -n "$destination" ] || exit 64
+    case "$key" in
+      cloud/v1/runtime/current.json)
+        if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+          [ "$AWS_ACCESS_KEY_ID" = "$MOCK_ACCESS_KEY_ID" ] || exit 64
+          if [ "$MOCK_SCENARIO" = expired_after_activation ] &&
+             [ -e "$MOCK_CANDIDATE_ACTIVE" ]; then
+            echo 'ExpiredToken' >&2
+            exit 254
+          fi
+        else
+          [ "$MOCK_SCENARIO" = expired_after_activation ] &&
+            [ -e "$MOCK_CANDIDATE_ACTIVE" ] || exit 64
+        fi
+        cp "$MOCK_POINTER_STATE" "$destination"
+        jq -nc --arg etag "$(<"$MOCK_ETAG_STATE")" '{ETag:$etag}'
+        ;;
+      cloud/v1/worlds.json)
+        [ -z "${AWS_ACCESS_KEY_ID:-}" ] || exit 64
+        case "$MOCK_SCENARIO" in
+          manifest_sha_drift) cp "$MOCK_MANIFEST_SHA_DRIFT" "$destination" ;;
+          manifest_schema_drift) cp "$MOCK_MANIFEST_SCHEMA_DRIFT" "$destination" ;;
+          *) cp "$MOCK_OBJECT_STORE/$key" "$destination" ;;
+        esac
+        if [ "$MOCK_SCENARIO" = manifest_etag_drift ] ||
+           [ "$MOCK_SCENARIO" = late_manifest_drift ]; then
+          manifest_etag='"dddddddddddddddddddddddddddddddd"'
+        else
+          manifest_etag="$MOCK_MANIFEST_PREIMAGE_ETAG"
+        fi
+        jq -nc --arg etag "$manifest_etag" '{ETag:$etag}'
+        ;;
+      *) exit 64 ;;
+    esac
     ;;
   *' s3api put-object '*)
     [ "${AWS_ACCESS_KEY_ID:-}" = "$MOCK_ACCESS_KEY_ID" ] || exit 64
@@ -289,6 +315,11 @@ case "$joined" in
        [ "$key" = "$MOCK_GAME_KEY" ]; then
       printf 'corrupt game fixture\n' >"$destination"
     fi
+    if [ "$MOCK_SCENARIO" = late_manifest_drift ] &&
+       [ "$key" = "$MOCK_MANIFEST_KEY" ]; then
+      cp "$MOCK_MANIFEST_SHA_DRIFT" \
+        "$MOCK_OBJECT_STORE/cloud/v1/worlds.json"
+    fi
     ;;
   *)
     echo "unexpected AWS fixture call: $*" >&2
@@ -320,6 +351,7 @@ run_transaction() {
   local expected_prior_object="${6:-runtime/$prior_sha.tar.gz}"
   local expected_prior_sha="${7:-$prior_sha}"
   local expected_prior_etag="${8:-$initial_pointer_etag}"
+  local expected_manifest_etag="${BIBITES_TEST_MANIFEST_PREIMAGE_ETAG:-$manifest_preimage_etag}"
   env PATH="$mock_bin:$PATH" TX_LABEL="$label" MOCK_SCENARIO="$scenario" \
     MOCK_AWS_LOG="$aws_log" MOCK_OBJECT_STORE="$object_store" \
     MOCK_POINTER_STATE="$pointer_state" MOCK_ETAG_STATE="$etag_state" \
@@ -333,6 +365,10 @@ run_transaction() {
     MOCK_ACTIVATION_RELEASE="$activation_release" \
     MOCK_CANDIDATE_ACTIVE="$candidate_active" \
     MOCK_GAME_KEY="cloud/v1/$game_object" \
+    MOCK_MANIFEST_KEY="cloud/v1/$manifest_object" \
+    MOCK_MANIFEST_PREIMAGE_ETAG="$manifest_preimage_etag" \
+    MOCK_MANIFEST_SHA_DRIFT="$manifest_sha_drift" \
+    MOCK_MANIFEST_SCHEMA_DRIFT="$manifest_schema_drift" \
     MOCK_CLOUD_CONF="$cloud_conf" \
     MOCK_RESTORE_FAILURE_MARKER="$test_root/restore-failed-once" \
     MOCK_PRIOR_INSTALL_FAILURE_MARKER="$prior_install_failure_marker" \
@@ -344,7 +380,8 @@ run_transaction() {
       vol-0123456789abcdef0 fixture-artifacts cloud/v1 \
       "runtime/$sha.tar.gz" "$sha" "$game_object" "$game_sha" \
       "$bepinex_object" "$bepinex_sha" "$manifest_object" "$manifest_sha" \
-      "$credential_prefix" 10.0.0.5 relay.example.test "$runtime_root" \
+      "$expected_manifest_etag" "$credential_prefix" 10.0.0.5 \
+      relay.example.test "$runtime_root" \
       "$expected_prior_object" "$expected_prior_sha" "$expected_prior_etag"
 }
 
@@ -499,6 +536,78 @@ for prior_mismatch in object_sha etag; do
   esac
 done
 
+# The final mutable-manifest read must match the runtime-only staging preimage.
+# Each mismatch stops before service, host-configuration, or pointer mutation.
+for manifest_drift in manifest_etag_drift manifest_sha_drift \
+  manifest_schema_drift late_manifest_drift; do
+  rm -rf "$runtime_root"
+  cp -a "$prior_tree" "$runtime_root"
+  cp "$manifest" "$object_store/cloud/v1/worlds.json"
+  write_pointer "$prior_sha"
+  write_cloud_conf
+  cp "$pointer_state" "$test_root/$manifest_drift-pointer-before"
+  cp "$etag_state" "$test_root/$manifest_drift-etag-before"
+  cp "$cloud_conf" "$test_root/$manifest_drift-cloud-conf-before"
+  : >"$aws_log"
+  : >"$action_log"
+  rm -f "$candidate_active"
+  set +e
+  manifest_drift_output="$(run_transaction B "$candidate_b_tree" \
+    "$candidate_b_archive" "$candidate_b_sha" "$manifest_drift" 2>&1)"
+  manifest_drift_status=$?
+  set -e
+  [ "$manifest_drift_status" -eq 26 ] || {
+    echo "$manifest_drift returned $manifest_drift_status instead of 26" >&2
+    echo "$manifest_drift_output" >&2
+    exit 1
+  }
+  [ "$(<"$runtime_root/label")" = P ]
+  cmp -s "$test_root/$manifest_drift-pointer-before" "$pointer_state"
+  cmp -s "$test_root/$manifest_drift-etag-before" "$etag_state"
+  cmp -s "$test_root/$manifest_drift-cloud-conf-before" "$cloud_conf"
+  [ ! -s "$action_log" ] || {
+    echo "$manifest_drift reached service mutation" >&2
+    exit 1
+  }
+  if grep -Fq 's3api put-object --bucket' "$aws_log"; then
+    echo "$manifest_drift attempted pointer publication" >&2
+    exit 1
+  fi
+  grep -Fq 's3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.json' \
+    "$aws_log"
+  case "$manifest_drift" in
+    manifest_etag_drift)
+      grep -Fq 'final manifest does not match the staged ETag' \
+        <<<"$manifest_drift_output"
+      ;;
+    manifest_sha_drift)
+      grep -Fq 'final manifest does not match the staged SHA-256' \
+        <<<"$manifest_drift_output"
+      ;;
+    manifest_schema_drift)
+      grep -Fq 'final manifest failed schema validation' \
+        <<<"$manifest_drift_output"
+      ;;
+    late_manifest_drift)
+      grep -Fq 'final manifest does not match the staged ETag' \
+        <<<"$manifest_drift_output"
+      grep -Fq 'final manifest does not match the staged SHA-256' \
+        <<<"$manifest_drift_output"
+      pinned_manifest_download_line="$(grep -nF \
+        "s3 cp s3://fixture-artifacts/cloud/v1/$manifest_object" "$aws_log" | \
+        cut -d: -f1)"
+      final_manifest_read_line="$(grep -nF \
+        's3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.json' \
+        "$aws_log" | cut -d: -f1)"
+      [ "$final_manifest_read_line" -gt "$pinned_manifest_download_line" ] || {
+        echo 'final manifest proof ran before the pinned dependency download' >&2
+        exit 1
+      }
+      ;;
+  esac
+done
+cp "$manifest" "$object_store/cloud/v1/worlds.json"
+
 # The remote transaction rejects malformed expected-prior inputs before AWS or
 # service access. The local wrapper applies the same gate before SSM dispatch.
 for malformed_prior in object sha256 etag relationship; do
@@ -545,6 +654,32 @@ for malformed_prior in object sha256 etag relationship; do
     echo "$malformed_prior input reached service mutation" >&2
     exit 1
   }
+done
+
+# A malformed staged manifest ETag fails before AWS or service access.
+for malformed_manifest_etag in cccccccccccccccccccccccccccccccc '"short"'; do
+  : >"$aws_log"
+  : >"$action_log"
+  set +e
+  malformed_manifest_output="$(BIBITES_TEST_MANIFEST_PREIMAGE_ETAG="$malformed_manifest_etag" \
+    run_transaction B "$candidate_b_tree" "$candidate_b_archive" \
+      "$candidate_b_sha" normal 2>&1)"
+  malformed_manifest_status=$?
+  set -e
+  [ "$malformed_manifest_status" -eq 2 ] || {
+    echo "malformed manifest ETag returned $malformed_manifest_status instead of 2" >&2
+    echo "$malformed_manifest_output" >&2
+    exit 1
+  }
+  [ ! -s "$aws_log" ] || {
+    echo 'malformed manifest ETag reached AWS' >&2
+    exit 1
+  }
+  [ ! -s "$action_log" ] || {
+    echo 'malformed manifest ETag reached service mutation' >&2
+    exit 1
+  }
+  grep -Fq 'invalid manifest preimage ETag' <<<"$malformed_manifest_output"
 done
 
 # A failed CAS after candidate activation must use the already-retained prior
@@ -686,7 +821,7 @@ set -e
 }
 [ "$(<"$runtime_root/label")" = P ]
 [ "$(jq -r .runtimeSha256 "$pointer_state")" = "$prior_sha" ]
-[ "$(grep -Fc 's3api get-object' "$aws_log")" -eq 3 ] || {
+[ "$(grep -Fc 's3api get-object' "$aws_log")" -eq 4 ] || {
   echo 'expired pointer session did not use one instance-role classification read' >&2
   exit 1
 }

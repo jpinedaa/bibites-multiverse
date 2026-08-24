@@ -49,6 +49,7 @@ cat >"$remote_manifest" <<'EOF'
 "saveMinutes":10,"saveKeep":6,"enabled":true}]}
 EOF
 manifest_sha256="$(sha256sum "$remote_manifest" | awk '{print $1}')"
+manifest_preimage_etag='"22222222222222222222222222222222"'
 invalid_manifest="$test_root/invalid-worlds.json"
 printf '{"schema":2,"worlds":[]}\n' >"$invalid_manifest"
 
@@ -76,6 +77,44 @@ case "$args" in
     fi
     ;;
   *' s3api put-public-access-block '*|*' s3api put-bucket-encryption '*) ;;
+  *' s3api get-object '*)
+    destination=''
+    key=''
+    for ((index=0; index < $#; index++)); do
+      argument="${@:$((index + 1)):1}"
+      case "$argument" in
+        --key) key="${@:$((index + 2)):1}" ;;
+        get-object)
+          for ((scan=index + 1; scan < $#; scan++)); do
+            candidate="${@:$((scan + 1)):1}"
+            case "$candidate" in
+              --bucket|--key|--query|--output) scan=$((scan + 1)) ;;
+              --*) ;;
+              *) destination="$candidate" ;;
+            esac
+          done
+          ;;
+      esac
+    done
+    [ "$key" = cloud/v1/worlds.json ] && [ -n "$destination" ] || exit 65
+    [ "$(stat -c %a "$destination")" = 600 ] || {
+      echo 'S3 destination was not owner-only before download' >&2
+      exit 65
+    }
+    case "$MOCK_SCENARIO" in
+      missing_manifest)
+        echo '404 NoSuchKey' >&2
+        exit 255
+        ;;
+      invalid_manifest) cp "$MOCK_INVALID_MANIFEST" "$destination" ;;
+      *) cp "$MOCK_REMOTE_MANIFEST" "$destination" ;;
+    esac
+    case "$MOCK_SCENARIO" in
+      missing_etag) printf 'None\n' ;;
+      malformed_etag) printf 'not-an-etag\n' ;;
+      *) printf '%s\n' "$MOCK_MANIFEST_ETAG" ;;
+    esac
+    ;;
   *' s3api put-object '*)
     body=''
     key=''
@@ -155,6 +194,7 @@ run_runtime_only() {
     MOCK_SCENARIO="$scenario" MOCK_AWS_LOG="$test_root/aws.log" \
     MOCK_OBJECT_DIR="$object_dir" MOCK_REMOTE_MANIFEST="$remote_manifest" \
     MOCK_INVALID_MANIFEST="$invalid_manifest" \
+    MOCK_MANIFEST_ETAG="$manifest_preimage_etag" \
     "$fixture_cloud/stage-artifacts.sh" --runtime-only
 }
 
@@ -166,6 +206,7 @@ run_complete() {
     MOCK_SCENARIO=complete MOCK_AWS_LOG="$test_root/aws.log" \
     MOCK_OBJECT_DIR="$object_dir" MOCK_REMOTE_MANIFEST="$remote_manifest" \
     MOCK_INVALID_MANIFEST="$invalid_manifest" \
+    MOCK_MANIFEST_ETAG="$manifest_preimage_etag" \
     "$fixture_cloud/stage-artifacts.sh"
 }
 
@@ -194,7 +235,7 @@ cmp -s "$remote_manifest" "$object_dir/cloud/v1/$manifest_object"
 [ "$(grep -Fc -- '--server-side-encryption AES256 --if-none-match *' \
   "$test_root/aws.log")" -eq 4 ]
 grep -Fq 's3api head-bucket --bucket fixture-artifacts' "$test_root/aws.log"
-grep -Fq "s3 cp s3://fixture-artifacts/cloud/v1/worlds.json" \
+grep -Fq "s3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.json" \
   "$test_root/aws.log"
 if grep -Eq 's3 cp [^ ]+ s3://' "$test_root/aws.log"; then
   echo 'runtime-only staging used a mutable S3 copy upload' >&2
@@ -229,6 +270,7 @@ BEPINEX_OBJECT=$bepinex_object
 BEPINEX_SHA256=$bepinex_sha256
 MANIFEST_OBJECT=$manifest_object
 MANIFEST_SHA256=$manifest_sha256
+MANIFEST_PREIMAGE_ETAG=\"22222222222222222222222222222222\"
 STAGING_SCOPE=runtime-only
 EOF
 cmp -s "$test_root/expected-staged.env" "$fixture_dist/staged.env"
@@ -289,7 +331,7 @@ cp "$test_root/complete-artifacts.env" "$fixture_dist/artifacts.env"
 
 # A missing or invalid remote manifest fails before any immutable PUT and also
 # invalidates a prior receipt.
-for manifest_scenario in missing_manifest invalid_manifest; do
+for manifest_scenario in missing_manifest invalid_manifest missing_etag malformed_etag; do
   cp "$test_root/expected-staged.env" "$fixture_dist/staged.env"
   : >"$test_root/aws.log"
   set +e
@@ -303,6 +345,10 @@ for manifest_scenario in missing_manifest invalid_manifest; do
       ;;
     invalid_manifest)
       grep -Fq 'the current staged world manifest is invalid' <<<"$manifest_output"
+      ;;
+    missing_etag|malformed_etag)
+      grep -Fq 'the current staged world manifest returned an invalid ETag' \
+        <<<"$manifest_output"
       ;;
   esac
   if grep -Fq 's3api put-object' "$test_root/aws.log"; then

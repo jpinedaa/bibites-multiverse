@@ -57,6 +57,8 @@ grep -Fq 'put_immutable_input "$dist/$RUNTIME_FILE" "$RUNTIME_SHA256" "$runtime_
   "$repo/cloud/aws/stage-artifacts.sh"
 grep -Fq "printf 'MANIFEST_OBJECT=%q\\n'" "$repo/cloud/aws/stage-artifacts.sh"
 grep -Fq "printf 'MANIFEST_SHA256=%q\\n'" "$repo/cloud/aws/stage-artifacts.sh"
+grep -Fq "printf 'MANIFEST_PREIMAGE_ETAG=%q\\n'" \
+  "$repo/cloud/aws/stage-artifacts.sh"
 grep -Fq 'staging_scope=runtime-only' "$repo/cloud/aws/stage-artifacts.sh"
 grep -Fq 'staging_scope=complete' "$repo/cloud/aws/stage-artifacts.sh"
 grep -Fq "printf 'STAGING_SCOPE=%q\\n'" "$repo/cloud/aws/stage-artifacts.sh"
