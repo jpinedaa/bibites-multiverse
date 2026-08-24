@@ -22,9 +22,12 @@ service, host, and coverage results. Use the
 
 ## Current production health
 
-The production-health dashboard is live. It joins the scheduled five-minute checks with a bounded
-two-hour view of the service host. It also shows current worlds, record integrity, restart cost,
-deployment identity, and broadcast audience state.
+The production-health dashboard is live. It organizes production into one system map and four
+visual layers: Compute, Cloud and services, Application and traffic, and Archive and data. Eight
+headline signals show checks, worlds, migration flow, records, gaps, CPU, memory, and disk. Host
+and TCP charts use the bounded two-hour service-host window. Check matrices, world grids, service
+memory bars, pipeline stages, and a coverage strip show the other live results. Every visual has a
+hover and keyboard-focus tooltip.
 
 At the `2026-08-22T00:06Z` closeout check, availability and record-integrity checks passed.
 All six public routes returned HTTP `200`. Sixteen slots were live, and one previously dark slot
@@ -34,7 +37,8 @@ roll-up and duplicate-window state, so that model does not describe its current 
 The dashboard shows this known critical result without weakening or hiding it.
 
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
-history store. Its Coverage section names the missing tests and profilers.
+history store. Gray gaps identify request telemetry, public probes, centralized world-host
+performance, pressure stalls, and continuous profiles that no current feed supplies.
 
 ### Localized migration-flow correction rollout
 

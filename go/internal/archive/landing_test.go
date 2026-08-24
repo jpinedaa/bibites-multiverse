@@ -53,7 +53,6 @@ func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
 		"landing": landingPageHTML,
 		"map":     statusPageHTML,
 		"watch":   watchPageHTML,
-		"health":  healthPageHTML,
 	}
 	for name, page := range pages {
 		for _, want := range []string{
@@ -78,6 +77,25 @@ func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
 			if strings.Contains(page, old) {
 				t.Errorf("%s page still contains retired navigation label %q", name, old)
 			}
+		}
+	}
+	for _, want := range []string{
+		`class="brand" href="/" aria-label="Bibites Multiverse home"`,
+		`<span>Bibites Multiverse</span>`, `>How it works</a>`, `>Join</a>`,
+		`>Watch broadcast</a>`, `>Live map</a>`,
+		`href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>`,
+	} {
+		if !strings.Contains(healthPageHTML, want) {
+			t.Errorf("health page is missing shared brand or navigation element %q", want)
+		}
+	}
+	for _, want := range []string{
+		`--compute:#55c5ff`, `--cloud:#a891ff`, `--app:#53e0b2`, `--data:#f5b95f`,
+		"Live system map", "Compute", "Cloud &amp; services", "Application &amp; traffic",
+		"Archive &amp; data", "Data coverage",
+	} {
+		if !strings.Contains(healthPageHTML, want) {
+			t.Errorf("health page is missing telemetry visual element %q", want)
 		}
 	}
 
@@ -606,7 +624,7 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		{"/", "text/html", "Evolution has a map.", http.StatusOK},
 		{"/live", "text/html", "species", http.StatusOK},
 		{"/watch", "text/html", "Follow a life in progress.", http.StatusOK},
-		{"/health", "text/html", "System health", http.StatusOK},
+		{"/health", "text/html", "Production telemetry", http.StatusOK},
 		{"/favicon.svg", "image/svg+xml", "#66e0ac", http.StatusOK},
 		{"/social-card.svg", "image/svg+xml", "Evolution", http.StatusOK},
 		{"/social-card.png", "image/png", pngMagic, http.StatusOK},

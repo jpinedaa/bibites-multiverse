@@ -1,6 +1,6 @@
-# Production telemetry dashboard proposal
+# Production telemetry dashboard design
 
-Status: static design proposal. This proposal does not change production.
+Status: implemented in the production `/health` page. The static mockup remains a design fixture.
 
 ## Goal
 
@@ -60,10 +60,19 @@ prevents one color from having two meanings.
 - Deployment, restart, and recovery marks in the same time store
 - Off-host retention for every chart
 
+## Implementation
+
+The production implementation is in `go/internal/archive/health_page.go`. It keeps the mockup's
+organization and visual grammar, but it removes scenarios and static values. It reads
+`/api/health`, `/api/status`, and `/api/viewers`. A missing collector becomes a gray data gap.
+
+The implementation uses the current two-hour host window. The complete design still calls for a
+shared off-host time store. That store is not part of this change.
+
 ## Mockup
 
 Open [mockup.html](mockup.html). The file is standalone and uses static data. The scenario control
 changes the visual state for typical load, compute pressure, and an archive stall.
 
-The mockup defines information structure and visual grammar. It does not define production
-thresholds or a storage implementation.
+The mockup defines information structure and visual grammar. It does not show live results or
+define production thresholds and storage.
