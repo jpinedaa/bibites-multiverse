@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.6` on **2026-08-23**, against the code and
+strangers. This audit was updated for release `0.3.7` on **2026-08-24**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -347,8 +347,14 @@ decision authority to refuse a migrant.
 ## 5b. `--forward-timeout` — unanswered forwarded organisms
 
 **Today.** The default is five wall-clock minutes. `MULTIVERSE_FORWARD_TIMEOUT` or
-`--forward-timeout` can override it. An outbound entry enters `sent` after the sidecar writes it to
-a live relay connection. The destination can already hold the organism at that point.
+`--forward-timeout` can override it. The sidecar commits an outbound entry as `sent` before it puts
+the attempt on a live relay connection. The destination can hold the organism after that point.
+
+A relay queue refusal moves the entry only when its proof matches the current relay session,
+destination, and reroute count. A forwarding receipt for the same attempt cancels that proof. The
+sidecar keeps the tried destinations and first refusal deadline in the journal. It continues on the
+same axis and bounces once when it exhausts the bounded walk. A drain refusal has no attempt proof,
+so it cannot consume a destination or move the deadline.
 
 At the deadline, the sidecar changes the entry to a `lost` tombstone. It increments
 `lostForwardTotal`. It does not send the organism again, and it does not return the organism to its

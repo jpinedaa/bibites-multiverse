@@ -18,7 +18,7 @@ without knowing which platform it was on would be guessing.
 
 | The test | Who applies it | What it decides |
 |---|---|---|
-| **The wire version** — `contract-b/4.1` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
+| **The wire version** — `contract-b/4.2` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
 | **The game version** — the build of The Bibites this machine runs, from Steam on Windows or from itch.io on Linux | **Your own machine**, through this matrix and the installer's check | Whether a mod and sidecar build exists that works with your game at all |
 
 The mod is a Harmony patch against a named game assembly, so the second test cannot be
@@ -30,15 +30,15 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected through shadow bring-up and controlled adaptive enforcement; initial enforcement verification had zero capacity sheds and discarded journal bytes |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction promoted the retained adaptive state to enforcement, every world retained its slot with mod and relay connected, and host verification passed |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | Five-world deployment on 2026-08-23: every world retained its slot with mod and relay connected through shadow bring-up and controlled adaptive enforcement; initial enforcement verification had zero capacity sheds and discarded journal bytes |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | Six hosted worlds on 2026-08-23: the guarded runtime transaction promoted the retained adaptive state to enforcement, every world retained its slot with mod and relay connected, and host verification passed |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
-same weight and the table does not pretend they do:** the Windows row covers a four-day continuous
-six-world run. The Linux row is one rehearsal session on one machine on one day. A build that is
-not in the table is not "probably fine": it is untested, and the installer treats untested as
-unsupported.
+same weight and the table does not pretend they do:** the Windows row covers five controlled worlds
+on the release machine. The Linux row covers six hosted worlds and a guarded runtime activation.
+A build that is not in the table is not "probably fine": it is untested, and the installer treats
+untested as unsupported.
 
 **What makes the Linux row trustworthy for the thing the mod actually does** is not session
 length. The mod is Harmony patches against named types, and a full decompile of both builds,
@@ -268,8 +268,8 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.3.6",
-  "published": "2026-08-23",
+  "release": "0.3.7",
+  "published": "2026-08-24",
   "testedBuild": {
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
@@ -293,7 +293,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.1",
+      "contractB": "contract-b/4.2",
       "tested": "five-world deployment on 2026-08-23; every world retained its slot with mod and relay connected through adaptive-shadow bring-up and controlled adaptive enforcement, with zero capacity sheds and discarded journal bytes at initial enforcement verification"
     },
     {
@@ -307,7 +307,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.1",
+      "contractB": "contract-b/4.2",
       "tested": "six hosted worlds on 2026-08-23; guarded runtime activation promoted retained adaptive state to enforcement, host verification passed, and every world retained its slot with mod and relay connected"
     }
   ]

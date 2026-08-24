@@ -14,7 +14,7 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration. Its `EstimatedSize` measures the program directory and `<data root>\runtimes` only — never `data\` or `logs\`, which an uninstall keeps and whose journal grows without bound |
+| `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration. Its `EstimatedSize` measures the program directory and `<data root>\runtimes` only — never `data\` or `logs\`, which an uninstall keeps because they contain custody state and diagnostic history. The journal compacts on a timer |
 | `kit/bibites-multiverse.ico` | The setup, desktop, and Start Menu icon |
 | `kit/Install-BibitesMultiverse.cmd` | The advanced Windows ZIP entry point. It opens the same GUI |
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
@@ -52,7 +52,7 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.3.6` publishes one executable
+The build creates an add-on archive for each platform. Release `0.3.7` publishes one executable
 Windows setup as the recommended Windows download, and every Windows package carries
 `BibitesMultiverseLauncher.exe` and `multiverse-launcher.exe`. It publishes a complete Linux archive as the
 recommended Linux download; the Linux kit keeps its shell scripts and ships no launcher in this
@@ -442,7 +442,7 @@ serving it. Open it afterwards and press both buttons, because a broken link is 
 link — but there is nothing to rebuild, no host value to set, and no relay outage to schedule.
 
 **The page does say which release that is, and it catches up on its own.** Under the download
-buttons the join card carries a `Latest release v0.3.6` line, so a visitor can tell what the
+buttons the join card carries a `Latest release v0.3.7` line, so a visitor can tell what the
 buttons will hand them. It is not a build-time constant: the archive asks GitHub's
 `/repos/jpinedaa/bibites-multiverse/releases/latest` for `tag_name` once an hour in the
 background and caches the answer in process, so a new release reaches that line within an hour of
@@ -783,7 +783,7 @@ unavailable. It is how the last two releases were published, before the workflow
 3. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 4. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.3.6 && git push origin v0.3.6`. The page's links point into the tag, so the
+   `git tag v0.3.7 && git push origin v0.3.7`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 5. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, the Windows setup, the two stable-named copies, and
@@ -791,14 +791,14 @@ unavailable. It is how the last two releases were published, before the workflow
    optional:** the homepage links them through `/releases/latest/download/`, so a release published
    without them breaks both download buttons, and the version globs below do not match them.
    ```sh
-   gh release create v0.3.6 \
-       release/dist/bibites-multiverse-0.3.6-*.zip \
-       release/dist/bibites-multiverse-0.3.6-*.exe \
+   gh release create v0.3.7 \
+       release/dist/bibites-multiverse-0.3.7-*.zip \
+       release/dist/bibites-multiverse-0.3.7-*.exe \
        release/dist/bibites-multiverse-windows-x64-setup.exe \
        release/dist/bibites-multiverse-linux-x64-complete.zip \
        release/dist/SHA256SUMS \
        --repo jpinedaa/bibites-multiverse --verify-tag --latest \
-       --title "Bibites Multiverse 0.3.6" \
+       --title "Bibites Multiverse 0.3.7" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 6. **Verify what you published**, because nothing else will: `sha256sum -c SHA256SUMS`, each
