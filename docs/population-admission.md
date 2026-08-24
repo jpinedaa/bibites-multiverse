@@ -106,6 +106,15 @@ The peer stats block, `/api/status`, archived `metrics.jsonl`, the settings card
 `multiverse-sidecar --my-slot` view publish the mode, target, estimate, effective limit, committed
 load, sample count, closed/enforcing state, and rejection total.
 
+The live map deliberately distinguishes an **offer** from a **delivery**. A lane's numeric rate and
+recorded migration count come from copied `MIGRATION_PAYLOAD` offers, so they can continue rising
+beside a closed admission gate. The moving creature and destination flash come from `/api/hops`,
+which correlates that offer with the receiving peer's `MIGRATION_ACK`; that ACK is sent only after
+the destination game acknowledges the spawn. An admission NACK therefore produces no moving
+creature. If the same migration ID spills onward, one glyph appears only at the eventual
+ACK-confirmed destination. If `/api/hops` is unavailable, the page pauses delivery animation
+instead of guessing an arrival from the offer counters.
+
 The enforcement promotion gate is:
 
 - at least 24 hours of shadow samples per production world;
@@ -156,6 +165,10 @@ rollback.
   worlds: the first sends east, the second refuses at its fixed population limit, and the third
   spawns the same migration exactly once. The source journal records slot 2 in `refusedSlots` and
   `peer_refused` as the reroute proof.
+- Archive regressions stage an offer to a closed peer, record its NACK, stage the same migration ID
+  to the next peer, and require exactly one live-map hop at the peer that ACKs. A second regression
+  observes that ACK before the rerouted payload copy and requires peer matching to keep it off the
+  rejected destination.
 - On 2026-08-23, five Windows worlds and six hosted Linux worlds ran the candidate in
   `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
   requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds

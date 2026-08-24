@@ -10,7 +10,166 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
+	"multiverse/internal/wire"
 )
+
+func hopEnvelope(t *testing.T, typ string, data any) wire.Envelope {
+	t.Helper()
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire.Envelope{Type: typ, Data: raw}
+}
+
+// TestHopFeedWaitsForDeliveryAndFollowsReroute is the production regression:
+// a closed, population-limited world NACKs an offer, then the same migrationId
+// is offered to the next world. A payload copy is only an attempt; the map must
+// animate the destination whose mod eventually acknowledged the spawn.
+func TestHopFeedWaitsForDeliveryAndFollowsReroute(t *testing.T) {
+	status := contractb.PeerStatus{
+		Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{
+			slot4(1, 0, 0, true, nil), slot4(2, 1, 0, true, nil),
+			slot4(3, 2, 0, true, nil),
+		},
+	}
+	status.Slots[0].PeerID = "peer-source"
+	status.Slots[1].PeerID = "peer-closed"
+	status.Slots[2].PeerID = "peer-open"
+	a := newViewFixture(t, status, time.Second)
+
+	p := contractb.MigrationPayload{
+		MigrationID: "migration-rerouted", SourcePeer: "peer-source", SourceSlot: 1,
+		DestSlot: 2, ExitEdge: contracta.EdgeE,
+		Species: &contractb.Species{GenericName: "Izus", SpecificName: "copedylanus"},
+	}
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	if got := a.HopFeedView().Hops; len(got) != 0 {
+		t.Fatalf("an unacknowledged offer appeared as a delivery: %+v", got)
+	}
+
+	a.onNack(hopEnvelope(t, contractb.TypeMigrationNack, contractb.MigrationNack{
+		MigrationID: p.MigrationID, SourcePeer: "peer-closed", DestPeer: "peer-source",
+		Code: "BACKPRESSURE", Message: "population admission closed",
+	}))
+	if got := a.HopFeedView().Hops; len(got) != 0 {
+		t.Fatalf("a rejected offer appeared as a delivery: %+v", got)
+	}
+
+	// The archive ledger intentionally keeps one migration record per id, but
+	// the ephemeral delivery correlator must still see this second destination.
+	p.DestSlot = 3
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	a.onAck(hopEnvelope(t, contractb.TypeMigrationAck, contractb.MigrationAck{
+		MigrationID: p.MigrationID, SourcePeer: "peer-open", DestPeer: "peer-source",
+		DeliveredAt: time.Now().UnixMilli(),
+	}))
+	got := a.HopFeedView().Hops
+	if len(got) != 1 {
+		t.Fatalf("the acknowledged reroute produced %d deliveries, want 1: %+v", len(got), got)
+	}
+	if got[0].FromSlot != 1 || got[0].ToSlot != 3 || got[0].ExitEdge != contracta.EdgeE {
+		t.Fatalf("the feed animated the rejected destination instead of the accepted one: %+v",
+			got[0])
+	}
+	if got[0].Species == nil || got[0].Species.SpecificName != "copedylanus" {
+		t.Fatalf("the acknowledged delivery lost its carried species: %+v", got[0].Species)
+	}
+
+	// A copied ACK cannot animate the same organism twice.
+	a.onAck(hopEnvelope(t, contractb.TypeMigrationAck, contractb.MigrationAck{
+		MigrationID: p.MigrationID, SourcePeer: "peer-open", DestPeer: "peer-source",
+	}))
+	if got := a.HopFeedView().Hops; len(got) != 1 {
+		t.Fatalf("a duplicate ACK produced %d deliveries, want 1", len(got))
+	}
+}
+
+// TestHopFeedMatchesAnAckObservedBeforeItsReroutedPayloadCopy keeps the result
+// independent of cross-peer scheduling. The ACK sender names the receiver, so
+// an early ACK for peer-open must wait for the attempt addressed to peer-open;
+// it must never be attached to the earlier peer-closed offer.
+func TestHopFeedMatchesAnAckObservedBeforeItsReroutedPayloadCopy(t *testing.T) {
+	status := contractb.PeerStatus{
+		Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{
+			slot4(1, 0, 0, true, nil), slot4(2, 1, 0, true, nil),
+			slot4(3, 2, 0, true, nil),
+		},
+	}
+	status.Slots[0].PeerID = "peer-source"
+	status.Slots[1].PeerID = "peer-closed"
+	status.Slots[2].PeerID = "peer-open"
+	a := newViewFixture(t, status, time.Second)
+	p := contractb.MigrationPayload{
+		MigrationID: "migration-reordered", SourcePeer: "peer-source", SourceSlot: 1,
+		DestSlot: 2, ExitEdge: contracta.EdgeE,
+	}
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	a.onAck(hopEnvelope(t, contractb.TypeMigrationAck, contractb.MigrationAck{
+		MigrationID: p.MigrationID, SourcePeer: "peer-open", DestPeer: "peer-source",
+	}))
+	if got := a.HopFeedView().Hops; len(got) != 0 {
+		t.Fatalf("an ACK from another peer was attached to the wrong attempt: %+v", got)
+	}
+	p.DestSlot = 3
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	got := a.HopFeedView().Hops
+	if len(got) != 1 || got[0].ToSlot != 3 {
+		t.Fatalf("the reordered ACK did not resolve to its matching destination: %+v", got)
+	}
+}
+
+// TestHopFeedRequiresTheDestinationPeerBinding makes the failure mode honest.
+// Without PEER_STATUS the archive knows the migrationId and slot number but
+// cannot prove which peer occupied that slot when an ACK arrived. Suppressing
+// one animation is safer than attaching it to a guessed reroute destination.
+func TestHopFeedRequiresTheDestinationPeerBinding(t *testing.T) {
+	a := newViewFixture(t, contractb.PeerStatus{}, time.Second)
+	p := contractb.MigrationPayload{
+		MigrationID: "migration-no-binding", SourcePeer: "peer-source", SourceSlot: 1,
+		DestSlot: 2, ExitEdge: contracta.EdgeE,
+	}
+	a.onMigration(hopEnvelope(t, contractb.TypeMigrationPayload, p))
+	a.onAck(hopEnvelope(t, contractb.TypeMigrationAck, contractb.MigrationAck{
+		MigrationID: p.MigrationID, SourcePeer: "peer-destination", DestPeer: "peer-source",
+	}))
+	if got := a.HopFeedView().Hops; len(got) != 0 {
+		t.Fatalf("an ACK without a slot-to-peer binding was guessed onto the map: %+v", got)
+	}
+}
+
+// TestHopCorrelationStateIsBounded covers the private half of the public
+// feed's bounds. A peer that never answers cannot turn this visualization into
+// an unbounded in-memory journal, and neither can cross-peer ACK reordering.
+func TestHopCorrelationStateIsBounded(t *testing.T) {
+	status := contractb.PeerStatus{
+		Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{slot4(1, 0, 0, true, nil), slot4(2, 1, 0, true, nil)},
+	}
+	status.Slots[0].PeerID = "peer-source"
+	status.Slots[1].PeerID = "peer-destination"
+	a := newViewFixture(t, status, time.Second)
+	now := time.Now().UnixMilli()
+	for i := 0; i <= hopPendingMax; i++ {
+		a.observeHopAttempt(contractb.MigrationPayload{
+			MigrationID: "pending-" + itoa(i), SourceSlot: 1, DestSlot: 2,
+			ExitEdge: contracta.EdgeE,
+		}, nil, now+int64(i))
+	}
+	if got := len(a.hopPending); got > hopPendingMax {
+		t.Fatalf("pending correlation grew to %d, above cap %d", got, hopPendingMax)
+	}
+	for i := 0; i <= hopEarlyAckMax; i++ {
+		a.confirmHop(contractb.MigrationAck{
+			MigrationID: "early-" + itoa(i), SourcePeer: "peer-destination",
+		}, now+int64(i))
+	}
+	if got := len(a.hopEarlyAcks); got > hopEarlyAckMax {
+		t.Fatalf("early-ACK correlation grew to %d, above cap %d", got, hopEarlyAckMax)
+	}
+}
 
 // slot4 is `slot` with all four export edges declared, which is what a
 // conformant mod reports under D17 (contract-a.md §18, A38).
