@@ -68,9 +68,9 @@ step() { printf '\n==== %s\n' "$*"; }
 warn() { printf '  !! %s\n' "$*" >&2; }
 die()  { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 
-# run executes a command, or prints it under --dry-run. Every mutation in this
-# script goes through it, which is what makes --dry-run an honest rehearsal
-# rather than a partial one.
+# run executes a command, or prints it under --dry-run. Every direct mutation
+# in this script goes through it. The binary-generation helper has its own
+# dry-run mode because it must also prove the running binary preimage.
 run() {
   if [ "$DRY" = 1 ]; then
     printf '     [dry-run] %s\n' "$*"
@@ -130,6 +130,7 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_GROUP:=multiverse}"
 : "${MV_PREFIX:=/opt/multiverse}"
 : "${MV_STATE:=/var/lib/multiverse}"
+: "${MV_BINARY_GENERATION_DIR:=$MV_STATE/rollback/binaries}"
 : "${MV_LOGDIR:=/var/log/multiverse}"
 : "${MV_NGINX_LOGDIR:=/var/log/multiverse/nginx}"
 : "${MV_GATEDIR:=/etc/multiverse/nginx-gates}"
@@ -727,7 +728,9 @@ phase_binaries() {
     warn "    what this run is supposed to install."
   fi
 
-  local installed=0 skipped=0 name src dst before after want
+  local installed=0 skipped=0 name src dst before after want index current helper
+  local -a artifact_names=() sources=() destinations=() staged_hashes=()
+  local -a installed_hashes=() changed_indexes=() capture_args=()
   for name in relay archive ringstat; do
     src="$MV_STAGE_DIR/${name}-linux-${arch}"
     [ -f "$src" ] || src="$MV_STAGE_DIR/$name"
@@ -756,19 +759,60 @@ phase_binaries() {
     after="$(sha_of "$dst")"
     say "$name: staged    $before"
     say "$name: installed $after"
+    index="${#artifact_names[@]}"
+    artifact_names+=("$name")
+    sources+=("$src")
+    destinations+=("$dst")
+    staged_hashes+=("$before")
+    installed_hashes+=("$after")
     if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
       say "already current: $dst"
       skipped=$((skipped + 1))
       continue
     fi
-    # A running binary cannot be written in place (ETXTBSY) but CAN be replaced
-    # by rename. `install` does that, and the old inode stays alive under the
-    # running process until it restarts — which is what makes an upgrade a
-    # deliberate restart rather than an accident.
-    run install -m 0755 -o root -g root "$src" "$dst"
-    say "installed $dst  -> $(sha_of "$dst")"
-    installed=1
+    changed_indexes+=("$index")
   done
+
+  # Capture the running generation before the first replacement. The helper
+  # opens both /proc/<MainPID>/exe files before it copies either one. It then
+  # rejects a PID, running-hash, or installed-hash change during the capture.
+  # If it fails, this phase has not called install for any binary.
+  if [ "${#changed_indexes[@]}" -gt 0 ]; then
+    helper="$KIT_DIR/binary-generation.sh"
+    [ -x "$helper" ] || die "no executable binary-generation.sh beside this provisioner.
+     Nothing has been installed. Install the complete deploy kit and try again."
+    capture_args=(capture --bin-dir "$BIN" --store "$MV_BINARY_GENERATION_DIR")
+    [ "$DRY" = 1 ] && capture_args+=(--dry-run)
+    say "capturing the exact running binary generation before replacement"
+    "$helper" "${capture_args[@]}" \
+      || die "the running binary generation could not be captured. Nothing has been installed."
+
+    # Close the gap between payload validation, preimage capture, and install.
+    # A concurrent edit to either side invalidates this deployment.
+    for index in "${!artifact_names[@]}"; do
+      current="$(sha_of "${sources[$index]}")"
+      [ "$current" = "${staged_hashes[$index]}" ] \
+        || die "the staged ${artifact_names[$index]} changed during preimage capture.
+     Nothing has been installed. Stage the payload again."
+      current="$(sha_of "${destinations[$index]}")"
+      [ "$current" = "${installed_hashes[$index]}" ] \
+        || die "the installed ${artifact_names[$index]} changed during preimage capture.
+     Nothing has been installed. Resolve the competing deployment and try again."
+    done
+
+    for index in "${changed_indexes[@]}"; do
+      name="${artifact_names[$index]}"
+      src="${sources[$index]}"
+      dst="${destinations[$index]}"
+      # A running binary cannot be written in place (ETXTBSY) but CAN be replaced
+      # by rename. `install` does that, and the old inode stays alive under the
+      # running process until it restarts — which is what makes an upgrade a
+      # deliberate restart rather than an accident.
+      run install -m 0755 -o root -g root "$src" "$dst"
+      say "installed $dst  -> $(sha_of "$dst")"
+      installed=1
+    done
+  fi
 
   # NOTHING CHANGED. Say so in the loudest form this script has that is not a
   # failure, because "already current" for every artifact is both the ordinary

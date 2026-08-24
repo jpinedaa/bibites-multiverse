@@ -237,7 +237,7 @@ if [ "$WITH_BINARIES" = 1 ]; then
     say "no SHA256SUMS beside the staged binaries — cannot verify them"
   fi
 
-  step "6  install the binaries  (provision.sh --only binaries)"
+  step "6  capture the running generation, then install the binaries"
   # The INSTALLED provision.sh, not the staged one: by now they are the same
   # file on a real run, and using the installed copy proves step 2 took effect.
   # A dry run deliberately did not install it, so exercise the staged copy that
@@ -245,6 +245,8 @@ if [ "$WITH_BINARIES" = 1 ]; then
   # of a new provision flag fail before it can rehearse the binary phase.
   BINARY_PROVISION="$INSTALLED_KIT/provision.sh"
   [ "$DRY" = 1 ] && BINARY_PROVISION="$PROVISION"
+  # The provisioner reports the exact rollback generation before it replaces
+  # the first installed path. A capture failure leaves every binary unchanged.
   "$BINARY_PROVISION" --only binaries --stage-dir "$STAGE" "${DRYFLAG[@]}" \
     || die "the binaries phase failed"
 

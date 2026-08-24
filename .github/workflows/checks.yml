@@ -249,6 +249,12 @@ jobs:
       - name: the deployment sequence
         run: deploy/test-deploy.sh
 
+      # A binary replacement must preserve the exact running generation before
+      # it changes an installed path. The fixture covers running/installed
+      # splits, restart races, partial captures, tampering, and named restore.
+      - name: binary generation capture and restore
+        run: deploy/test-binary-generation.sh
+
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.
