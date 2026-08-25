@@ -64,9 +64,15 @@ It states what is measured, at what interval, where each reading lands, and who 
 
 Copy `deploy.env.example` to `/etc/multiverse/deploy.env` on the host.
 Keep the installed file at mode `0640` with owner `root:multiverse`.
+Keep `/etc/multiverse` at mode `0750` with owner `root:multiverse`.
 
 The example contains safe placeholders and conservative defaults.
 It does not contain the values for a live service.
+
+The deployment tools source `deploy.env` as a Bash file. Keep it to the assignment and comment
+forms in `deploy.env.example`. Do not process it as a generic dotenv file, and do not copy a value
+from it with an ad-hoc line parser. A shell expansion, an inline comment, or a quoted `#` can have
+different meanings in those two parsers.
 
 The following values identify one deployment:
 
@@ -89,6 +95,12 @@ The following values identify one deployment:
   what that lookup follows: point it at a repository with no published release
   and the page simply prints no number. The lookup is anonymous, never on the
   request path, and its failure only ever costs the page that one line.
+
+These homepage values are inputs to `provision.sh --only envfiles`. The provisioner writes their
+runtime forms to `/etc/multiverse/archive.env`. The archive reads
+`MULTIVERSE_HOMEPAGE_REPO` and `MULTIVERSE_HOMEPAGE_GAME_VERSION` from that generated file. Verify
+the generated file when you verify the running archive; do not treat the source values in
+`deploy.env` as proof of the active runtime values.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.
@@ -174,6 +186,18 @@ The alert test must reach its intended recipient.
 The backup list must contain the identity files and their checksums.
 The archive status must show an active relay subscription.
 
+Each identity backup contains relative names in `SHA256SUMS`. Verify it from inside the backup
+directory:
+
+```sh
+latest="$(find /var/lib/multiverse/backup/identity -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+test -n "$latest"
+( cd "$latest" && sha256sum -c --strict SHA256SUMS )
+```
+
+Running `sha256sum -c` from another directory checks the wrong paths and can report a false
+failure.
+
 The verbose run prints one line for each check.
 Read the three that watch money rather than availability:
 
@@ -241,6 +265,11 @@ It then rechecks the service PIDs, running hashes, and installed hashes.
 If a check fails, it installs nothing.
 After capture, it installs and proves each staged artifact.
 It restarts nothing.
+
+The service host does not need Go or a source checkout. Build each binary in a clean controller
+workspace. Record its SHA-256 and source revision there. Send only the binary and its checksum to
+the host. Read the installed and running SHA-256 values back from the host. Map those values to the
+accepted controller build; do not ask the host to infer a Git revision.
 
 `ci-gate.sh` is the forced command for the CI key.
 Add it to the login account's `authorized_keys`:
@@ -740,6 +769,16 @@ transaction on the host can restart a multiverse unit, and it exports `NEEDRESTA
 own apt calls. Neither of those makes the ordering optional.
 `RESTART-POLICY.md`, "Package installs and needrestart", carries the rule and the incident that
 produced it.
+
+Before a restart window, run the non-interactive report by its fixed system path:
+
+```sh
+sudo /usr/sbin/needrestart -r l -b
+```
+
+Treat the output as a report, not as a restart command. Re-read the named unit's current state and
+restart count before you decide that it still needs an action. A stale row does not authorize an
+unrelated service restart.
 
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes: a restart costs a held-down relay, and that outage is a

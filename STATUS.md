@@ -97,6 +97,13 @@ already speak 4.2 at exact source `c9e4f3a`. The controlled slot 7 and cloud-wor
 remain planned. This relay-first order means an old participant can omit the new proof, but no new
 participant must guess whether a refusal belongs to its current attempt.
 
+The controlled rollout preflight stopped before it changed a service. The service host has less
+free space than the required deployment and replay margin. Every closed raw segment is still
+inside the announced 30-day retention window, and each segment has a confirmed off-host copy.
+Removing those in-window records would violate the retention rule and would still not recover the
+required margin. A larger service-host replacement is therefore the next prerequisite. The
+current host, controlled worlds, identities, journals, and public service remain unchanged.
+
 ### Population-aware portal routing rollout
 
 Release `0.3.6` changes the pre-custody overload path. A live destination that explicitly refuses
