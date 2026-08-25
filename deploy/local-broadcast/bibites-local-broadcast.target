@@ -1,6 +1,8 @@
 [Unit]
 Description=Local Bibites broadcast
-Wants=bibites-local-broadcast-tunnel.service
+# The RTMP tunnel is no longer a WSL unit: it runs natively on Windows as the
+# scheduled task BibitesBroadcastTunnel (run-tunnel.ps1), so nothing here Wants
+# it. See run-tunnel.ps1 for why the WSL localhost-forwarding path was retired.
 
 [Install]
 WantedBy=default.target

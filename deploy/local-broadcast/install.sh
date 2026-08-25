@@ -502,8 +502,15 @@ tmux -L bibites-broadcast kill-session -t bibites-local-broadcast >/dev/null 2>&
 systemctl --user disable --now bibites-local-broadcast-windows.service >/dev/null 2>&1 || true
 systemctl --user stop bibites-local-broadcast-tunnel.service \
   bibites-local-broadcast.target >/dev/null 2>&1 || true
+# The RTMP tunnel moved from a WSL systemd unit to a native Windows scheduled
+# task. Retire any stale WSL unit and stop the task while the sidecar exe (which
+# the tunnel does not touch, but the trio does) is rebuilt below.
+systemctl --user disable bibites-local-broadcast-tunnel.service >/dev/null 2>&1 || true
+rm -f "$unit_root/bibites-local-broadcast-tunnel.service"
 powershell.exe -NoProfile -Command \
   'Unregister-ScheduledTask -TaskName "BibitesLocalBroadcast" -Confirm:$false -ErrorAction SilentlyContinue' || true
+powershell.exe -NoProfile -Command \
+  'Stop-ScheduledTask -TaskName "BibitesBroadcastTunnel" -ErrorAction SilentlyContinue' || true
 existing_stopper="$windows_root_wsl/stop-windows.ps1"
 if [ -f "$existing_stopper" ]; then
   existing_stopper_windows="$(wslpath -w "$existing_stopper")"
@@ -578,12 +585,12 @@ say 'building the Windows sidecar for the broadcast world'
 install -m 0644 "$repo/deploy/local-broadcast/run-windows.ps1" "$windows_root_wsl/run-windows.ps1"
 install -m 0644 "$repo/deploy/local-broadcast/stop-windows.ps1" "$windows_root_wsl/stop-windows.ps1"
 install -m 0644 "$repo/deploy/local-broadcast/watch-viewers.ps1" "$windows_root_wsl/watch-viewers.ps1"
-for script in run-loop run-tunnel run-windows start stop stop-windows; do
+install -m 0644 "$repo/deploy/local-broadcast/run-tunnel.ps1" "$windows_root_wsl/run-tunnel.ps1"
+for script in run-loop run-windows start stop stop-windows; do
   install -m 0755 "$repo/deploy/local-broadcast/$script" "$runtime_root/bin/$script"
 done
-for unit in bibites-local-broadcast.target bibites-local-broadcast-tunnel.service; do
-  install -m 0644 "$repo/deploy/local-broadcast/$unit" "$unit_root/$unit"
-done
+install -m 0644 "$repo/deploy/local-broadcast/bibites-local-broadcast.target" \
+  "$unit_root/bibites-local-broadcast.target"
 
 runner_windows="$(wslpath -w "$windows_root_wsl/run-windows.ps1")"
 stopper_windows="$(wslpath -w "$windows_root_wsl/stop-windows.ps1")"
@@ -670,6 +677,22 @@ rm -f "$windows_root_wsl/state/director.json" "$windows_root_wsl/state/command.t
 rm -f "$unit_root/bibites-local-broadcast-windows.service"
 systemctl --user daemon-reload
 systemctl --user disable bibites-local-broadcast.target >/dev/null 2>&1 || true
+
+# Register (or refresh) the native Windows RTMP tunnel as a scheduled task. It
+# runs run-tunnel.ps1 at logon and restarts on failure, holding the SSM
+# port-forward on 127.0.0.1:1935 that OBS publishes to. This replaces the WSL
+# systemd tunnel, taking the fragile Windows<->WSL localhost-forwarding relay
+# (wslrelay.exe) out of the video path entirely. run-windows.ps1 waits for
+# 127.0.0.1:1935 below, so the task must be running before the trio starts.
+install -m 0644 "$repo/deploy/local-broadcast/register-tunnel-task.ps1" \
+  "$windows_root_wsl/register-tunnel-task.ps1"
+register_task_windows="$(wslpath -w "$windows_root_wsl/register-tunnel-task.ps1")"
+run_tunnel_windows="$(wslpath -w "$windows_root_wsl/run-tunnel.ps1")"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$register_task_windows" \
+  -ScriptPath "$run_tunnel_windows" -AwsProfile "$profile" -Region "$region" \
+  -AccountId "$expected_account" -Stack "$cloud_stack" \
+  -OriginIp "$origin_private_ip" -LocalPort 1935 >/dev/null
+
 if [ "$start" -eq 1 ]; then
   # Keep the install lock in this process through verification. Do not pass the
   # descriptor to the long-lived broadcaster processes that start creates.

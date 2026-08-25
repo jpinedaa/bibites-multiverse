@@ -319,6 +319,16 @@ unit_is_active() {
   systemctl --user is-active --quiet "$1"
 }
 
+# The RTMP tunnel is a native Windows scheduled task (run-tunnel.ps1), not a WSL
+# unit. Its run loop never exits, so the healthy state is "Running".
+windows_tunnel_task_active() {
+  local state
+  state="$(powershell.exe -NoProfile -Command \
+    '(Get-ScheduledTask -TaskName "BibitesBroadcastTunnel" -ErrorAction SilentlyContinue).State' \
+    2>/dev/null | tr -d ' \r')"
+  [ "$state" = 'Running' ]
+}
+
 assert_private_process_counts() {
   local wanted="$1" counts
   counts="$(get_windows_process_counts)" || return 1
@@ -340,10 +350,9 @@ assert_runtime_stopped() {
     die 'The private tmux supervisor is still active'
     return 1
   fi
-  if unit_is_active bibites-local-broadcast-tunnel.service; then
-    die 'The private RTMP tunnel is still active'
-    return 1
-  fi
+  # The RTMP tunnel is intentionally NOT required to stop for a sidecar swap: it
+  # is a native Windows scheduled task independent of the sidecar exe, so it
+  # keeps holding 127.0.0.1:1935 across the update.
   if unit_is_active bibites-local-broadcast.target; then
     die 'The local-broadcast systemd target is still active'
     return 1
@@ -402,8 +411,8 @@ assert_runtime_health() {
     die 'The private tmux supervisor is not active'
     return 1
   fi
-  if ! unit_is_active bibites-local-broadcast-tunnel.service; then
-    die 'The private RTMP tunnel is not active'
+  if ! windows_tunnel_task_active; then
+    die 'The private RTMP tunnel (BibitesBroadcastTunnel task) is not active'
     return 1
   fi
   if ! unit_is_active bibites-local-broadcast.target; then
