@@ -112,8 +112,17 @@ type Config struct {
 	HeartbeatDeliveryGrace time.Duration
 	// Population admission is evaluated before inbound custody. fixed enforces
 	// InboundPopulationLimit; adaptive learns a limit for the target achieved
-	// speed; adaptive-shadow learns and reports the same value without refusing;
-	// off disables this gate. The paced journal ceiling remains independent.
+	// speed AND refuses on it once the estimator is ready; adaptive-shadow
+	// learns and reports the same value without ever refusing; off disables
+	// this gate. The paced journal ceiling remains independent.
+	//
+	// The default is adaptive. adaptive-shadow was the rollout default while
+	// the estimator was gathering its first production evidence; that evidence
+	// exists now, and a world whose learned limit is already below its own
+	// population is a world that should be shedding new arrivals rather than
+	// only reporting that it would. adaptive still fails OPEN until the
+	// estimator is ready (ten samples), so a cold install refuses nothing for
+	// its first ten minutes.
 	InboundAdmissionMode        string
 	InboundPopulationLimit      int
 	InboundTargetTimeScale      float64
@@ -198,7 +207,7 @@ func DefaultConfig() Config {
 		InboundRateBurst:            contracta.InboundRateBurst,
 		PacingIdleGrace:             contracta.PacingIdleGrace,
 		HeartbeatDeliveryGrace:      defaultHeartbeatDeliveryGrace,
-		InboundAdmissionMode:        AdmissionAdaptiveShadow,
+		InboundAdmissionMode:        AdmissionAdaptive,
 		InboundTargetTimeScale:      defaultAdmissionTarget,
 		InboundPopulationMin:        defaultAdmissionMin,
 		InboundPopulationMax:        defaultAdmissionMax,

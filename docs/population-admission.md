@@ -1,7 +1,8 @@
 # Population-aware inbound admission
 
-Status: implemented. Operator-controlled production worlds enforce `adaptive`; participant
-packages retain the `adaptive-shadow` default.
+Status: implemented and enforcing by default. Every package — participant and
+operator-controlled alike — now ships `adaptive`, which learns a limit and refuses new arrivals
+once the estimator is ready. `adaptive-shadow` remains available and is the immediate rollback.
 
 ## Why this exists
 
@@ -81,8 +82,8 @@ wait-and-reconnect condition during the rollout.
 |---|---|
 | `off` | No population decision. The journal queue ceiling still applies. |
 | `fixed` | Reject a new inbound migration when committed load reaches `inboundPopulationLimit`. |
-| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. This is the participant-package default. |
-| `adaptive` | Enforce the learned limit after the estimator is ready. Before readiness it fails open. |
+| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. Diagnostic and rollback mode. |
+| `adaptive` | Enforce the learned limit after the estimator is ready. Before readiness it fails open. **This is the shipped default.** |
 
 Committed load is the last heartbeat population plus inbound journal entries plus successful
 spawns not yet reconciled by the next heartbeat. This prevents the heartbeat/ACK race from
@@ -132,10 +133,9 @@ MULTIVERSE_INBOUND_ADMISSION=fixed
 MULTIVERSE_INBOUND_POPULATION_LIMIT=40
 ```
 
-The normal promotion path is to enable `adaptive` only after shadow history shows stable learned
-limits across save cycles, restarts, and representative ecology. An operator may authorize an
-earlier controlled-world promotion to collect enforcement evidence, but the exception, initial
-health evidence, fixed fallbacks, and rollback conditions must be recorded below.
+`adaptive` is the default and needs no configuration. Setting `adaptive-shadow` explicitly turns
+enforcement back off while keeping the estimate and its published decision, which is the intended
+rollback and the intended way to observe a new host class before letting it refuse anything.
 
 ## Observability and rollout gates
 
@@ -170,9 +170,13 @@ the gate closed, because discarding those journal entries would lose organisms a
 reach the game and produce genuine ACK-confirmed animations. Once it drains to zero, a closed gate
 has no accepted backlog left to deliver.
 
-The enforcement promotion gate is:
+These were the gates on the original promotion to enforcing, and they are now the standing health
+criteria for enforcement wherever it runs. The first one no longer gates a default install — the
+shipped default is enforcing, and its equivalent per-install protection is the fail-open window,
+which refuses nothing until the estimator has measured that machine. The rest are what an
+operator, or a participant reading their own live map, checks against:
 
-- at least 24 hours of shadow samples per production world;
+- at least 24 hours of samples before treating a host class's learned limit as settled;
 - no sustained oscillation of the effective limit;
 - no estimate pinned to the configured minimum or maximum without an explained workload;
 - no regression in migration loss, capacity sheds, journal discard, or live/mod-connected state;
@@ -184,6 +188,28 @@ and 72-hour checkpoints, compare achieved speed and population against effective
 then review rejection, spillover, lost-forward, custody-depth, capacity-shed, journal-discard, and
 live/mod-connected deltas. A rejection is expected evidence that the gate worked; a custody loss,
 discard, or sustained loss increase is not.
+
+## Default promotion
+
+On 2026-08-25 `adaptive` became the shipped default for every package, in `DefaultConfig` and in
+the `--inbound-admission` flag. The reason is the state a shadow default converges on: a world
+whose learned limit has fallen below its own population publishes `WOULD CLOSE` on the live map
+and keeps accepting migrations anyway, which is a report with no effect on the load that produced
+it. Enforcement is what the estimator was built to authorize.
+
+What this does NOT change:
+
+- The estimator, its median, its safety margin, its bounds, or its rate limits.
+- The fail-open window. `enforcing()` is false until the controller is ready, so a cold install
+  refuses nothing for its first ten valid samples.
+- Custody already accepted. `CLOSED` applies to new offers only.
+- `admission-state.json`. An existing world keeps the limit it learned in shadow and begins
+  enforcing on it at the next sidecar restart, with no relearning period.
+
+The consequence to watch is routing rather than population: a world that refuses sends
+`OVERLOADED` before custody, and the sender re-offers to the next untried world. The 24/72-hour
+`metrics.jsonl` review above is the check on that, and `adaptive-shadow` is the one-variable
+rollback.
 
 ## Controlled enforcement record
 

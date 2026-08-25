@@ -534,10 +534,11 @@ The runtime object must be `runtime/<prior-sha256>.tar.gz` for the supplied SHA-
 These inputs identify the approved rollback preimage. They are not credentials.
 
 The checked-in hosted sidecar unit explicitly sets
-`MULTIVERSE_INBOUND_ADMISSION=adaptive` for these six operator-controlled worlds. This is a
-production override, not a change to the participant-package `adaptive-shadow` default. The
+`MULTIVERSE_INBOUND_ADMISSION=adaptive` for these six operator-controlled worlds. Since 2026-08-25
+that matches the shipped default rather than overriding it, and the line is kept so these six
+worlds state their own policy instead of inheriting whatever a future default becomes. The
 admission estimator lives on each persistent world volume, so activation and rollback retain its
-sample history. To roll back enforcement, change that unit override to `adaptive-shadow`, build a
+sample history. To roll back enforcement, change that unit value to `adaptive-shadow`, build a
 new runtime-only artifact, and use the same guarded transaction; do not delete admission or
 migration-journal state.
 

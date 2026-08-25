@@ -105,10 +105,12 @@ that refusal durably and continues in the same direction to the next compatible 
 tried. Queue overload and the new population policy both use this custody-safe path; relay queue
 pressure remains a retry to the same destination and is not misclassified as a world refusal.
 
-The population controller ships to participants in `adaptive-shadow`. It measures a per-world
-capacity estimate for ×10 and publishes the limit and open/closed decision without refusing on
-population. Fixed and enforcing adaptive modes remain explicit operator choices. The normal
-promotion gate requires at least 24 hours of stable shadow evidence and the other checks in
+The population controller ships to participants in `adaptive`. It measures a per-world capacity
+estimate for ×10, publishes the limit and open/closed decision, and refuses a new arrival on that
+decision once the estimator is ready; before readiness it fails open. `adaptive-shadow` keeps the
+identical measurement and publication while refusing nothing, and is the one-variable rollback.
+The default moved from shadow to enforcing on 2026-08-25; the reasoning, what it does not change,
+and the review it is under are in
 [`docs/population-admission.md`](docs/population-admission.md).
 
 On 2026-08-23, candidate `94a71b2` passed the full uncached Go suite and vet, a release plugin

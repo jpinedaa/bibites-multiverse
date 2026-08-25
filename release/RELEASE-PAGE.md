@@ -26,8 +26,11 @@ Your game and saves stay on your computer.
   journal.
 - **Do not clear the journal.** Existing queue entries, identities, and saves remain in place. A
   4.2 relay gives the upgraded sidecar the exact proof it needs to advance an old refused entry.
-- **No admission setting is required.** The default remains non-enforcing shadow mode. Existing
-  population settings and learned state continue unchanged.
+- **The population gate now enforces by default.** Earlier releases only reported the limit they
+  learned; this one refuses a new arrival once your world reaches it, and the refused organism
+  goes to another world instead. Your learned limit and any explicit population settings carry
+  over unchanged — a world that has been running keeps the number it already measured. To go back
+  to reporting only, set `MULTIVERSE_INBOUND_ADMISSION=adaptive-shadow`.
 
 ## What you need
 

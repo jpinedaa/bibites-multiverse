@@ -8,10 +8,12 @@ RequiresMountsFor=/srv/bibites
 Type=simple
 User=bibites
 Group=bibites
-# The six operator-controlled hosted worlds use the reviewed enforcement rollout.
-# Participant packages retain the safer adaptive-shadow default. The estimator
-# state lives on the persistent world volume, so this promotion does not relearn
-# or fail open on restart.
+# adaptive is now the shipped default for every package, so this line no longer
+# changes behavior. IT STAYS ANYWAY, for the reason every other setting in this
+# unit is written out: a hosted world's policy must be readable here rather than
+# inferred from whichever binary is installed, and a future move of the default
+# must not silently move these six worlds with it. The estimator state lives on
+# the persistent world volume, so a restart neither relearns nor fails open.
 Environment=MULTIVERSE_INBOUND_ADMISSION=adaptive
 ExecStart=/usr/local/libexec/bibites-sidecar %i
 Restart=always

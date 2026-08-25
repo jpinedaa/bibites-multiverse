@@ -97,3 +97,44 @@ func TestAdaptiveAdmissionStateSurvivesShadowToEnforcingRestart(t *testing.T) {
 		t.Fatalf("restored controller = %+v, want ready enforcing limit 45", got)
 	}
 }
+
+// The shipped default is the ENFORCING adaptive mode. A world that has learned
+// a limit below its own population must shed new arrivals, not merely report
+// that it would; that is what the gate is for, and leaving the participant
+// package in shadow made "WOULD CLOSE" the permanent end state of every
+// install. This test is the only thing standing between that decision and a
+// silent revert, so it pins both halves: the mode, and the fail-open window a
+// cold install still gets before the estimator is ready.
+func TestDefaultAdmissionEnforcesOnceReady(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.InboundAdmissionMode != AdmissionAdaptive {
+		t.Fatalf("default inbound admission = %q, want %q",
+			cfg.InboundAdmissionMode, AdmissionAdaptive)
+	}
+	cfg.AdmissionMinSamples = 3
+	a := newAdmissionController(cfg)
+
+	// Nothing learned yet: the gate fails open rather than refusing on an
+	// estimate it does not have.
+	if !a.admit(10_000, true) {
+		t.Fatal("the default refused an arrival before the estimator was ready")
+	}
+	if got := a.snapshot(); got.Enforcing || got.Reason != "learning" {
+		t.Fatalf("cold snapshot = %+v, want non-enforcing and learning", got)
+	}
+
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		a.observe(now.Add(time.Duration(i)*time.Minute), 50, 10, 10, false)
+	}
+	got := a.snapshot()
+	if !got.Ready || !got.Enforcing || got.EffectiveLimit != 45 {
+		t.Fatalf("learned snapshot = %+v, want ready enforcing limit 45", got)
+	}
+	if a.admit(45, true) {
+		t.Fatal("the default admitted an arrival at its learned limit")
+	}
+	if got := a.snapshot(); !got.Closed || got.Reason != "population_limit" {
+		t.Fatalf("closed snapshot = %+v, want closed on population_limit", got)
+	}
+}
