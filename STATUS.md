@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-24 UTC.
+Last updated: 2026-08-25 UTC.
 
 Bibites Multiverse `0.3.7` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
@@ -92,9 +92,10 @@ regression starts with 64 pre-4.2 refused entries and proves that one exact 4.2 
 each entry once to a different destination.
 
 Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` endpoint. The
-hosted minimum remains unset, so 4.0 and 4.1 peers still join. The relay and archive must activate
-4.2 before participant sidecars so that an old relay can only withhold the new proof, never make a
-new client guess.
+hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
+already speak 4.2 at exact source `c9e4f3a`. The controlled slot 7 and cloud-world sidecar updates
+remain planned. This relay-first order means an old participant can omit the new proof, but no new
+participant must guess whether a refusal belongs to its current attempt.
 
 ### Population-aware portal routing rollout
 
@@ -243,7 +244,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | `contract-b/4.1` remains live while the relay-first 4.2 rollout is pending. The current release speaks `contract-b/4.2`; older worlds speaking 4.0 or 4.1 still join because the new attempt proof is optional |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. The controlled slot 7 and cloud-world sidecar updates remain planned. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
@@ -271,7 +272,7 @@ request.
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
-| Network protocol | `contract-b/4.2` — what this release speaks. The hosted service remains on 4.1 until the relay-first rollout; see [Hosted service](#hosted-service). Worlds on `contract-b/4.0` and `contract-b/4.1` still join |
+| Network protocol | `contract-b/4.2` — what this release and the active hosted service speak. See [Hosted service](#hosted-service). Worlds on `contract-b/4.0` and `contract-b/4.1` still join. |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
 | Windows launcher | The shortcuts open `BibitesMultiverseLauncher.exe`, a window that lists every world on this computer with what is running, whether its mod has reached the map, its speed and its slot, and starts, stops, creates, clones, deletes and diagnoses them. A per-session switch runs one session with or without a window. The same launcher's commands and console menu ship beside it as `multiverse-launcher.exe`, which is what a script calls. One game folder supports five worlds at once |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
