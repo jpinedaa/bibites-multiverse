@@ -175,9 +175,15 @@ Prepare this software before installation:
 
 - A Windows user session with the supported Bibites game and BepInEx.
 - OBS Studio and an NVIDIA GPU that supports NVENC.
-- WSL with systemd, AWS CLI v2, Session Manager Plugin, `flock`, `tmux`, `jq`, Go, and .NET SDK.
+- WSL with systemd, `flock`, `tmux`, `jq`, Go, and .NET SDK — for the installer and the
+  sidecar/game/OBS/watcher supervisor.
+- AWS CLI v2 and the Session Manager Plugin installed **on Windows** (`winget install
+  Amazon.AWSCLI Amazon.SessionManagerPlugin`). The RTMP tunnel runs natively on Windows as a
+  scheduled task, so the AWS tooling and profile must resolve for the Windows user, not only in
+  WSL. The installer registers the task; it does not install the tooling.
 - SSH access to the private stream origin.
-- An AWS profile that can read the cloud stack and start an SSM session.
+- An AWS profile — configured for the Windows user (`%USERPROFILE%\.aws`) — that can read the
+  cloud stack and start an SSM session.
 - Outbound HTTPS to the public map for enrollment, and outbound WSS for the relay.
 
 The default source paths are the Steam game directory and the standard OBS directory.
@@ -228,12 +234,17 @@ Start the tunnel, sidecar, game, and OBS:
 ~/.local/lib/bibites-local-broadcast/bin/start
 ```
 
-Make sure that the WSL supervisors are active:
+Make sure the supervisors are active. The RTMP tunnel is a native Windows scheduled task; the
+sidecar, game, OBS, and watcher run under the WSL/tmux supervisor:
 
 ```sh
-systemctl --user is-active bibites-local-broadcast-tunnel.service
+powershell.exe -NoProfile -Command "(Get-ScheduledTask BibitesBroadcastTunnel).State"
 tmux -L bibites-broadcast has-session -t bibites-local-broadcast
 ```
+
+The tunnel logs to `%LOCALAPPDATA%\BibitesMultiverse\broadcast\logs\tunnel.log`. It resolves the
+cloud host from the CloudFormation stack on every cycle, so a Spot replacement is picked up
+automatically, and it holds `127.0.0.1:1935` for OBS to publish to.
 
 Read the viewer watcher:
 
@@ -442,8 +453,10 @@ powershell.exe -NoProfile -Command \
 ## Limits
 
 Keep the computer powered on and keep the Windows user logged in.
-WSL must also remain running.
-A Windows, WSL, display, or GPU restart can interrupt the broadcast.
+The sidecar/game/OBS/watcher supervisor runs under WSL, so WSL must remain running for the
+broadcast world itself; the RTMP tunnel no longer depends on WSL (it is a native Windows
+scheduled task) and survives a WSL restart on its own.
+A Windows, display, or GPU restart can interrupt the broadcast.
 
 The installer does not enable automatic start at boot.
 Run the start command after a computer restart.
