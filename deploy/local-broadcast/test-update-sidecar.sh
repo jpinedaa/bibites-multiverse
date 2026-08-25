@@ -222,6 +222,8 @@ installed_start() {
 
 tmux_session_exists() { [ "$(read_state)" = up ]; }
 
+windows_tunnel_task_active() { [ "$(read_state)" = up ]; }
+
 unit_is_active() { [ "$(read_state)" = up ]; }
 
 sleep_update() {
