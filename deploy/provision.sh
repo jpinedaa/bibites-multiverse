@@ -948,6 +948,29 @@ MULTIVERSE_LOG_LEVEL=$MV_LOG_LEVEL
 # the contract's default; 720h is the announced 30 days. It prunes genome BLOBS
 # and never the ledger. See deploy.env.example.
 MULTIVERSE_GENOME_HORIZON=${MV_ARCHIVE_GENOME_HORIZON:-}
+# The genome COLD TIER's hot window. Empty or 0 tiers nothing, which is the
+# default; 168h is the announced 7 days. It is INDEPENDENT of the horizon above:
+# the horizon permanently deletes a blob, the hot window bundles it to
+# <data-dir>/genome-bundles and, once deploy/coldcopy.sh confirms an off-host
+# copy, removes it from the hot store — and it restores on demand. With no cold
+# archive configured no receipt is ever written, so nothing retires and the disk
+# fills: the same safe default as MV_COLDCOPY=off. See deploy.env.example.
+MULTIVERSE_GENOME_HOT_WINDOW=${MV_GENOME_HOT_WINDOW:-}
+# The RAW METRICS window. Empty or 0 keeps metrics.jsonl whole and unrotated,
+# which is the default; 720h is the announced 30 days. Every answer the history
+# strip draws is folded into a persisted rollup before its raw segment can retire,
+# so the view survives; this is the RAW SAMPLES only, removed only behind a
+# confirmed off-host copy. It is INDEPENDENT of the genome knobs. See
+# deploy.env.example.
+MULTIVERSE_METRICS_WINDOW=${MV_METRICS_WINDOW:-}
+# On-demand restore of a genome blob that has been tiered to cold storage. When a
+# genealogy read misses the hot store and the hash is in the cold index, the
+# archive shells this script with `--restore <bundle>` to fetch and re-admit the
+# blob. coldcopy.sh sources its own S3 config from deploy.env, so only the path is
+# needed here. Empty disables on-demand restore (a cold genome then draws no
+# genealogy ring, a correct answer, never an error). Default to the installed kit
+# path when the cold tier is on so the strengthened availability is real.
+MULTIVERSE_COLDCOPY_SCRIPT=${MV_COLDCOPY_SCRIPT:-${MV_GENOME_HOT_WINDOW:+/opt/multiverse/deploy/coldcopy.sh}}
 # The RAW LEDGER's window. Empty takes MULTIVERSE_GENOME_HORIZON, which is the
 # intended setting and is why there is no default here: one horizon, three
 # mechanisms (§23 B34, extended to the raw ledger). A negative value keeps every
@@ -1260,9 +1283,15 @@ EOF
   # timer an operator stops reading. The archive is safe either way — with no
   # receipt it removes nothing.
   if [ "${MV_COLDCOPY:-off}" != off ]; then
+    # All three cold-copy tiers' directories, because multiverse-coldcopy.service
+    # names them in ReadWritePaths and systemd refuses to start a unit whose
+    # ReadWritePaths is absent. The archive creates them too, but the timer can
+    # fire before the archive has closed anything into one.
     run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/archive/segments
+    run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/archive/genome-bundles
+    run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/archive/metrics-segments
     run systemctl enable --now multiverse-coldcopy.timer
-    say "off-host segment copy: ON, to ${MV_COLDCOPY_URI:-UNSET}"
+    say "off-host copy: ON, to ${MV_COLDCOPY_URI:-UNSET} (tiers: ledger, genome bundles, metrics)"
   else
     run systemctl disable --now multiverse-coldcopy.timer 2>/dev/null || true
     say "off-host segment copy: OFF (MV_COLDCOPY unset or off). The archive keeps every"

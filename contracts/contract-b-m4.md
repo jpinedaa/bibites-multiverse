@@ -1,6 +1,6 @@
 # Contract B — Sidecar ↔ Relay ↔ Sidecar ↔ Archive Wire Specification
 
-**Version:** `contract-b/4.2` (amended — §31, B46; `contract-b/4.1` before it, §25 B37)
+**Version:** `contract-b/4.2` (amended — §32, B47–B48; §31, B46; `contract-b/4.1` before it, §25 B37)
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3 — **superseded — §25, B37**), **B6** the
@@ -194,6 +194,20 @@ answer **minor**, so the identifier moves to **`contract-b/4.2`**. The path stay
 sidecars. A 4.2 sidecar with a 4.1 relay safely leaves the feature unavailable. Contract A takes
 no set. Affected body text carries an `(amended — §31, B46)` marker, and **§31 wins over the
 body and over §14 to §30 wherever they disagree.**
+**Amended:** 2026-08-25, amendment set **`contract-b/4.2 + B47–B48`** (**§32**), from the
+archive disk-pressure work. Two stores that grew without the ledger's bound gain it. **B47** —
+a genome **blob** gains a `genomeHotWindow`: aged blobs are bundled, copied off-host and retired
+from the hot store behind a confirmed receipt, and restored on demand, so a deployment holds a
+bounded working set without giving up the record. It is independent of and reversible where the
+`genomeRetentionHorizon` permanently deletes; §23's "permanently unfetchable" cost is now the
+horizon's alone. **B48** — `metrics.jsonl` gains a `metricsWindow`: its closed days fold into
+the durable history the status strip keeps and its raw segments are cold-copied and retired
+behind a receipt, so the last file §20's B20 named as unbounded becomes a window plus a fold.
+Both are OFF by default, both fail safe (a stalled cold tier costs disk and never record), and
+neither adds or changes a wire field — §4's test answers **neither major nor minor**, so the
+identifier **stays at `contract-b/4.2`**, on §23's and §26's precedent. Contract A takes no set.
+Affected body text carries an `(amended — §32, B47)` or `(added — §32, B48)` marker, and **§32
+wins over the body and over §14 to §31 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -3205,6 +3219,10 @@ horizon that is **unset by default at this contract's level** and turned on by a
 The growth arithmetic stays WP3's deliverable and now has a second number beside it — the age at
 which the bytes stop accumulating. Risk 7 becomes a **policy**: a genome nobody fetched inside
 the horizon is permanently unfetchable, and the archive counts what it abandoned (§23, B34).
+**That policy is the horizon's alone since §32** (amended — §32, B47): a separate **hot window**
+retires an aged blob to a receipt-gated off-host copy and restores it on demand, so a blob past
+the *hot window* stays fetchable and reads as held; only the *horizon* deletes for good, and the
+two are independent knobs.
 
 **The second half landed on 2026-08-17, and it is the other change this paragraph asked for**
 (amended — §26, B39/B40). The owner's ratification splits **the record** from **the lines that
@@ -3423,6 +3441,8 @@ crossing" is now one of those claims.
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
 | `genomeRetentionHorizon` | *unset* | archive | **New after `contract-b/4.0`** (added — §23, B33). Decision 3's retention horizon: how long a genome **blob** is kept after it was last stored or last served, as a duration. **Unset means nothing evicts, and that is the default** — the M4 behaviour this document specified until §23, and the safe direction for a knob that deletes. A deployment turns it on: `--genome-horizon`, `MULTIVERSE_GENOME_HORIZON`, `720h` on the M5 hosted run. It applies to the **genome store only**; ~~`migrations.jsonl` is kept forever at every setting~~ — **amended — §26, B40**: no setting of *this* knob touches a line, and the ledger's own window is the separate knob in the row below. The **same** value retires a gap whose crossing is older than it (§23, B34) — one number, **three** mechanisms since §26's B40, or the archive re-fetches what it just evicted. |
 | `ledgerWindow` | *unset* | archive | **New after `contract-b/4.1`** (added — §26, B40). How long a closed `migrations.jsonl` segment is kept on the host, measured from its newest record, as a duration. **Unset means the ledger is kept whole, and that is the default** — the behaviour of every release before §26, and the safe direction for a knob that deletes. A deployment turns it on: `720h` on the M5 hosted run, which is `genomeRetentionHorizon`'s own value because §26's B40 makes them one number. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset. Setting it does **not** shorten the record: the aggregates behind the lines are kept forever (§26, B39), and a segment past the window is kept anyway until its off-host copy is confirmed. |
+| `genomeHotWindow` | *unset* | archive | **New after `contract-b/4.2`** (added — §32, B47). How long a genome **blob** is kept in the host's **hot** store before it is bundled and moved to the cold tier, measured on the same last-stored-or-last-served axis as `genomeRetentionHorizon` above, as a duration. **Unset means nothing bundles and nothing retires, and that is the default** — the safe direction for a knob that moves bytes off the host. A deployment turns it on: `--genome-hot-window`, `MULTIVERSE_GENOME_HOT_WINDOW`, `168h` on the M5 hosted run. It is **independent of `genomeRetentionHorizon`**: the horizon *deletes* a blob for good, this window *moves* it to a receipt-gated off-host copy that is restored on demand (§32, B47). A deployment may set either, both, or neither. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset. Bytes leave the hot store **only** after a confirmed off-host copy, exactly as `ledgerWindow`'s segments do. |
+| `metricsWindow` | *unset* | archive | **New after `contract-b/4.2`** (added — §32, B48). How long a closed `metrics.jsonl` segment's raw samples are kept on the host, measured from its newest sample, as a duration. **Unset or `0` keeps `metrics.jsonl` whole and unrotated, and that is the default** — every release's behaviour before §32. A deployment turns it on: `--metrics-window`, `MULTIVERSE_METRICS_WINDOW`, `720h` on the M5 hosted run. It is **independent of the genome and ledger knobs** and governs only the raw metric samples; each closed day is folded into the durable history buckets the status strip keeps (§32, B48; the fold discipline is §26, B39's), and a raw segment leaves the host only after its off-host copy is confirmed, as `ledgerWindow`'s do. This is the knob that bounds the one file §20's B20 named as left unbounded. |
 | `journalCompactMinutes` | `15` | sidecar | **New after M4** (added — §20, B20). How often the journal is rewritten to the entries it still holds. `--journal-compact-minutes`, `MULTIVERSE_JOURNAL_COMPACT_MINUTES`. |
 | `logRotateMb` | `100` | all | **New after M4** (added — §20, B20). Size at which a process rotates its own log. `--log-file` names the file, `--log-rotate-mb` the cap, and a negative value disables rotation. With no `--log-file` the process logs to stderr and bounds nothing, which is the pre-M4 behaviour and still the default. |
 | `logKeep` | `5` | all | **New after M4** (added — §20, B20). Rotated generations kept beside `--log-file`. The disk ceiling for one process is `logRotateMb × (logKeep + 1)`. |
@@ -3455,14 +3475,21 @@ Compaction MUST also preserve the exact-refusal tried-slot set and first deadlin
 **What is still unbounded, and deliberately so:** the archive's
 `migrations.jsonl` ledger and its genome store are the record of what happened
 and nothing may evict from them (§10). They grow with traffic, not with uptime,
-and an operator has to size a disk for them. `metrics.jsonl` grows with time at
-one sample per `metricsInterval` per slot, which is small but also monotone.
+and an operator has to size a disk for them. `metrics.jsonl` grows with time —
+the status view serialized verbatim once a minute (§10.1) — which is monotone.
 **The ledger, permanently; the genome store, unless an operator says otherwise**
 (amended — §23, B33). `migrations.jsonl` is unbounded by rule and always will be.
 The genome store is unbounded by **default** — `genomeRetentionHorizon` is unset
 — and an operator who sets one converts that term from a total into a steady
 state of one horizon's worth of blobs. It is the only line of this paragraph a
-configuration can move.
+configuration can move. **Three lines of it move now, and none of them evict the
+record** (amended — §26, B40; §32, B47/B48). The ledger's raw lines take a window
+(`ledgerWindow`) and their fold is kept forever; the genome store's hot working
+set takes a window (`genomeHotWindow`) and a retired blob is copied off-host and
+restored on demand, not deleted; and `metrics.jsonl` takes a window
+(`metricsWindow`) whose closed days fold into the durable history first. Each is a
+window on the host plus a copy off it, so what the operator sizes for is a steady
+state, and what is kept for ever is untouched at every setting.
 
 The **delivery rate limit** is a Contract A tunable, because it paces a Contract A message:
 `inboundRatePerSimMinute`, `inboundRateBurst` and `pacingIdleGraceMs` are in
@@ -4475,7 +4502,7 @@ whatever the operator's shell redirect caught.
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
 | A failed append leaves no bytes behind, and a replay says what it could not read (the ledger's half added 2026-08-09) | Every append-only file here — a sidecar's journal, the archive's `migrations.jsonl` — MUST truncate back to its pre-write length when an append fails or lands **short**, so no fragment is left for the next append to splice a whole record onto, and MUST drop an unterminated final line before appending again. A replay MUST report what it could not read rather than ending in silence. Where the file is rewritten as a matter of course — the journal, which compacts at `Open` — a replay MAY stop at the damage and report the history it discarded behind it. Where the file is **never** rewritten — the archive's ledger, whose contents nothing may evict (§10) — a replay MUST **skip** the damaged line and keep every record behind it, because the damage is permanent and stopping would make the loss grow with the file, without bound, forever. **Segmentation does not weaken that argument and this row's reasoning is restated rather than assumed** (amended — §26, B40): a segment is closed once and never rewritten, so damage inside one is exactly as permanent as damage in the single file was, for the life of that segment. What §26 changes is only that the damage now leaves the host with its segment instead of being read past forever, and that the aggregate the replay feeds (§26, B39) counts the line it could not read rather than losing the fact. |
-| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. **Two of the three still are, and the genome store is now the operator's choice** (amended — §23, B33): `migrations.jsonl` and `metrics.jsonl` are unbounded exactly as this row says, and the **genome store** grows without bound only while `genomeRetentionHorizon` is unset — which is its default, so this row remains true of every deployment that has not decided otherwise. Where a horizon **is** set, the store's steady state is the horizon's worth of blobs and the sizing question becomes a rate rather than a total. ~~Nothing changes for the ledger, at any setting.~~ **One of the three is left, and it is `metrics.jsonl`** (amended — §26, B39/B40). The ledger's per-crossing lines are bounded by `ledgerWindow` (§12) when a deployment sets one, and their steady state is likewise a rate rather than a total; the **aggregate** they fold into is kept forever and is bounded by construction, because its size follows the number of species, lanes, peers and buckets and not the number of crossings. **What the operator now sizes for is a window plus a fold, not a file that only grows.** Unset, this row still reads exactly as it was written, which is the default. |
+| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. **Two of the three still are, and the genome store is now the operator's choice** (amended — §23, B33): `migrations.jsonl` and `metrics.jsonl` are unbounded exactly as this row says, and the **genome store** grows without bound only while `genomeRetentionHorizon` is unset — which is its default, so this row remains true of every deployment that has not decided otherwise. Where a horizon **is** set, the store's steady state is the horizon's worth of blobs and the sizing question becomes a rate rather than a total. ~~Nothing changes for the ledger, at any setting.~~ **One of the three is left, and it is `metrics.jsonl`** (amended — §26, B39/B40). The ledger's per-crossing lines are bounded by `ledgerWindow` (§12) when a deployment sets one, and their steady state is likewise a rate rather than a total; the **aggregate** they fold into is kept forever and is bounded by construction, because its size follows the number of species, lanes, peers and buckets and not the number of crossings. **What the operator now sizes for is a window plus a fold, not a file that only grows.** Unset, this row still reads exactly as it was written, which is the default. ~~One of the three is left, and it is `metrics.jsonl`.~~ **None of the three is left** (amended — §32, B47/B48). `metrics.jsonl` gains its own window (`metricsWindow`, §12): its closed days fold into the durable history the status strip keeps and its raw segments are copied off-host and retired behind a receipt, so the last monotone file becomes a window plus a fold as well. And the genome store gains a second, reversible rule beside its horizon — a hot window (`genomeHotWindow`, §12) whose aged blobs are bundled, copied off-host and retired behind a receipt, restored on demand — so a deployment can hold a bounded working set **without** giving up the record. Each of the three is now a window on the host and a receipt-gated copy off it, and every one keeps its record for ever. Unset, every one of them still reads exactly as this row was first written, which is the default. |
 
 **What the outage cost, as evidence for *A failed write cleans up after itself*.** When the volume filled,
 every genome write in the rig failed inside `os.WriteFile` — after the file
@@ -5338,6 +5365,17 @@ line is unchanged and is worth reading beside this one: **M5 promises removal fr
 does not promise removal from the record** — a horizon prunes blobs by age and is not a takedown
 mechanism, has no way to name a peer, a species or a hash, and must never be offered as one.
 
+**That cost is now the horizon's alone** (amended — §32, B47). §32 adds a second, independent
+rule beside the horizon — a **hot window** (`genomeHotWindow`, §12) whose aged blobs are bundled,
+copied off-host and retired only behind a confirmed receipt, and **restored on demand** when a
+genealogy read needs one. A blob that ages out of the *hot window* is therefore **not**
+permanently unfetchable: it is archived to cold storage and stays fetchable for the run, read as
+**held** rather than as a gap. Permanent unfetchability is what the *horizon* does, and only the
+horizon; the two are separate knobs on separate clocks and a deployment may run either, both, or
+neither. The takedown line above is untouched and is only strengthened by it — a cold copy makes
+the record more durable, still selects by date and by nothing else, and is no more a way to name a
+peer, a species or a hash than the horizon was.
+
 ### B33 — The genome store gains an operator-set retention horizon, off by default; the ledger's rule is untouched (§10, §12, §20 B20, §22 B27)
 
 *`m5_considerations.md` Decision 3, answered 2026-08-12. Milestone-internal — no D-row of its
@@ -5842,9 +5880,15 @@ being a project and becomes a daily upload of one immutable segment.
 gating removal on a recorded confirmation and for publishing the window; the **operator**, for
 choosing the number deliberately, for keeping the off-host destination real, and for knowing
 that the number they choose is the age at which this system stops being able to answer *"which
-organism was that"*; and **every participant-facing document**, for stating the three tiers —
+organism was that"*; and **every participant-facing document**, for stating the tiers —
 the record forever, the lines for the window and then off-host, the genome blobs for the
-horizon — in one set of terms.
+horizon — in one set of terms. **The tiers list is longer since §32** (amended — §32, B47/B48):
+the genome blobs gain a *hot window* whose aged blobs go off-host and are restored on demand
+rather than being deleted at the horizon, and `metrics.jsonl` gains a *window* whose closed days
+fold into the durable history and whose raw segments go off-host. Every one of the durable stores
+is now the same shape — a window on the host, a fold or a record kept for ever, and a
+receipt-gated copy off the host — and a participant-facing document states them in one set of
+terms.
 
 ## 27. A loss is written off in minutes, not in a day (`contract-b/4.1`, 2026-08-19)
 
@@ -6106,3 +6150,121 @@ queue refusal, and byte-identical forwarding.
 refresh, one deadline, no repeated destination, pre-enqueue commit, and one terminal bounce.
 
 **Enforced by the archive:** field persistence and identical attempt-aware live and replay keys.
+
+---
+
+## 32. The genome blobs and the metrics file gain a cold tier (2026-08-25)
+
+§26 gave the archive's ledger the shape this set now gives its other two durable stores: **a
+window on the host, an off-host copy that removal is gated on, and a record that outlives the
+bytes.** §23 had already given the genome blobs a horizon, but the horizon **deletes**, and §20's
+B20 named `metrics.jsonl` as the last file with no bound at all. This set closes both, and it
+closes them by applying B40's copy-then-retire discipline rather than by inventing a new one.
+
+> **A genome blob leaves the SSD's hot working set the same way a closed ledger segment does:
+> bundled, copied off-host, and removed only after a receipt confirms the copy. A retired blob is
+> still HELD, restored on demand when a genealogy read needs it. And `metrics.jsonl` gains a
+> window, its closed days folding into the history the status strip already keeps, its raw
+> segments copied off-host and retired behind a receipt.**
+
+**This strengthens the genome promise rather than narrowing it.** §23's cost line — *a genome
+nobody fetched inside the horizon is permanently unfetchable* — was the horizon's, and the horizon
+is untouched: `genomeRetentionHorizon` still deletes a blob for good where a deployment sets it.
+What B47 adds beside it is a **second, reversible** rule. The genome **hot window**
+(`genomeHotWindow`, §12) is not a deletion at all: past it a blob is archived to the same cold
+store the ledger uses and **stays fetchable for the run**, re-admitted to the hot store the moment
+a read wants it. The two are independent knobs on independent clocks — the horizon a permanent
+delete, the hot window a move to cold — and a deployment may run either, both, or neither. The M5
+hosted run sets the **hot window to `168h`** and leaves the horizon unset, so on that deployment a
+genome that ages out of the working set is **copied off-host and kept**, not lost.
+
+**Two amendments, B47 and B48, and each is one set with its own store.** They share the mechanism
+§26's B40 defined and the gate that makes it safe: **no bytes leave the host until a receipt
+confirms an off-host copy exists**, recomputed and not trusted. With the cold copy switched off
+(`MULTIVERSE_COLDCOPY=off`, `coldcopy.sh` writing no receipt) nothing is ever confirmed, so nothing
+retires — the hot store and the metrics segments grow and the disk fills, which is the same safe
+failure direction B40 chose: **a stalled cold tier costs disk and never record.**
+
+**This set does not change the wire.** No message type, no field, no enum value, no NACK code, no
+close code, no change to custody, dedup, the fan-out, hashing, routing or admission control — and
+no change to what any peer sends or accepts. The archive is a **read-only subscriber** (§5.1, §22
+B27) that answers no `GENOME_REQUEST` at all; bundling, cold-copying, retiring and restoring a blob
+are moves inside its own store, and an on-demand restore serves nothing but the archive's own
+genealogy surface. A peer running a hot window and a peer without one are indistinguishable to
+every other party on the map, exactly as §23 and §26 each found for their own sets. **§4's test
+therefore answers neither major nor minor, and the identifier stays at `contract-b/4.2`** — §31
+moved it and this set does not.
+
+**This set is not a takedown mechanism and must never be offered as one.** §22's B30 line stands
+exactly as written: **M5 promises removal from the view and does not promise removal from the
+record.** The hot window and the metrics window both select **by date and by nothing else**;
+neither can name a peer, a species, a hash or an organism, and a request to remove one is answered
+exactly as it was before this set existed. A cold copy makes the record *more* durable, not less,
+so nothing here is a channel for deletion of any kind.
+
+### B47 — The genome blobs gain a hot window and a receipt-gated cold tier, off by default (§10, §12, §20 B20, §22 B27, §23 B33, §26 B40)
+
+*`m5_considerations.md` Decision 3's third step. Milestone-internal — no D-row of its own — and it
+moves D6 and D11 on the side §23 and §26 moved them: the catalog inherits a complete fold whose raw
+lines and cold blobs are archived off-host rather than deleted.*
+
+**Gap.** §23 gave the genome store a horizon that **deletes**, on the theory that a public archive
+must either buy the disk or let the bytes age out of reach. §26 then showed the ledger a third way
+the horizon could not offer the blobs — window on the host, copy off it, keep the record — and left
+the blobs on the horizon's harsher rule. The blobs are the larger store and the one a genealogy
+view actually reads, so a deployment that wants a bounded working set **and** a fetchable record has
+no knob for it: the horizon gives it the first by giving up the second.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **The hot window is a sibling of the horizon, and it is OFF at the contract level** | `genomeHotWindow` (§12) is **unset by default**, and unset means the M4 behaviour exactly: no bundle is written, nothing is copied, nothing retires, no counter appears. A **deployment** turns it on — the M5 hosted run sets `168h` (`--genome-hot-window`, `MULTIVERSE_GENOME_HOT_WINDOW`) — which keeps the default on the side where a mistake costs disk rather than data. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset. It is **independent of `genomeRetentionHorizon`**: the horizon permanently deletes a blob, the hot window moves it to a reversible off-host copy, and a deployment may set either, both, or neither. |
+| **An aged blob is bundled, not deleted** | A blob whose last-stored-or-last-served age (§23's mtime axis, unchanged) crosses the window is written into a dated bundle under `<data-dir>/genome-bundles/` — a `<day>-<seq>.jsonl.gz` of the blobs plus a sorted `<day>-<seq>.manifest` of the hashes it contains — with the same atomic, crash-safe discipline B40 requires of a ledger rotation. The bundle is written and the manifest beside it; a crash between the two leaves a bundle with no manifest, which the next reconcile ignores and the startup sweep collects. **Nothing is removed from the hot store by this step.** |
+| **A blob leaves the hot store only after its copy is confirmed** | Removal is gated on exactly the receipt B40 defined for a ledger segment: a `.jsonl.gz.receipt` that parses, names the bundle, and whose size and `sha256` match the file recomputed on this disk **now**, against a checksum the cold store returned after the upload. `deploy/coldcopy.sh` writes that receipt and writes it only after reading the object back. On confirmation the local `.jsonl.gz` is deleted and the **manifest and receipt are KEPT** — they are the only record of where the bytes went. There is no timeout, no override, and no "old enough to risk it". |
+| **The cold copy shares the ledger's bucket under its own sub-prefix** | The genome bundles are copied to the **same** cold store as the ledger segments (§26, B40), keyed under the sub-prefix `genome-bundles/`; the ledger tier keeps the original no-sub-prefix key layout. One destination, one credential, one `MULTIVERSE_COLDCOPY` switch. |
+| **A retired blob is HELD, not a gap** | The archive loads a **cold index** at startup from every retired bundle's manifest — the exact set of hashes whose bytes are off-host — keyed on the raw `sha256`. A hash in that index reads as **held** on every surface: it is not a `genomeGap`, not `[MISSING]`, and not a `found: false` the way a pruned or never-held hash is. The record says *"we have it, off-host"* rather than *"we no longer have it"*, which is the whole difference between this set and §23's horizon. |
+| **A read re-admits a cold blob on demand** | When a genealogy read needs a blob that is cold, the archive restores it through `MULTIVERSE_COLDCOPY_SCRIPT` (`coldcopy.sh --restore`), which fetches the bundle back under the sub-prefix its receipt names, verifies it, and re-admits the blob to the hot store where the read finds it. `provision.sh` wires the script automatically whenever a hot window is set, so on-demand availability is real without an operator step. With the script left empty the restore is disabled and a cold blob simply draws no genealogy detail — never an error, and never a claim the record is gone. |
+| **A pass says what it retired** | `genomeHotWindowMs`, `genomeBundlesAwaitingColdCopy`, `genomesCold`, `genomesColdBytes` and `genomesRetired` appear on §10.1's status surface beside `genomeGaps`. `genomeBundlesAwaitingColdCopy` is the number that MUST be zero in steady state: a bundle waiting for a receipt is a cold tier that has stopped working, and it shows here and in disk usage rather than as a record that is gone. Absent `genomeHotWindowMs` means the window is off — §10.1's unknown-is-a-value rule applied to one more knob. |
+| **The wire is untouched, and §5.1 is why** | The archive answers no `GENOME_REQUEST`, so a retired blob, a restored blob and a hot one are indistinguishable to every party on the wire. No field, no type, no enum value, no code — see this section's version note. |
+
+**Enforced by:** the **archive**, for the bundling, for gating every removal on a recomputed
+receipt, for building the cold index so a retired blob reads as held, for restoring on demand and
+for publishing what it retired; the **genome store**, for the atomic bundle write and the sweep
+that collects a crashed one; `deploy/coldcopy.sh`, for writing a receipt only after reading the
+object back and for restoring under the sub-prefix the receipt names; and the **operator**, for
+choosing the window deliberately, for keeping the cold destination real, and for reading
+`genomeBundlesAwaitingColdCopy` as the number that says the working set is aging faster than it is
+being copied off.
+
+### B48 — `metrics.jsonl` gains a window, its closed days fold into the history, and its raw segments are cold-copied and retired (§10, §10.1, §12, §20 B20, §26 B39)
+
+*The last of §20 B20's three unbounded files, closed on the pattern §26 set. Milestone-internal —
+no D-row of its own.*
+
+**Gap.** §20's B20 named three files that only grow — `migrations.jsonl`, the genome store and
+`metrics.jsonl` — and §23, §26 and B47 above bound the first two. `metrics.jsonl` is the status
+view serialized verbatim once a minute (§10.1, §17 B14), so it grows with wall time **and** with
+map size and never with a bound. §26 left it explicitly open, on the ground that it was a smaller
+problem; the measured rate closes that ground — the file grows far faster than the per-slot model
+in `deploy/SIZING.md` assumed — and it is now the one file the disk budget cannot bound.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **The window is off by default** | `metricsWindow` (§12) unset or `0` keeps `metrics.jsonl` whole and unrotated, which is every release's behaviour before this set. A **deployment** turns it on — the M5 hosted run sets `720h` (`--metrics-window`, `MULTIVERSE_METRICS_WINDOW`) — and it is **independent of the genome and ledger knobs**: it governs only the raw metric samples. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset. |
+| **A closed day is folded before its raw segment is a candidate for removal** | Past the window the archive rotates `metrics.jsonl` into dated segments and folds each closed day into the **persisted history buckets** the `/api/history` strip already computes — the metrics rollup, a durable aggregate kept forever on the same discipline §26's B39 gives the ledger's folds. The strip answers from the buckets after the raw day is gone. A missing or unreadable rollup is a loss and says so; it is never a run of zeroes (§10.1, *unknown is a value*). |
+| **A raw segment leaves the host only after its copy is confirmed** | The raw segment is cold-copied and removed behind exactly B47's and B40's receipt gate — recomputed size and `sha256`, a destination the store returned — and never before. `metricsSegmentsAwaitingColdCopy` on §10.1's status surface is the number that MUST be zero in steady state; with the cold copy off, no receipt is written and nothing retires, and the segments accumulate on the host as designed. |
+| **The window is published** | `metricsWindowMs` and `metricsSegmentsAwaitingColdCopy` appear on the status surface beside the genome and ledger counters. Absent `metricsWindowMs` means the window is off. |
+
+**Enforced by:** the **archive**, for folding each closed day into the durable history before its
+raw segment is a removal candidate, for gating removal on a recomputed receipt, and for publishing
+the window; and the **operator**, for keeping the cold destination real and for reading
+`metricsSegmentsAwaitingColdCopy` as the sign that the raw samples are outrunning their off-host
+copy.
+
+**What it closes.** §20's B20 said *one of the three is left, and it is `metrics.jsonl`*. **None is
+left.** All three of the durable files the disk budget once could only watch grow are now a window
+plus a durable fold on the host and a receipt-gated cold copy off it, and the operator sizes for a
+steady state rather than a date — the record kept forever in every one of them.

@@ -368,7 +368,38 @@ MV_COLDCOPY_AWS=$TMP/fake-aws
 EOF
 out="$(MV_ENV_FILE="$R19/deploy.env" MV_CC_CALLS="$R19/calls.txt" MV_CC_MODE=ok "$CC" --check 2>&1)"; rc=$?
 eq  "check: no segments directory is still a pass" "$rc" "0"
-has "check: and it says why the directory is absent" "$out" "no segment has been closed"
+has "check: and it says why the directory is absent" "$out" "does not exist yet: nothing closed in it"
+
+# 17. --restore-tier resolves the tier EXPLICITLY. All three tiers share the
+#     day-seq grammar, so 2026-08-25-0000.jsonl.gz can exist in more than one.
+#     Without the flag, do_restore searches receipts in tier_rows order and takes
+#     the ledger first — so a genome restore would fetch the wrong object back.
+R20="$(newstate restore-tier 2026-08-25-0000)"     # a ledger segment of this name
+mkdir -p "$R20/archive/genome-bundles" "$R20/remote"
+# A RETIRED genome bundle of the SAME name (manifest + receipt, gz gone) AND a
+# ledger receipt of the same name, so the receipt search would find ledger first.
+printf 'deadbeef\n' > "$R20/archive/genome-bundles/2026-08-25-0000.manifest"
+printf '{"segment":"2026-08-25-0000.jsonl.gz","bytes":1,"sha256":"aa"}\n' \
+  > "$R20/archive/genome-bundles/2026-08-25-0000.jsonl.gz.receipt"
+printf '{"segment":"2026-08-25-0000.jsonl.gz","bytes":1,"sha256":"bb"}\n' \
+  > "$R20/archive/segments/2026-08-25-0000.jsonl.gz.receipt"
+rm -f "$R20/archive/segments/2026-08-25-0000.jsonl.gz"
+
+MV_ENV_FILE="$R20/deploy.env" MV_CC_CALLS="$R20/calls.txt" MV_CC_SRC="$R20/remote" MV_CC_MODE=ok \
+  "$CC" --restore 2026-08-25-0000.jsonl.gz --restore-tier genomes >/dev/null 2>&1
+has "restore-tier genomes: fetches the genome-bundles object" \
+    "$(grep get-object "$R20/calls.txt")" "genome-bundles/2026-08-25-0000.jsonl.gz"
+
+# Without the flag it resolves the LEDGER (search order), proving the flag is what
+# changes the resolution: the key carries no genome-bundles sub-prefix.
+: > "$R20/calls.txt"
+MV_ENV_FILE="$R20/deploy.env" MV_CC_CALLS="$R20/calls.txt" MV_CC_SRC="$R20/remote" MV_CC_MODE=ok \
+  "$CC" --restore 2026-08-25-0000.jsonl.gz >/dev/null 2>&1
+if grep get-object "$R20/calls.txt" | grep -q 'genome-bundles/'; then
+  fail "restore default: without --restore-tier it must NOT pick genomes" "$(grep get-object "$R20/calls.txt")"
+else
+  pass "restore default: without --restore-tier it resolves the ledger"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]

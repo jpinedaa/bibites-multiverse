@@ -19,15 +19,24 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const metricsName = "metrics.jsonl"
 
 // MetricsLog is the append-only sample file.
+//
+// It carries the UTC day of its FIRST sample so the metrics window can name a
+// rotated segment by the day it holds (metricsseg.go). The live file is never a
+// segment itself: it stays for tail reads, and rotation closes it into a dated
+// segment and reopens an empty one.
 type MetricsLog struct {
 	mu   sync.Mutex
 	path string
 	f    *os.File
+	// firstMs is the GeneratedAtMs of the first sample in the live file, 0 when it
+	// is empty. It is read from the file at open and set on the first Append.
+	firstMs int64
 }
 
 // OpenMetrics opens or creates <dir>/metrics.jsonl for appending.
@@ -40,11 +49,76 @@ func OpenMetrics(dir string) (*MetricsLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MetricsLog{path: path, f: f}, nil
+	m := &MetricsLog{path: path, f: f}
+	m.firstMs = firstSampleMs(path)
+	return m, nil
 }
 
 // Path is the sample file.
 func (m *MetricsLog) Path() string { return m.path }
+
+// FirstDayMs is the UTC midnight of the live file's first sample, or 0 when it is
+// empty. It is what the rotation decides "is this file's day over" on.
+func (m *MetricsLog) FirstDayMs() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.firstMs == 0 {
+		return 0
+	}
+	return time.UnixMilli(m.firstMs).UTC().Truncate(24 * time.Hour).UnixMilli()
+}
+
+// Size is the live file's current byte size.
+func (m *MetricsLog) Size() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.f == nil {
+		return 0
+	}
+	info, err := m.f.Stat()
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// RotateTo closes the live file, renames it to dest, and reopens an empty live
+// file. It returns false with no error when the live file is empty — there is
+// nothing to rotate. The caller has already ensured dest's directory exists.
+func (m *MetricsLog) RotateTo(dest string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.f == nil {
+		return false, os.ErrClosed
+	}
+	info, err := m.f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return false, nil
+	}
+	if err := m.f.Sync(); err != nil {
+		return false, err
+	}
+	if err := m.f.Close(); err != nil {
+		m.f = nil
+		return false, err
+	}
+	if err := os.Rename(m.path, dest); err != nil {
+		// Reopen the live file so the archive keeps sampling even if the rename
+		// failed; the day will be retried on the next pass.
+		m.f, _ = os.OpenFile(m.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+		return false, err
+	}
+	f, err := os.OpenFile(m.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return true, err
+	}
+	m.f = f
+	m.firstMs = 0
+	return true, nil
+}
 
 // Append writes one sample and flushes it before returning.
 func (m *MetricsLog) Append(view Status) error {
@@ -60,7 +134,26 @@ func (m *MetricsLog) Append(view Status) error {
 	if _, err := m.f.Write(append(b, '\n')); err != nil {
 		return err
 	}
+	if m.firstMs == 0 && view.GeneratedAtMs > 0 {
+		m.firstMs = view.GeneratedAtMs
+	}
 	return m.f.Sync()
+}
+
+// firstSampleMs reads the GeneratedAtMs of the first parseable line of a metrics
+// file, or 0.
+func firstSampleMs(path string) int64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var s Status
+	if dec.Decode(&s) == nil {
+		return s.GeneratedAtMs
+	}
+	return 0
 }
 
 // Close flushes and closes the sample file.

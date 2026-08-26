@@ -261,13 +261,17 @@ Every service notice — planned work, a change of terms — is published on the
 - **For the whole run and beyond**, the record itself: every species that crossed, how often, when
   it first and last crossed, and which species it descended from. Nothing removes a species, a
   count, or a family link.
-- **For 30 days**, the individual crossing lines behind those counts. After 30 days a line is no
-  longer on the server; the crossing is still counted and the family link is still there.
-- **For 30 days**, the related genome files.
+- **For 30 days on the server, then off it for the run**, the individual crossing lines behind
+  those counts. After 30 days a line moves to off-server storage; the crossing is still counted and
+  the family link is still there.
+- **For about a week on the server, then off it for the run**, the related genome files. After that
+  a genome moves to the same off-server storage and is fetched back on demand — it is kept, not
+  deleted.
 
-A compressed copy of the crossing lines is kept away from the server for the length of the run, and
-a line only leaves the server once that copy is confirmed. **This is a capacity schedule and not a
-deletion service**: it ages lines by date and cannot pick out a world, a species, or an organism.
+A compressed copy — of the crossing lines, and of the older genome files — is kept away from the
+server for the length of the run, and each only leaves the server once that copy is confirmed.
+**This is a capacity schedule and not a deletion service**: it ages lines and genome files by date
+and cannot pick out a world, a species, or an organism.
 [`docs/participant/leave.md`](docs/participant/leave.md) states what that means for a removal
 request.
 

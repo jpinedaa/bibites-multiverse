@@ -7,8 +7,11 @@ package archive
 // get the gate wrong.
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -95,5 +98,100 @@ func TestACorruptReceiptIsAnErrorAndNeverAnAbsence(t *testing.T) {
 	verdict, why := checkColdCopy(dir, Segment{Name: "2026-08-14-0000", Compressed: true})
 	if verdict != coldCopyBad {
 		t.Fatalf("a corrupt receipt gave verdict %v (%s), want coldCopyBad", verdict, why)
+	}
+}
+
+// writeGz writes a small gzip file for a bundle/metrics receipt to verify against.
+func writeGz(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write([]byte(body))
+	zw.Close()
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheSecondNameClassIsAcceptedForGenomeBundles: the receipt gate now confirms
+// two kinds of thing, the ledger segment and the genome bundle, through ONE
+// verifier. A bundle receipt round-trips, opens the gate for a matching file, and
+// stays shut for a mismatched one — the same guarantees the ledger segment has.
+func TestTheSecondNameClassIsAcceptedForGenomeBundles(t *testing.T) {
+	dir := t.TempDir()
+	bd := genomeBundlesDir(dir)
+	name := "2026-08-20-0000"
+	gz := filepath.Join(bd, name+gzSuffix)
+	writeGz(t, gz, `{"hash":"bb8-genome/1:sha256:abc"}`+"\n")
+
+	// A bundle receipt lands beside the bundle, not under segments/, and is
+	// accepted by the bundle gate.
+	writeGoodBundleReceipt2(t, dir, name)
+	if v, why := checkColdCopyBundle(bd, name); v != coldCopyOK {
+		t.Fatalf("a good bundle receipt did not open the gate: %v (%s)", v, why)
+	}
+	got, err := BundleReceiptFor(bd, name)
+	if err != nil || got.Segment != name+gzSuffix {
+		t.Fatalf("BundleReceiptFor returned %+v, %v", got, err)
+	}
+
+	// A receipt whose sha no longer matches the bundle on disk does NOT open it.
+	writeGz(t, gz, `{"hash":"bb8-genome/1:sha256:def"}`+"\n") // rewrite: sha changes
+	if v, _ := checkColdCopyBundle(bd, name); v != coldCopyBad {
+		t.Fatalf("a receipt whose sha does not match the bundle opened the gate: %v", v)
+	}
+
+	// WriteBundleReceipt refuses what cannot confirm anything, exactly as the
+	// ledger writer does.
+	for label, r := range map[string]ColdCopyReceipt{
+		"not compressed": {Segment: name + ".jsonl", VerifiedAtMs: 1},
+		"not a name":     {Segment: "genomes.jsonl.gz", VerifiedAtMs: 1},
+		"never verified": {Segment: name + gzSuffix, VerifiedAtMs: 0},
+	} {
+		if err := WriteBundleReceipt(bd, r); err == nil {
+			t.Fatalf("%s: WriteBundleReceipt accepted it", label)
+		}
+	}
+}
+
+func writeGoodBundleReceipt2(t *testing.T, dir, name string) {
+	t.Helper()
+	bd := genomeBundlesDir(dir)
+	info, err := os.Stat(filepath.Join(bd, name+gzSuffix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if err := WriteBundleReceipt(bd, ColdCopyReceipt{
+		Segment: name + gzSuffix, Bytes: info.Size(), SHA256: fileSHA(t, filepath.Join(bd, name+gzSuffix)),
+		Destination: "s3://b/genomes/" + name + gzSuffix, RemoteChecksum: "x", RemoteChecksumKind: "etag",
+		UploadedAtMs: now, VerifiedAtMs: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheMetricsNameClassIsAcceptedToo: the same verifier confirms a metrics
+// segment's off-host copy.
+func TestTheMetricsNameClassIsAcceptedToo(t *testing.T) {
+	dir := t.TempDir()
+	msd := metricsSegmentsDir(dir)
+	name := "2026-08-20-0000"
+	gz := filepath.Join(msd, name+gzSuffix)
+	writeGz(t, gz, `{"generatedAtMs":1}`+"\n")
+	info, _ := os.Stat(gz)
+	now := time.Now().UnixMilli()
+	if err := WriteMetricsReceipt(msd, ColdCopyReceipt{
+		Segment: name + gzSuffix, Bytes: info.Size(), SHA256: fileSHA(t, gz),
+		Destination: "s3://b/metrics/" + name + gzSuffix, RemoteChecksum: "x", RemoteChecksumKind: "etag",
+		UploadedAtMs: now, VerifiedAtMs: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if v, why := checkColdCopyMetrics(msd, name); v != coldCopyOK {
+		t.Fatalf("a good metrics receipt did not open the gate: %v (%s)", v, why)
 	}
 }

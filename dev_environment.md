@@ -697,10 +697,28 @@ The durable rules are:
 - Keep each append all-or-nothing.
 - Measure archive replay from the current ledger size.
 - Treat genomes and the migration ledger as separate retention classes.
+- Window and cold-copy each durable store off-host rather than deleting the record.
 - Keep raw logs, saves, and captures out of Git.
 
 The migration ledger grows for as long as records are retained.
 A fixed replay-duration estimate becomes stale as the ledger grows.
+
+**The archive now applies one cold-tier discipline to all three durable stores** (contract §26,
+§32). Each takes a window on the host, folds or keeps its record forever, and a
+`deploy/coldcopy.sh` receipt gates removal so nothing leaves the host before a confirmed off-host
+copy exists. The knobs, all off by default:
+
+- `MULTIVERSE_LEDGER_WINDOW` — the raw ledger segments (the aggregates are kept forever).
+- `MULTIVERSE_GENOME_HOT_WINDOW` — the genome hot working set. Past it a blob is bundled,
+  cold-copied and retired, and restored on demand; this is a **move to cold**, independent of the
+  permanent-delete `MULTIVERSE_GENOME_HORIZON`.
+- `MULTIVERSE_METRICS_WINDOW` — the raw `metrics.jsonl` samples, each closed day folded into the
+  persisted `/api/history` buckets first.
+
+On `/api/status`, `genomeBundlesAwaitingColdCopy` and `metricsSegmentsAwaitingColdCopy` should both
+read zero in steady state — a non-zero value is a cold copy that has stopped working, showing as
+disk pressure rather than as a lost record — and `genomesCold`, `genomesColdBytes` and
+`genomesRetired` report what the genome tier has moved off-host.
 
 ### Append-only recovery
 
@@ -881,6 +899,8 @@ Future performance work can repeat these measurements:
 - Journal compaction size and duration.
 - Archive replay rate against current ledger size.
 - Forward-receipt cost at real public traffic rates.
+- Cold-tier backlog: `genomeBundlesAwaitingColdCopy` and `metricsSegmentsAwaitingColdCopy` on
+  `/api/status`, which should stay at zero, and the genome hot working-set size against its window.
 - Log and capture retention during long test runs.
 - Version-skew behavior across an ordinary game update.
 

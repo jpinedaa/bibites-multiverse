@@ -102,6 +102,15 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 	a.brains.mu.Lock()
 	if e, ok := a.brains.byHash[hash]; ok {
 		a.brains.mu.Unlock()
+		// A CACHED MISS on a cold hash still asks for a restore. Without this, the
+		// very first poll caches the miss and no later poll ever re-triggers the
+		// restore — a genome that failed to restore once (cold copy briefly down,
+		// the worker's buffer full) would stay invisible forever. The restore queue
+		// is a dedup set, so re-asking every poll is free until the blob is home,
+		// at which point doColdRestore invalidates this entry.
+		if !e.known && a.cold.has(hash) {
+			a.enqueueColdRestore(hash)
+		}
 		return e.brain, e.known
 	}
 	a.brains.mu.Unlock()
@@ -113,12 +122,40 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 	entry := brainEntry{}
 	if stored, ok := a.genomes.Get(hash); ok {
 		entry.brain, entry.known = bb8.BrainStats(stored.BB8)
+	} else if a.cold.has(hash) {
+		// The hot store has aged this blob out to cold. Ask for it back in the
+		// background; until it lands the answer is ABSENT (rule 2), and the restore
+		// invalidates this cached miss when the bytes are home. The queue dedups, so
+		// a two-second poll enqueues one restore rather than one per poll.
+		a.enqueueColdRestore(hash)
 	}
 
 	a.brains.mu.Lock()
 	defer a.brains.mu.Unlock()
 	a.putBrainLocked(hash, entry)
 	return entry.brain, entry.known
+}
+
+// invalidateBrainMiss drops a CACHED MISS for one hash, so the next brainFor
+// re-reads the store. It is called by the cold-restore worker when a blob comes
+// home: without it, a restored genome would stay invisible on the genealogy until
+// the bounded cache turned over. A cached HIT is left alone — the bytes have not
+// changed, so the parse is still right.
+func (a *Archive) invalidateBrainMiss(hash string) {
+	if hash == "" {
+		return
+	}
+	a.brains.mu.Lock()
+	defer a.brains.mu.Unlock()
+	if e, ok := a.brains.byHash[hash]; ok && !e.known {
+		delete(a.brains.byHash, hash)
+		for i, h := range a.brains.order {
+			if h == hash {
+				a.brains.order = append(a.brains.order[:i], a.brains.order[i+1:]...)
+				break
+			}
+		}
+	}
 }
 
 // fillBrainCache records a shape read from bytes the process was already holding

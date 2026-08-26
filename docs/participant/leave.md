@@ -148,10 +148,13 @@ is the string this operator conversation needs.
 the dates and the family links are kept for the whole run and beyond — that is what makes it a
 record. The individual crossing lines behind them are kept for 30 days on the server, and in a
 compressed copy away from it for the length of the run; a line only leaves the server once that
-copy is confirmed.
+copy is confirmed. The related genome files follow the same path on a shorter on-server window —
+kept there while recent, then held in the same off-server storage for the run and fetched back on
+demand — so an older organism's genome stays reachable rather than being dropped.
 
-**That schedule is a capacity rule and it is not a deletion service.** It ages lines by date. It
-cannot pick out a world, a species or an organism, and asking it to is not something it can do.
+**That schedule is a capacity rule and it is not a deletion service.** It ages the lines and the
+genome files by date. It cannot pick out a world, a species or an organism, and asking it to is
+not something it can do.
 If a name from your world needs to stop being shown, the operator can suppress it **at the
 view**: it disappears from the map's page and its terminal view, your world is untouched, and
 nothing is asked of your machine. **What cannot be promised is removal from the record.** That

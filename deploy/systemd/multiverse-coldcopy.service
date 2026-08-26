@@ -4,7 +4,7 @@
 # archive will not remove a closed segment from this host until this timer has
 # written a receipt confirming the segment exists in the object store and matches
 # the bytes on this disk.
-Description=Bibites Multiverse off-host copy of closed ledger segments
+Description=Bibites Multiverse off-host copy of closed ledger segments, genome bundles and metrics segments
 Documentation=file:///opt/multiverse/deploy/coldcopy.sh
 After=multiverse-archive.service
 
@@ -27,9 +27,17 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 LockPersonality=true
-# It writes ONLY receipts and its own log, both inside the segments directory.
-# It never deletes a segment: removal is the archive's, behind the receipt.
+# It writes ONLY receipts (and its own log), inside each tier's directory. It
+# never deletes anything: removal is the archive's, behind the receipt. All three
+# tiers must be listed — systemd refuses to start a unit whose ReadWritePaths does
+# not exist, so provision.sh creates them when the copy is turned on.
+#   segments          the ledger's closed daily segments
+#   genome-bundles    the genome cold tier's dated bundles (a .jsonl.gz restore
+#                     also lands here, which is why the path is read-WRITE)
+#   metrics-segments  the metrics window's closed daily segments
 ReadWritePaths=/var/lib/multiverse/archive/segments
+ReadWritePaths=/var/lib/multiverse/archive/genome-bundles
+ReadWritePaths=/var/lib/multiverse/archive/metrics-segments
 
 # NO [Install] SECTION, and that is deliberate: the timer is what is enabled and
 # the timer is what pulls this in. multiverse-backup.service and

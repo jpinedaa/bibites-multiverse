@@ -1068,7 +1068,7 @@ func (a *Archive) expireLoadedGapsLocked(now time.Time) (expired, held int) {
 	}
 	for hash, f := range a.pending {
 		switch {
-		case a.genomes.Has(hash):
+		case a.heldOrColdLocked(hash):
 			delete(a.pending, hash)
 			a.markGapGoneLocked(hash)
 			held++
