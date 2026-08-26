@@ -1397,6 +1397,22 @@ The owner ratified the shape and the window on `2026-08-17` (*"B+D, 30-day raw w
 `contract-b-m4.md` §26 is the amendment; the arithmetic and the four shapes that were compared
 are in `archive_rollup_design.md`. **This paragraph is an addition and not a rewrite** — the
 `2026-08-12` answer above is what was decided on that date and stays as it was written.
+**AMENDED 2026-08-25 — the copy-then-retire discipline reaches the last two stores** (§32,
+B47/B48). §26 gave the ledger a window on the host and a receipt-gated cold copy off it, and left
+the genome blobs on §23's harsher rule — a horizon that *deletes* — and `metrics.jsonl` unbounded.
+This step gives the blobs the same reversible shape the ledger has: a **hot window** on the SSD
+(the hosted run sets `168h`), past which an aged blob is bundled, copied off-host to the same cold
+store as the ledger segments, and retired **only** after a confirmed receipt, with a local cold
+index so a retired blob reads as **held** and an on-demand restore that re-admits it when a
+genealogy read needs it. So the `2026-08-12` cost — *a genome nobody fetched inside the horizon is
+permanently unfetchable* — is now the **horizon's alone**: a deployment that runs the hot window
+instead keeps its genomes fetchable for the run in cold storage, which is the strongest mitigation
+**Risk 7** sketched (any holder can serve a content-addressed blob) reached on the archive's own
+side. `metrics.jsonl` gains a window too, its closed days folding into the durable history the
+status strip keeps, closing the last of `contract-b-m4.md` §20 B20's three unbounded files.
+**This paragraph is an addition and not a rewrite** — the `2026-08-12` and `2026-08-17` answers
+above stay as they were written, and the hot window is off by default so nothing changes for a
+deployment that does not set it.
 
 **4. Who operates the public relay, and under what commitment?**
 `system_decomposition.md`'s research table still lists this as open, and D9 answered it only

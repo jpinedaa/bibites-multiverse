@@ -103,6 +103,23 @@ type Status struct {
 	GenomesEvicted      int   `json:"genomesEvicted,omitempty"`
 	GenomesEvictedBytes int64 `json:"genomesEvictedBytes,omitempty"`
 	GapsExpired         int   `json:"genomeGapsExpired,omitempty"`
+	// THE GENOME COLD TIER (genomecold.go). The hot window is a SIBLING of the
+	// horizon above and independent of it: the horizon permanently deletes a blob,
+	// the hot window moves it to a reversible off-host copy. All are omitted on an
+	// archive with no hot window — the default — so an absent genomeHotWindowMs is
+	// how a reader knows nothing is being tiered.
+	//
+	// GenomeBundlesAwaitingColdCopy is the number that should be ZERO: a blob is
+	// removed from the hot store only once its bundle's off-host copy is confirmed,
+	// so a cold archive that has stopped working shows up here and in disk usage,
+	// never as a record that is gone. GenomesCold is how many distinct genomes now
+	// live off-host, GenomesColdBytes is the hot-store bytes those retirements
+	// reclaimed, and GenomesRetired is the blobs they removed from the hot store.
+	GenomeHotWindowMs             int64 `json:"genomeHotWindowMs,omitempty"`
+	GenomeBundlesAwaitingColdCopy int   `json:"genomeBundlesAwaitingColdCopy,omitempty"`
+	GenomesCold                   int   `json:"genomesCold,omitempty"`
+	GenomesColdBytes              int64 `json:"genomesColdBytes,omitempty"`
+	GenomesRetired                int   `json:"genomesRetired,omitempty"`
 	// THE ROLL-UP HONESTY FIELDS (rollup.go). They exist so a page can say WHICH
 	// PART OF ITS ANSWER IS AGGREGATE AND WHICH IS RAW, which stops mattering
 	// only if the raw record is kept forever — and the record roll-up is the
@@ -189,6 +206,14 @@ type Status struct {
 	LedgerSegmentsAwaitingColdCopy int   `json:"ledgerSegmentsAwaitingColdCopy"`
 	LedgerRetired                  int   `json:"ledgerRetiredTotal"`
 	LedgerRetiredBytes             int64 `json:"ledgerRetiredBytes,omitempty"`
+	// THE METRICS WINDOW (metricsseg.go). metrics.jsonl was append-forever; the
+	// window rotates it into dated segments and removes the old ones behind a
+	// confirmed off-host copy, exactly as the ledger window does. The history the
+	// strip draws is kept forever in the rollup; these describe the RAW samples.
+	// MetricsSegmentsAwaitingColdCopy is the number that should be zero. Both are
+	// omitted on an archive with no metrics window — the default.
+	MetricsWindowMs                 int64 `json:"metricsWindowMs,omitempty"`
+	MetricsSegmentsAwaitingColdCopy int   `json:"metricsSegmentsAwaitingColdCopy,omitempty"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -483,6 +508,15 @@ func (a *Archive) StatusView() Status {
 		GenomesEvicted:      a.evict.evicted,
 		GenomesEvictedBytes: a.evict.bytes,
 		GapsExpired:         a.evict.gapsExpired,
+
+		GenomeHotWindowMs:             a.cfg.GenomeHotWindow.Milliseconds(),
+		GenomeBundlesAwaitingColdCopy: a.coldTier.awaiting,
+		GenomesCold:                   a.cold.len(),
+		GenomesColdBytes:              a.coldTier.genomesColdBytes,
+		GenomesRetired:                a.coldTier.genomesRetired,
+
+		MetricsWindowMs:                 a.cfg.MetricsWindow.Milliseconds(),
+		MetricsSegmentsAwaitingColdCopy: a.metricsSeg.awaiting,
 
 		LedgerSegments:                 a.seg.segments,
 		LedgerRawBytes:                 a.seg.rawBytes,

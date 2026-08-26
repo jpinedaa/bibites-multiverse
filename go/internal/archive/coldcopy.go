@@ -137,17 +137,30 @@ const (
 // compressed, and past the window — so the sha256 it recomputes is paid once per
 // segment and never on a pass that was not going to delete anything.
 func checkColdCopy(dir string, seg Segment) (coldCopyVerdict, string) {
-	path := receiptPath(dir, seg.Name)
-	r, err := readReceipt(path)
+	return verifyColdCopyAt(seg.Path, receiptPath(dir, seg.Name), seg.Name+gzSuffix)
+}
+
+// verifyColdCopyAt is the gate itself, over explicit paths and a name to check —
+// the ONE implementation of "does this receipt confirm an off-host copy that
+// matches the bytes on this disk", shared by the ledger segment gate, the genome
+// bundle gate (genomecold.go) and the metrics segment gate (metricsseg.go). It is
+// factored out so a SECOND name-class of thing that retires behind a receipt
+// cannot grow a second, subtly different check.
+//
+//	the receipt parses, and names wantName
+//	Bytes equals the size of gzPath on disk
+//	SHA256 equals the sha256 of gzPath on disk, RECOMPUTED
+//	VerifiedAtMs is set, Destination and RemoteChecksum are not empty
+func verifyColdCopyAt(gzPath, receiptPath, wantName string) (coldCopyVerdict, string) {
+	r, err := readReceipt(receiptPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return coldCopyMissing, "no receipt"
 	}
 	if err != nil {
 		return coldCopyBad, err.Error()
 	}
-	want := seg.Name + gzSuffix
-	if r.Segment != want {
-		return coldCopyBad, fmt.Sprintf("the receipt names %q, not %q", r.Segment, want)
+	if r.Segment != wantName {
+		return coldCopyBad, fmt.Sprintf("the receipt names %q, not %q", r.Segment, wantName)
 	}
 	if r.VerifiedAtMs <= 0 {
 		return coldCopyBad, "the receipt has no verification time: the upload was never read back"
@@ -158,21 +171,21 @@ func checkColdCopy(dir string, seg Segment) (coldCopyVerdict, string) {
 	if strings.TrimSpace(r.RemoteChecksum) == "" {
 		return coldCopyBad, "the receipt carries no checksum read back from the store"
 	}
-	info, err := os.Stat(seg.Path)
+	info, err := os.Stat(gzPath)
 	if err != nil {
-		return coldCopyBad, "the segment could not be stat'd: " + err.Error()
+		return coldCopyBad, "the file could not be stat'd: " + err.Error()
 	}
 	if r.Bytes != info.Size() {
 		return coldCopyBad, fmt.Sprintf(
-			"the receipt is for %d bytes and the segment on this disk is %d", r.Bytes, info.Size())
+			"the receipt is for %d bytes and the file on this disk is %d", r.Bytes, info.Size())
 	}
-	d, err := digestOfFile(seg.Path)
+	d, err := digestOfFile(gzPath)
 	if err != nil {
-		return coldCopyBad, "the segment could not be hashed: " + err.Error()
+		return coldCopyBad, "the file could not be hashed: " + err.Error()
 	}
 	if !strings.EqualFold(d.SHA256, r.SHA256) {
 		return coldCopyBad, fmt.Sprintf(
-			"the receipt's sha256 is %s and the segment on this disk hashes to %s",
+			"the receipt's sha256 is %s and the file on this disk hashes to %s",
 			short12(r.SHA256), short12(d.SHA256))
 	}
 	return coldCopyOK, ""
@@ -202,12 +215,18 @@ func WriteReceipt(dir string, r ColdCopyReceipt) error {
 	if r.VerifiedAtMs <= 0 {
 		return errors.New("archive: a cold-copy receipt with no verification time does not confirm anything")
 	}
+	return writeReceiptFile(receiptPath(dir, name), r)
+}
+
+// writeReceiptFile writes one receipt atomically to an explicit path. It is the
+// shared writer behind WriteReceipt (ledger) and WriteBundleReceipt (genomecold),
+// so the on-disk shape the gate reads is produced in exactly one place.
+func writeReceiptFile(path string, r ColdCopyReceipt) error {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	path := receiptPath(dir, name)
 	tmp := path + tmpSuffix
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err

@@ -641,6 +641,22 @@ check_disk() {
     elif [ "$winms" -gt 0 ]; then
       tail="$tail. A $(( winms / 86400000 ))-day raw window is set but $awaiting segment(s) have no confirmed off-host copy, so NOTHING is being retired and the raw ledger is growing as though there were no window ('cold-copy' check)"
     fi
+    # The genome and metrics tiers stop the disk shrinking for the SAME reason: a
+    # window set but the off-host copy stuck means those bytes are not leaving the
+    # host either, so the projection above is a straight line through terms that
+    # were meant to flatten. Say so — it is the 'cold-copy' check's business, but
+    # the disk projection is where the growth is felt.
+    local gaw maw
+    gaw="$(jq -r '.genomeBundlesAwaitingColdCopy // 0' "$STATUS_JSON" 2>/dev/null)"
+    maw="$(jq -r '.metricsSegmentsAwaitingColdCopy // 0' "$STATUS_JSON" 2>/dev/null)"
+    case "${gaw:-x}" in ''|*[!0-9]*) gaw=0 ;; esac
+    case "${maw:-x}" in ''|*[!0-9]*) maw=0 ;; esac
+    if [ "$gaw" -gt 0 ] || [ "$maw" -gt 0 ]; then
+      tail="$tail. Also NOT retiring:"
+      [ "$gaw" -gt 0 ] && tail="$tail $gaw genome bundle(s)"
+      [ "$maw" -gt 0 ] && tail="$tail $maw metrics segment(s)"
+      tail="$tail with no confirmed off-host copy ('cold-copy' check)"
+    fi
   fi
 
   if [ "$free" -le "$MV_DISK_CRIT_PCT" ]; then
@@ -1338,20 +1354,50 @@ check_cold_copy() {
   case "${fromms:-x}" in ''|*[!0-9]*) fromms=0 ;; esac
   case "${saved:-x}"  in ''|*[!0-9]*) saved=0  ;; esac
 
-  if [ "$saved" = 0 ] && [ "$segs" = 0 ] && [ "$awaiting" = 0 ]; then
+  # THE OTHER TWO TIERS share this one check, because the failure is identical:
+  # the archive removes a genome bundle or a metrics segment only behind a
+  # confirmed off-host copy (genomecold.go, metricsseg.go), so a stopped cold
+  # archive shows up here as a number that should be zero and never as a record
+  # that is gone. Absent fields mean the tier is off, which contributes nothing.
+  local gawait mawait
+  gawait="$(jq -r '.genomeBundlesAwaitingColdCopy // 0' "$STATUS_JSON" 2>/dev/null)"
+  mawait="$(jq -r '.metricsSegmentsAwaitingColdCopy // 0' "$STATUS_JSON" 2>/dev/null)"
+  case "${gawait:-x}" in ''|*[!0-9]*) gawait=0 ;; esac
+  case "${mawait:-x}" in ''|*[!0-9]*) mawait=0 ;; esac
+  local otherwait=$(( gawait + mawait )) otherdesc=""
+  [ "$gawait" -gt 0 ] && otherdesc="$otherdesc, $gawait genome bundle(s)"
+  [ "$mawait" -gt 0 ] && otherdesc="$otherdesc, $mawait metrics segment(s)"
+
+  if [ "$saved" = 0 ] && [ "$segs" = 0 ] && [ "$awaiting" = 0 ] && [ "$otherwait" = 0 ]; then
     report cold-copy OK "the segment layer has not reported yet. The archive refreshes these fields in its maintenance pass, and the pass at start compresses before it refreshes, so a reading taken in the first minute after a restart is 'not yet' rather than 'nothing there'."
     return
   fi
 
-  if [ "$awaiting" = 0 ]; then
+  if [ "$awaiting" = 0 ] && [ "$otherwait" = 0 ]; then
     sset coldcopy.awaiting.since 0
     if [ "$winms" -gt 0 ]; then
-      report cold-copy OK "every closed segment past the $(( winms / 86400000 ))-day window has a confirmed off-host copy ($segs segment(s) held)"
+      report cold-copy OK "every closed segment, genome bundle and metrics segment past its window has a confirmed off-host copy ($segs ledger segment(s) held)"
     else
-      report cold-copy OK "no segment is waiting for an off-host copy ($segs segment(s) held; no ledger window is in force, so none would be removed anyway)"
+      report cold-copy OK "nothing is waiting for an off-host copy across the ledger, genome and metrics tiers ($segs segment(s) held)"
     fi
     return
   fi
+
+  # The ledger is clear but a younger tier is waiting. It costs disk, not record,
+  # exactly like a waiting ledger segment, so it is a since-tracked WARN.
+  if [ "$awaiting" = 0 ] && [ "$otherwait" -gt 0 ]; then
+    local osince oage
+    osince="$(sget coldcopy.other.since 0)"
+    case "$osince" in ''|*[!0-9]*|0) osince="$NOW"; sset coldcopy.other.since "$NOW" ;; esac
+    oage=$(( NOW - osince ))
+    if [ "$oage" -ge $(( MV_COLDCOPY_WAIT_HOURS * 3600 )) ]; then
+      report cold-copy WARN "the ledger is clear but${otherdesc} have had no confirmed off-host copy for $(( oage / 3600 ))h. Nothing is removed without a receipt, so this costs DISK and not record: 'deploy/coldcopy.sh --check' then '--list'."
+    else
+      report cold-copy OK "the ledger is clear;${otherdesc} waiting for an off-host copy, first seen $(( oage / 60 )) min ago (the timer runs hourly)"
+    fi
+    return
+  fi
+  sset coldcopy.other.since 0
 
   local since age
   since="$(sget coldcopy.awaiting.since 0)"
@@ -1374,9 +1420,9 @@ check_cold_copy() {
   fi
 
   if [ "$age" -ge $(( MV_COLDCOPY_WAIT_HOURS * 3600 )) ]; then
-    report cold-copy WARN "$awaiting closed segment(s) have had no confirmed off-host copy for $(( age / 3600 ))h. The hourly timer should clear one within the hour, so this is the copy failing rather than lagging. Nothing is removed without a receipt, so this costs disk and not record: 'systemctl status multiverse-coldcopy.timer', then 'deploy/coldcopy.sh --check'."
+    report cold-copy WARN "$awaiting closed ledger segment(s)${otherdesc} have had no confirmed off-host copy for $(( age / 3600 ))h. The hourly timer should clear one within the hour, so this is the copy failing rather than lagging. Nothing is removed without a receipt, so this costs disk and not record: 'systemctl status multiverse-coldcopy.timer', then 'deploy/coldcopy.sh --check'."
   else
-    report cold-copy OK "$awaiting segment(s) waiting for an off-host copy, first seen $(( age / 60 )) min ago (the timer runs hourly)"
+    report cold-copy OK "$awaiting ledger segment(s)${otherdesc} waiting for an off-host copy, first seen $(( age / 60 )) min ago (the timer runs hourly)"
   fi
 }
 

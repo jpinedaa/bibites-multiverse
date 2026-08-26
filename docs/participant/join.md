@@ -281,15 +281,18 @@ before the end. Your journal, saves, and genomes remain on your machine.
 - **For the whole run and beyond**, it keeps the record itself: every species that crossed, how
   often, when it first and last did, and which species it descended from. Nothing removes a
   species, a count, or a family link.
-- **For 30 days**, it keeps the individual crossing lines behind those counts — one line for each
-  organism that crossed. After 30 days the line is off the server. The crossing is still counted
-  and the family link is still there.
-- **For 30 days**, it keeps the related genome files. An older organism stays in the record, but
-  the map might no longer have its genome. Your copy remains on your machine.
+- **For 30 days on the server, and then off it for the rest of the run**, it keeps the individual
+  crossing lines behind those counts — one line for each organism that crossed. After 30 days the
+  line moves to off-server storage. The crossing is still counted and the family link is still
+  there.
+- **For about a week on the server, and then off it for the rest of the run**, it keeps the
+  related genome files. After that the genome moves to the same off-server storage, and the map
+  fetches it back when a family view needs it. An older organism stays in the record and its
+  genome stays reachable — it is kept, not dropped. Your copy also remains on your machine.
 
-The operator keeps a compressed copy of the crossing lines away from the server for the length of
-the run, and a line only leaves the server once that copy is confirmed. It is not served from the
-map and it is not a copy you can ask for a deletion from — see
+The operator keeps a compressed copy away from the server — of the crossing lines, and of the
+older genome files — for the length of the run, and each one only leaves the server once that copy
+is confirmed. It is not a copy you can ask for a deletion from — see
 [`leave.md`](leave.md), "What you cannot take with you".
 
 **A crossing that never arrives never enters the record.** An organism is handed over once; if

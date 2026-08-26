@@ -29,7 +29,9 @@
 #   coldcopy.sh --check          can this host copy at all? Make no upload
 #   coldcopy.sh --list           what is copied, what is waiting, and how much
 #   coldcopy.sh --verify         re-read every receipt's object from the store
-#   coldcopy.sh --restore NAME   fetch one segment back and verify it
+#   coldcopy.sh --restore NAME [--restore-tier ledger|genomes|metrics]
+#                                fetch one file back and verify it. Name the tier
+#                                when the day-seq name could exist in more than one
 #   coldcopy.sh --dry-run        say what would be copied; make no call
 #
 # RUN `--check` BEFORE THE FIRST REAL COPY, and after any change to the
@@ -90,10 +92,32 @@ set -a; . "$ENV_FILE"; set +a
 
 ARCHIVE_DATA="$MV_STATE/archive"
 SEGMENTS="$ARCHIVE_DATA/segments"
+# THE THREE TIERS this script copies off-host, each an immutable .jsonl.gz with a
+# receipt beside it that the archive re-checks before it removes anything:
+#
+#   segments          the ledger's closed daily segments (the original tier)
+#   genome-bundles    the genome cold tier's dated bundles (genomecold.go)
+#   metrics-segments  the metrics window's closed daily segments (metricsseg.go)
+#
+# They differ only in their directory and in the S3 sub-prefix their objects land
+# under, so a bundle and a ledger segment of the same day-seq name cannot collide
+# in the bucket. The ledger tier keeps the ORIGINAL key layout (no sub-prefix) so
+# receipts already written on the host still name the object that is there.
+GENOME_BUNDLES="$ARCHIVE_DATA/genome-bundles"
+METRICS_SEGMENTS="$ARCHIVE_DATA/metrics-segments"
 LOG="$SEGMENTS/coldcopy.jsonl"
-VERSION="coldcopy.sh 1"
+VERSION="coldcopy.sh 2"
+
+# tier_rows prints "dir<TAB>subprefix" for every tier whose directory exists. The
+# ledger's sub-prefix is empty, which reproduces the pre-tier key exactly.
+tier_rows() {
+  [ -d "$SEGMENTS" ]        && printf '%s\t%s\n' "$SEGMENTS" ""
+  [ -d "$GENOME_BUNDLES" ]  && printf '%s\t%s\n' "$GENOME_BUNDLES" "genome-bundles"
+  [ -d "$METRICS_SEGMENTS" ] && printf '%s\t%s\n' "$METRICS_SEGMENTS" "metrics"
+}
 MODE=copy
 RESTORE_NAME=""
+RESTORE_TIER=""
 DRY=0
 
 say()  { printf '     %s\n' "$*"; }
@@ -108,6 +132,12 @@ while [ $# -gt 0 ]; do
     --check) MODE=check ;;
     --verify) MODE=verify ;;
     --restore) MODE=restore; RESTORE_NAME="${2:-}"; shift ;;
+    # WHICH TIER a restore names, because all three tiers share the day-seq name
+    # grammar starting at 0000: 2026-08-25-0000.jsonl.gz can exist in every one of
+    # them. Without this, a restore resolves to whichever tier comes first in
+    # tier_rows (the ledger) and fetches the wrong object back. Values: ledger,
+    # genomes, metrics.
+    --restore-tier) RESTORE_TIER="${2:-}"; shift ;;
     --dry-run) DRY=1 ;;
     -h|--help) sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "coldcopy: unknown argument $1" >&2; exit 2 ;;
@@ -138,20 +168,27 @@ awscli() {
   AWS_PAGER="" "$MV_COLDCOPY_AWS" "${args[@]}" "$@"
 }
 
+# key_for builds the object key: <prefix>/<subprefix>/<name>, with either part
+# elided when empty. The ledger tier passes an empty sub-prefix, so its key is
+# unchanged from before the cold tier existed.
 key_for() {
-  if [ -n "$PREFIX" ]; then printf '%s/%s' "$PREFIX" "$1"; else printf '%s' "$1"; fi
+  local name="${1:-}" sub="${2:-}" key
+  key="$name"
+  [ -n "$sub" ] && key="$sub/$name"
+  if [ -n "$PREFIX" ]; then printf '%s/%s' "$PREFIX" "$key"; else printf '%s' "$key"; fi
 }
 
-# ---------------------------------------------------------------- the segments
+# ---------------------------------------------------------------- the files
 
-# closed_segments lists every compressed closed segment, oldest first. Sorting
-# is on the DAY inside the name, so the legacy segment — whose name begins
-# "legacy-" and whose records are the oldest in the system — sorts first rather
-# than last, exactly as the archive's own ordering does.
-closed_segments() {
-  [ -d "$SEGMENTS" ] || return 0
-  local f base sortkey
-  for f in "$SEGMENTS"/*.jsonl.gz; do
+# closed_files lists every compressed closed file in a tier directory, oldest
+# first. Sorting is on the DAY inside the name, so the ledger's legacy segment —
+# whose name begins "legacy-" — sorts first rather than last, exactly as the
+# archive's own ordering does. Bundles and metrics segments have no legacy form,
+# so the same sort key works for all three tiers.
+closed_files() {
+  local dir="$1" f base sortkey
+  [ -d "$dir" ] || return 0
+  for f in "$dir"/*.jsonl.gz; do
     [ -e "$f" ] || continue
     base="$(basename "$f")"
     case "$base" in
@@ -162,7 +199,7 @@ closed_segments() {
   done | sort | cut -f2
 }
 
-receipt_of() { printf '%s/%s.receipt' "$SEGMENTS" "$1"; }
+receipt_of() { printf '%s/%s.receipt' "${2:-$SEGMENTS}" "$1"; }
 
 # ---------------------------------------------------------------- the actions
 
@@ -207,8 +244,9 @@ deny_report() {
 # fallback verification would be checking a number against a different number. A
 # single PUT is good to 5 GB and a segment is a few hundred megabytes.
 put_and_verify() {
-  local name="$1" path="$SEGMENTS/$1" key bytes sha md5 out remote kind up_ms ver_ms
-  key="$(key_for "$name")"
+  local name="$1" dir="${2:-$SEGMENTS}" sub="${3:-}"
+  local path="$dir/$name" key bytes sha md5 out remote kind up_ms ver_ms
+  key="$(key_for "$name" "$sub")"
   bytes="$(stat -c %s "$path")"
   sha="$(sha256sum "$path" | cut -d' ' -f1)"
   md5="$(md5sum "$path" | cut -d' ' -f1)"
@@ -289,7 +327,7 @@ put_and_verify() {
   # THE RECEIPT, written atomically. Its shape is the archive's ColdCopyReceipt
   # (go/internal/archive/coldcopy.go) and the archive re-checks every field of it
   # against the bytes on this disk before it removes anything.
-  local rp; rp="$(receipt_of "$name")"
+  local rp; rp="$(receipt_of "$name" "$dir")"
   cat > "$rp.tmp" <<JSON
 {"segment":"$name","bytes":$bytes,"sha256":"$sha","destination":"s3://$BUCKET/$key","endpoint":"$MV_COLDCOPY_ENDPOINT","remoteChecksum":"$remote","remoteChecksumKind":"$kind","uploadedAtMs":$up_ms,"verifiedAtMs":$ver_ms,"verifiedBy":"$VERSION"}
 JSON
@@ -302,63 +340,99 @@ JSON
 }
 
 do_copy() {
-  step "closed segments with no cold-copy receipt"
+  step "closed files with no cold-copy receipt (ledger, genome bundles, metrics)"
   split_uri "$MV_COLDCOPY_URI" || exit 2
-  local n=0 ok=0 fail=0 name
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    [ -e "$(receipt_of "$name")" ] && continue
-    n=$((n + 1))
-    if [ "$n" -gt "$MV_COLDCOPY_MAX_PER_RUN" ]; then
-      say "$MV_COLDCOPY_MAX_PER_RUN uploaded or attempted this run; the rest wait for the next."
-      break
-    fi
-    if put_and_verify "$name"; then ok=$((ok + 1)); else fail=$((fail + 1)); fi
-  done < <(closed_segments)
+  local n=0 ok=0 fail=0 name dir sub capped=0
+  while IFS="$(printf '\t')" read -r dir sub; do
+    [ -n "$dir" ] || continue
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      [ -e "$(receipt_of "$name" "$dir")" ] && continue
+      n=$((n + 1))
+      if [ "$n" -gt "$MV_COLDCOPY_MAX_PER_RUN" ]; then
+        say "$MV_COLDCOPY_MAX_PER_RUN uploaded or attempted this run; the rest wait for the next."
+        capped=1
+        break
+      fi
+      if put_and_verify "$name" "$dir" "$sub"; then ok=$((ok + 1)); else fail=$((fail + 1)); fi
+    done < <(closed_files "$dir")
+    [ "$capped" = 1 ] && break
+  done < <(tier_rows)
   if [ "$n" = 0 ]; then
-    say "nothing waiting: every closed segment already has a verified receipt."
+    say "nothing waiting: every closed file already has a verified receipt."
   fi
   say "copied $ok, failed $fail"
   [ "$fail" = 0 ]
 }
 
 do_verify() {
-  step "re-reading every receipt's object from the store"
+  step "re-reading every receipt's object from the store (all tiers)"
   split_uri "$MV_COLDCOPY_URI" || exit 2
-  local rp name key bad=0 seen=0
-  for rp in "$SEGMENTS"/*.jsonl.gz.receipt; do
-    [ -e "$rp" ] || continue
-    seen=$((seen + 1))
-    name="$(basename "$rp" .receipt)"
-    key="$(key_for "$name")"
-    local want_bytes; want_bytes="$(sed -n 's/.*"bytes":\([0-9]*\).*/\1/p' "$rp")"
-    local head
-    if ! head="$(awscli s3api head-object --bucket "$BUCKET" --key "$key" 2>&1)"; then
-      warn "$name: the object is NOT in the store ($head)"
-      warn "    THE HOST COPY MAY ALREADY BE GONE. Do not delete anything; investigate."
-      bad=$((bad + 1)); continue
-    fi
-    local rbytes; rbytes="$(printf '%s' "$head" | sed -n 's/.*"ContentLength": *\([0-9]*\).*/\1/p' | head -1)"
-    if [ "${rbytes:-0}" != "${want_bytes:-x}" ]; then
-      warn "$name: the store holds ${rbytes:-unknown} bytes, the receipt says ${want_bytes:-unknown}"
-      bad=$((bad + 1)); continue
-    fi
-    say "$name  ok  ($(human "${rbytes:-0}"))"
-  done
+  local rp name key bad=0 seen=0 dir sub
+  while IFS="$(printf '\t')" read -r dir sub; do
+    [ -n "$dir" ] || continue
+    for rp in "$dir"/*.jsonl.gz.receipt; do
+      [ -e "$rp" ] || continue
+      seen=$((seen + 1))
+      name="$(basename "$rp" .receipt)"
+      key="$(key_for "$name" "$sub")"
+      local want_bytes; want_bytes="$(sed -n 's/.*"bytes":\([0-9]*\).*/\1/p' "$rp")"
+      local head
+      if ! head="$(awscli s3api head-object --bucket "$BUCKET" --key "$key" 2>&1)"; then
+        warn "$name: the object is NOT in the store ($head)"
+        warn "    THE HOST COPY MAY ALREADY BE GONE. Do not delete anything; investigate."
+        bad=$((bad + 1)); continue
+      fi
+      local rbytes; rbytes="$(printf '%s' "$head" | sed -n 's/.*"ContentLength": *\([0-9]*\).*/\1/p' | head -1)"
+      if [ "${rbytes:-0}" != "${want_bytes:-x}" ]; then
+        warn "$name: the store holds ${rbytes:-unknown} bytes, the receipt says ${want_bytes:-unknown}"
+        bad=$((bad + 1)); continue
+      fi
+      say "$name  ok  ($(human "${rbytes:-0}"))"
+    done
+  done < <(tier_rows)
   say "$seen receipt(s), $bad problem(s)"
   [ "$bad" = 0 ]
 }
 
 do_restore() {
-  [ -n "$RESTORE_NAME" ] || { warn "--restore needs a segment file name, e.g. 2026-08-16-0000.jsonl.gz"; exit 2; }
+  [ -n "$RESTORE_NAME" ] || { warn "--restore needs a file name, e.g. 2026-08-16-0000.jsonl.gz"; exit 2; }
   split_uri "$MV_COLDCOPY_URI" || exit 2
   step "restoring $RESTORE_NAME"
+  # WHICH TIER owns this name? An EXPLICIT --restore-tier is authoritative, because
+  # all three tiers share the day-seq grammar and a name can exist in more than one
+  # — the archive's on-demand restore always names the tier for exactly this
+  # reason. Only when none is given do we fall back to searching by receipt (a
+  # manual ledger restore), and that search takes the ledger first.
+  local dir="" sub="" d s
+  if [ -n "$RESTORE_TIER" ]; then
+    case "$RESTORE_TIER" in
+      ledger)  dir="$SEGMENTS"; sub="" ;;
+      genomes|genome-bundles) dir="$GENOME_BUNDLES"; sub="genome-bundles" ;;
+      metrics|metrics-segments) dir="$METRICS_SEGMENTS"; sub="metrics" ;;
+      *) warn "--restore-tier '$RESTORE_TIER' is not one of: ledger, genomes, metrics"; exit 2 ;;
+    esac
+    say "tier: $dir  (sub-prefix ${sub:-<none>}, from --restore-tier $RESTORE_TIER)"
+  else
+    while IFS="$(printf '\t')" read -r d s; do
+      [ -n "$d" ] || continue
+      if [ -e "$d/$RESTORE_NAME.receipt" ] || [ -e "$d/$RESTORE_NAME" ]; then
+        dir="$d"; sub="$s"; break
+      fi
+    done < <(tier_rows)
+    if [ -z "$dir" ]; then
+      dir="$SEGMENTS"; sub=""
+      say "no receipt for $RESTORE_NAME on this host and no --restore-tier; assuming the ledger tier."
+    else
+      say "tier: $dir  (sub-prefix ${sub:-<none>}, resolved by receipt)"
+    fi
+  fi
   local rp key dest want_sha
-  rp="$(receipt_of "$RESTORE_NAME")"
-  key="$(key_for "$RESTORE_NAME")"
-  dest="$SEGMENTS/$RESTORE_NAME"
+  rp="$(receipt_of "$RESTORE_NAME" "$dir")"
+  key="$(key_for "$RESTORE_NAME" "$sub")"
+  dest="$dir/$RESTORE_NAME"
   if [ -e "$dest" ]; then
-    warn "$dest already exists. Move it aside first; this script does not overwrite a segment."
+    warn "$dest already exists. Move it aside first; this script does not overwrite a file."
     exit 1
   fi
   if [ -r "$rp" ]; then
@@ -368,7 +442,7 @@ do_restore() {
     warn "there is no receipt for $RESTORE_NAME on this host."
     warn "    The fetch will still run; the digest cannot be checked against anything local."
   fi
-  mkdir -p "$SEGMENTS" || exit 1
+  mkdir -p "$dir" || exit 1
   if ! awscli s3api get-object --bucket "$BUCKET" --key "$key" "$dest.part" >/dev/null; then
     warn "fetching s3://$BUCKET/$key failed"
     rm -f "$dest.part"; exit 1
@@ -471,20 +545,25 @@ do_check() {
     fi
   fi
 
-  # The receipts land beside the segments, and a directory this process cannot
-  # write is a copy that succeeds off-host and is never recorded on it.
-  if [ -d "$SEGMENTS" ]; then
-    if [ -w "$SEGMENTS" ]; then
-      say "segments directory   $SEGMENTS (writable)"
+  # The receipts land beside the files, and a directory this process cannot write
+  # is a copy that succeeds off-host and is never recorded on it. Every tier the
+  # archive uses must be writable — the systemd unit names all three in
+  # ReadWritePaths.
+  local d
+  for d in "$SEGMENTS" "$GENOME_BUNDLES" "$METRICS_SEGMENTS"; do
+    if [ -d "$d" ]; then
+      if [ -w "$d" ]; then
+        say "tier directory       $d (writable)"
+      else
+        warn "tier directory       $d is NOT WRITABLE by $(id -un)."
+        warn "    An upload would succeed and its receipt would not be written, so the"
+        warn "    file would be uploaded again on every run and never retire."
+        bad=$((bad + 1))
+      fi
     else
-      warn "segments directory   $SEGMENTS is NOT WRITABLE by $(id -un)."
-      warn "    An upload would succeed and its receipt would not be written, so the"
-      warn "    segment would be uploaded again on every run and never retire."
-      bad=$((bad + 1))
+      say "tier directory       $d does not exist yet: nothing closed in it."
     fi
-  else
-    say "segments directory   $SEGMENTS does not exist yet: no segment has been closed."
-  fi
+  done
 
   say ""
   if [ "$bad" = 0 ]; then
@@ -499,39 +578,45 @@ do_check() {
 
 do_list() {
   step "the off-host copy of the record"
-  say "segments directory   $SEGMENTS"
   say "destination          ${MV_COLDCOPY_URI:-<unset>}  (mode $MV_COLDCOPY)"
   say "endpoint             ${MV_COLDCOPY_ENDPOINT:-<AWS S3>}"
+  local gtotal=0 gwaiting=0 gcopied=0 gretired=0 name dir sub rp bytes label
+  while IFS="$(printf '\t')" read -r dir sub; do
+    [ -n "$dir" ] || continue
+    label="${sub:-ledger}"
+    say ""
+    say "tier $label   ($dir)"
+    local total=0 waiting=0 copied=0 retired=0
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      total=$((total + 1)); gtotal=$((gtotal + 1))
+      bytes="$(stat -c %s "$dir/$name" 2>/dev/null || echo 0)"
+      if [ -e "$(receipt_of "$name" "$dir")" ]; then
+        copied=$((copied + 1)); gcopied=$((gcopied + 1))
+        printf '     %-46s %10s  copied\n' "$name" "$(human "$bytes")"
+      else
+        waiting=$((waiting + 1)); gwaiting=$((gwaiting + 1))
+        printf '     %-46s %10s  WAITING\n' "$name" "$(human "$bytes")"
+      fi
+    done < <(closed_files "$dir")
+    # A receipt with no file is a RETIRED one: the bytes are off-host and this is
+    # the only record of where they went.
+    for rp in "$dir"/*.jsonl.gz.receipt; do
+      [ -e "$rp" ] || continue
+      name="$(basename "$rp" .receipt)"
+      [ -e "$dir/$name" ] && continue
+      retired=$((retired + 1)); gretired=$((gretired + 1))
+      printf '     %-46s %10s  RETIRED (off-host only)\n' "$name" "-"
+    done
+    say "     $total present ($copied copied, $waiting waiting), $retired retired"
+  done < <(tier_rows)
   say ""
-  local name total=0 waiting=0 copied=0 bytes
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    total=$((total + 1))
-    bytes="$(stat -c %s "$SEGMENTS/$name" 2>/dev/null || echo 0)"
-    if [ -e "$(receipt_of "$name")" ]; then
-      copied=$((copied + 1))
-      printf '     %-46s %10s  copied\n' "$name" "$(human "$bytes")"
-    else
-      waiting=$((waiting + 1))
-      printf '     %-46s %10s  WAITING\n' "$name" "$(human "$bytes")"
-    fi
-  done < <(closed_segments)
-  # A receipt with no segment is a RETIRED segment: the bytes are off-host and
-  # this is the only record of where they went.
-  local rp retired=0
-  for rp in "$SEGMENTS"/*.jsonl.gz.receipt; do
-    [ -e "$rp" ] || continue
-    name="$(basename "$rp" .receipt)"
-    [ -e "$SEGMENTS/$name" ] && continue
-    retired=$((retired + 1))
-    printf '     %-46s %10s  RETIRED (off-host only)\n' "$name" "-"
-  done
+  say "totals: $gtotal present on this host — $gcopied copied, $gwaiting waiting; $gretired retired"
   say ""
-  say "$total closed segment(s) on this host: $copied copied, $waiting waiting"
-  say "$retired retired segment(s): the off-host copy is the only one"
-  say ""
-  say "The archive publishes the same picture as ledgerSegments,"
-  say "ledgerSegmentsAwaitingColdCopy and ledgerRetiredTotal on /api/status."
+  say "The archive publishes the same picture per tier on /api/status:"
+  say "  ledger  ledgerSegments / ledgerSegmentsAwaitingColdCopy / ledgerRetiredTotal"
+  say "  genomes genomesCold / genomeBundlesAwaitingColdCopy / genomesRetired"
+  say "  metrics metricsSegmentsAwaitingColdCopy"
 }
 
 # ---------------------------------------------------------------- run
@@ -543,8 +628,8 @@ if [ "$MODE" = check ]; then
   do_check; exit $?
 fi
 
-if [ ! -d "$SEGMENTS" ]; then
-  say "no $SEGMENTS yet: this archive has not closed a segment."
+if [ ! -d "$SEGMENTS" ] && [ ! -d "$GENOME_BUNDLES" ] && [ ! -d "$METRICS_SEGMENTS" ]; then
+  say "no tier directory yet under $ARCHIVE_DATA: this archive has closed nothing."
   exit 0
 fi
 

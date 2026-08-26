@@ -280,11 +280,41 @@ Compare the alternatives on the same volume: no window at all is `94` to `121 GB
 before the run ends; a `7`-day window is `1.5` to `2.0 GB` and abandons live genome gaps for no
 gain; a `90`-day window is `19` to `24 GB` and is just option D with extra steps.
 
-**`metrics.jsonl` is a smaller problem and does not need the same treatment.** It grows with wall
+**`metrics.jsonl` is a smaller problem and does not need the same treatment.** ~~It grows with wall
 time rather than with the record — `1.6 MB` each day for each slot — which is under `1 GB` for the
 whole announced run, already under the `2 GB` bound its own all-record reader applies. Rotate and
 compress its closed months on the same machinery, keep every one, and revisit if the slot count
-grows. It is not urgent and it should not hold this change up.
+grows. It is not urgent and it should not hold this change up.~~ **Corrected and reversed
+2026-08-25** (`contracts/contract-b-m4.md` §32, B48): the per-slot figure understated it.
+`metrics.jsonl` is the status view serialized verbatim once a minute, so it grows with map size as
+well as with wall time — measured at about `31 MB` a day on the deployment, not the `1.6 MB` per
+slot this paragraph assumed — and it was the last of §20 B20's three files with no bound. It takes
+the same treatment after all: a window (`metricsWindow`, `720h` on the hosted run), each closed day
+folded into the persisted history buckets the `/api/history` strip already keeps, and the raw
+segment cold-copied and retired behind the same receipt gate as a ledger segment. The fold is
+durable on §26 B39's discipline; the window bounds only the raw samples.
+
+### The genome blobs get the same cold tier (2026-08-25)
+
+The blobs are the larger store and the one a genealogy view actually reads, and §23 left them on a
+harsher rule than the ledger got: a horizon that **deletes**. This step gives them the ledger's
+reversible shape instead. A **hot window** (`genomeHotWindow`, `168h` on the hosted run) bounds the
+working set on the SSD; past it a blob is bundled into a dated `<day>-<seq>.jsonl.gz` plus a sorted
+`.manifest` under `<data-dir>/genome-bundles/`, cold-copied to the **same** store as the ledger
+segments under a `genome-bundles/` sub-prefix, and retired from the SSD **only** after a confirmed
+receipt — the same recomputed size-and-`sha256` gate B40 defined. On retirement the local
+`.jsonl.gz` is deleted and the manifest and receipt are kept as the record of where the bytes went.
+
+Two things make this a strengthening rather than a narrowing. A **cold index**, loaded at startup
+from every retired bundle's manifest (the exact set of off-host hashes, keyed on the raw `sha256`),
+makes a retired blob read as **held** — never a gap, never a `[MISSING]`. And an **on-demand
+restore** (`coldcopy.sh --restore`, wired automatically whenever a hot window is set) re-admits a
+blob when a genealogy read needs it. So a genome that ages out of the *hot window* is archived to
+cold and stays fetchable for the run; only the separate, independent **horizon** deletes for good.
+This is the archive-side reach of Risk 7's strongest mitigation — a content-addressed blob any
+holder can serve — and it is off by default, so a deployment that sets no hot window is unchanged.
+The window arithmetic is the genome store's, not the ledger's; `deploy/SIZING.md` carries the hot
+working-set size and the one-off backlog-drain upload against the transfer allowance.
 
 ## Migration, in one restart
 
@@ -430,8 +460,14 @@ can leave the host is `2026-09-16`. 3 — an object store off the host, copied h
 `deploy/coldcopy.sh`, and a *confirmed* copy is a receipt file the archive requires beside the
 segment before it removes anything; `deploy/README.md` documents the job and its checks. 4 — the
 counters shipped with the at-most-once change and the roll-up: forwarded losses, `duplicatesRefused`
-and the per-lane flow totals, and `contracts/contract-b-m4.md` §26 states the claim. **5 is still
-open** — `metrics.jsonl` is not windowed by this set, and it is bounded for this run only.
+and the per-lane flow totals, and `contracts/contract-b-m4.md` §26 states the claim. ~~**5 is still
+open** — `metrics.jsonl` is not windowed by this set, and it is bounded for this run only.~~
+**5 answered 2026-08-25** (`contract-b-m4.md` §32, B48): `metrics.jsonl` now takes a window, its
+closed days folding into the durable history buckets and its raw segments cold-copied and retired
+behind the ledger's receipt gate — so it is bounded in principle, not only for this run. The same
+set (§32, B47) gave the **genome blobs** a hot window and a receipt-gated cold tier beside their
+horizon, restored on demand, which is a sixth question this design did not ask and answers here:
+the blobs age off-host and stay fetchable rather than being deleted.
 
 1. **The window's value.** `30` days is proposed because it is already the genome horizon and
    because one horizon for three mechanisms is a rule rather than a coincidence. Any other value
@@ -444,12 +480,16 @@ open** — `metrics.jsonl` is not windowed by this set, and it is bounded for th
    since segment retirement is proposed to depend on it.
 4. **The evidence claim.** At-most-once with counted losses replaces exactly-once by census. The
    counters it rests on do not exist yet.
-5. **`metrics.jsonl`**, which is bounded for this run and unbounded in principle.
+5. **`metrics.jsonl`**, ~~which is bounded for this run and unbounded in principle.~~ **Answered
+   2026-08-25 (§32, B48):** windowed, its closed days folded into durable history, its raw segments
+   cold-copied and retired — bounded in principle. The genome blobs took the same cold tier in the
+   same set (§32, B47).
 
 ## Related documents
 
-- [`contracts/contract-b-m4.md`](contracts/contract-b-m4.md) §10, §20 B20, §23 B33–B34 — the
-  never-evict rule, and the one amendment that has narrowed it.
+- [`contracts/contract-b-m4.md`](contracts/contract-b-m4.md) §10, §20 B20, §23 B33–B34,
+  §26 B39–B40, §32 B47–B48 — the never-evict rule, and the amendments that window each durable
+  store and copy it off-host rather than deleting the record.
 - [`system_decomposition.md`](system_decomposition.md) D6, D11 — what the archive is for.
 - [`m5_considerations.md`](m5_considerations.md) Design Question 3, Decision 3 — the retention
   decision and its deadline.

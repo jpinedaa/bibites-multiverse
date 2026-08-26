@@ -74,6 +74,32 @@ func runMain(args []string, stderr io.Writer) int {
 			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
 			"than it (§23, B34), and the ledger's own window reads the same number when a "+
 			"deployment sets one — one horizon, three mechanisms (§26, B40)")
+	// The genome COLD TIER's hot window (genomecold.go). It is a SIBLING of the
+	// horizon and INDEPENDENT of it: the horizon permanently deletes a blob, the
+	// hot window moves it to a reversible off-host copy whose receipt gates the
+	// removal. OFF is the default; the hosted run sets 168h.
+	genomeHotWindow := fs.Duration("genome-hot-window",
+		envDuration("MULTIVERSE_GENOME_HOT_WINDOW", 0),
+		"how long a genome BLOB is kept in the HOT store at <data-dir>/genomes after it was last "+
+			"stored or served before it is bundled to <data-dir>/genome-bundles and, ONCE AN "+
+			"OFF-HOST COPY IS CONFIRMED, removed from the host (168h is the hosted run's 7 days). "+
+			"0 — THE DEFAULT — keeps every blob hot forever, which is what this archive has always "+
+			"done. It is INDEPENDENT of --genome-horizon: the horizon permanently DELETES a blob, "+
+			"the hot window moves it to cold and it restores on demand. With no cold archive "+
+			"configured no receipt is ever written, so nothing retires and the disk fills — the "+
+			"same safe default as MV_COLDCOPY=off. genomeBundlesAwaitingColdCopy is what says so")
+	// The raw metrics window (metricsseg.go). metrics.jsonl was append-forever;
+	// this rotates it into dated segments and removes the old ones behind a
+	// confirmed off-host copy. The history the strip draws is folded into a rollup
+	// first, so it survives retirement.
+	metricsWindow := fs.Duration("metrics-window",
+		envDuration("MULTIVERSE_METRICS_WINDOW", 0),
+		"how long a CLOSED metrics segment is kept on this host before it is removed behind a "+
+			"confirmed off-host copy (720h is the hosted run's 30 days). 0 — THE DEFAULT — keeps "+
+			"metrics.jsonl whole and unrotated, exactly as this archive has always done. Every "+
+			"answer the history strip draws is folded into a persisted rollup before its raw "+
+			"segment can retire, so the view survives; this is the RAW SAMPLES only. It is "+
+			"INDEPENDENT of the genome knobs")
 	// The raw ledger's window (segments.go). It is a SIBLING of the genome
 	// horizon and it defaults to it, because the two are one number: a raw
 	// window equal to the horizon holds exactly the crossings whose genome gaps
@@ -167,6 +193,8 @@ func runMain(args []string, stderr io.Writer) int {
 		RequestsPerMinute:   *maxGenomeRPM,
 		DenyListFile:        *denyList,
 		GenomeHorizon:       *genomeHorizon,
+		GenomeHotWindow:     *genomeHotWindow,
+		MetricsWindow:       *metricsWindow,
 		LedgerWindow:        *ledgerWindow,
 		DedupWindow:         *dedupWindow,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),

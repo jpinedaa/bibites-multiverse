@@ -67,9 +67,16 @@ func FetchSpecies(base string, timeout time.Duration) (SpeciesIndex, error) {
 	return s, nil
 }
 
-// LastSample reads the newest sample out of a metrics file.
+// lastSampleTailBytes bounds LastSample's read. A single PEER_STATUS sample with
+// full census detail is tens of kilobytes; a few megabytes of tail holds the
+// newest one comfortably without ever reading a metrics file that the window now
+// keeps whole (metricsseg.go) — a terminal tool must not read a growing file end
+// to end just to print its last line.
+const lastSampleTailBytes int64 = 4 << 20
+
+// LastSample reads the newest sample out of a metrics file, from a bounded tail.
 func LastSample(path string) (Status, error) {
-	samples, err := ReadMetrics(path)
+	samples, _, err := ReadMetricsTail(path, lastSampleTailBytes)
 	if err != nil {
 		return Status{}, err
 	}

@@ -33,7 +33,7 @@ The table shows the measured quantities that support the model.
 | Ledger bytes per crossing | 703 B |
 | Forwarded wire bytes per crossing | approximately 15.8 KB |
 | Genome object size | approximately 14.2 KB |
-| Metrics growth | 1.6 MB each day per slot |
+| Metrics growth | approximately 31 MB each day, whole archive [2] |
 | Relay resident memory | 93 MB |
 | Archive retained state | approximately 28 to 31 B per ledger record |
 | Archive resident set | approximately 64 B per ledger record on two cores |
@@ -41,6 +41,13 @@ The table shows the measured quantities that support the model.
 
 These measurements are capacity inputs, not guarantees.
 Measure the target deployment and update its private forecast.
+
+[2] `metrics.jsonl` is the status view serialized verbatim once a minute, so it is one file for
+the whole archive and grows with map size as well as wall time. The earlier `1.6 MB` per slot per
+day model understated it — the measured whole-file rate is about `31 MB` each day. Since `2026-08-25`
+it is bounded: `MULTIVERSE_METRICS_WINDOW` windows the raw samples, each closed day folds into the
+persisted `/api/history` buckets, and the raw segment is cold-copied and retired (see "The
+retirement gate"). Unset, it grows at this rate for the run.
 
 The two archive rows describe the build of `2026-08-16` and change when that build changes.
 The archive resident set is also the replay peak; they are one number.
@@ -63,6 +70,15 @@ durable_MB_per_day = 56 * S + 1.6 * slot_count
 The simulated-time term contains the ledger and expected genome demand.
 The slot term contains wall-clock metrics samples.
 
+The `1.6 * slot_count` slot term understated the raw metrics rate: `metrics.jsonl` is one
+whole-archive file, not a per-slot one, and it measured about `31 MB` a day (see reference note
+[2]), above what the per-slot term predicts. Correct it in two directions. Where
+`MULTIVERSE_METRICS_WINDOW` is **unset**, replace the slot term with the whole-archive rate of
+about `31 MB` a day and treat it as monotone growth. Where it is **set**, the raw samples reach a
+steady state at the window, their closed days fold into the durable `/api/history` buckets, and the
+raw segments are cold-copied off-host — so the term becomes a capped on-host total plus a daily
+off-host upload rather than perpetual growth.
+
 The simulated-time term has this approximate shape:
 
 | Term | Daily amount for each unit of `S` |
@@ -75,6 +91,13 @@ The simulated-time term has this approximate shape:
 Use genome demand instead of observed genome-store growth.
 An archive can build a genome-fetch backlog.
 Observed growth can then report supply instead of demand.
+
+The genome term is on-host growth only where the genome cold tier is off. With
+`MULTIVERSE_GENOME_HOT_WINDOW` set, the on-host store reaches a steady state at the hot window
+rather than accumulating for the run — a `7`-day working set is about `25 GB` at the projected
+public rate, against the `30`-day-on-SSD store the horizon-only rule left. Past the hot window a
+blob is bundled and copied off-host, so the genome term splits: a bounded on-host working set, plus
+a daily off-host upload that counts against the transfer allowance (see "The retirement gate").
 
 This table once carried a relay forward-traffic term of `357 MB` for each unit of `S`.
 Network transfer no longer follows `S`. The measured model is in "Network transfer".
@@ -100,6 +123,11 @@ A genome horizon bounds stored blobs after the horizon reaches steady state.
 Since the record roll-up it also sets the raw ledger's own window, unless a
 deployment overrides that window; see "The raw ledger window" below.
 It does not bound archive memory. The duplicate window does.
+
+A genome **hot window** (`MULTIVERSE_GENOME_HOT_WINDOW`) is the alternative that bounds the on-host
+store **without** deleting: past it a blob is copied off-host and retired, restored on demand. It
+is independent of the horizon and the hosted run uses it in the horizon's place; see "The
+retirement gate".
 
 ## Archive memory
 
@@ -241,6 +269,7 @@ Use this model:
 resident_B ~= bounded_aggregates_B
             + min(keys_in_the_whole_ledger, 2 * keys_in_one_duplicate_window) * 26 B
             + queued_genome_gaps * 1.2 KB
+            + cold_genome_hashes * ~35 B
 ```
 
 Every term is bounded and none of them follows the ledger's length.
@@ -250,6 +279,13 @@ Every term is bounded and none of them follows the ledger's length.
 | Bounded aggregates | The approved retained state: 65,536 species names, 131,072 lineage instances, 8,192 genome fingerprints for each species, brain-coverage buckets, and lanes. The next two sections explain the species and lineage bounds. |
 | Duplicate keys | The duplicate window, times the crossing rate. Two generations of the table. |
 | Genome-gap queue | The genome horizon. A gap is only ever queued for a crossing inside it, and a restart drains what aged out while the process was down. |
+| Cold index | The number of genome blobs that have been retired off-host. It is the exact set of cold hashes, keyed on the raw `sha256`, loaded from retired-bundle manifests so a retired blob reads as held rather than as a gap. It is present only where `MULTIVERSE_GENOME_HOT_WINDOW` is set, and it is bounded by the run's total retired blobs, not by the ledger. |
+
+**The cold index is a new memory term with the genome cold tier**
+(`contracts/contract-b-m4.md` §32, B47). Size it at about `70 MB` at `2` million cold hashes — an
+exact in-memory set, not a Bloom filter, because a false positive would serve a genealogy read the
+wrong blob. It is zero where the hot window is off, and where it is on it grows only as blobs
+retire off-host, so it trades the disk the hot window reclaims for a bounded slice of RAM.
 
 #### Species aggregate capacity
 
@@ -576,6 +612,38 @@ It shows as `ledgerSegmentsAwaitingColdCopy` climbing on `/api/status`, which
 `monitor.sh` watches, and as the volume filling.
 With no destination configured at all, no receipt is ever written and nothing is
 ever removed, whatever the window says. That is the safe default.
+
+### The genome bundles and metrics segments use the same gate
+
+Since `2026-08-25` the same receipt gate retires two more stores to the same cold destination
+(`contracts/contract-b-m4.md` §32). Genome bundles land under a `genome-bundles/` sub-prefix in the
+bucket and metrics segments under their own; the ledger keeps the original no-sub-prefix key. Each
+one obeys the five conditions above and each shows its own awaiting counter — the numbers that must
+read zero in steady state:
+
+| Store | Knob | Awaiting counter |
+|---|---|---|
+| Raw ledger segments | `MULTIVERSE_LEDGER_WINDOW` | `ledgerSegmentsAwaitingColdCopy` |
+| Genome bundles | `MULTIVERSE_GENOME_HOT_WINDOW` | `genomeBundlesAwaitingColdCopy` |
+| Metrics segments | `MULTIVERSE_METRICS_WINDOW` | `metricsSegmentsAwaitingColdCopy` |
+
+**The genome hot window reclaims SSD at the cost of new egress.** A `7`-day hot working set is about
+`25 GB` at the projected public rate, against the `30`-day-on-SSD store the horizon-only rule kept.
+The disk that buys back becomes an off-host upload: **the genome-bundle upload is new egress that
+did not exist before**, and this host is already near its transfer allowance (see "Network
+transfer"). Two shapes to size:
+
+- **The first backlog drain is a one-time upload of the blobs already older than the hot window** —
+  about `18 GB` on the current store. It is paced by `MV_COLDCOPY_MAX_PER_RUN` (default `4` objects
+  a run) so it spreads across runs instead of spending the allowance in one burst; expect the
+  `genomeBundlesAwaitingColdCopy` counter to sit non-zero until the drain completes, which is
+  backlog, not breakage.
+- **The steady state is the daily genome bundle upload plus the daily metrics segment upload** —
+  the metrics raw is about `31 MB` a day (reference note [2]) — on top of the ledger segment upload
+  the "raw ledger window" section already counts against the allowance.
+
+With the cold copy off (`MV_COLDCOPY=off`), no receipt is written for any of the three, so nothing
+retires: the SSD fills instead, which is the safe failure direction and the default.
 
 ### Compression and the disk figures
 

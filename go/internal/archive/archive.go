@@ -147,6 +147,31 @@ type Config struct {
 	// a minute; it exists so a test does not have to wait one.
 	EvictionInterval time.Duration
 
+	// GenomeHotWindow is the genome cold tier's window (genomecold.go): how long a
+	// genome BLOB is kept in the HOT store after it was last stored or served
+	// before it is bundled and, once an off-host copy is confirmed, removed from
+	// the host. ZERO IS OFF AND IS THE DEFAULT — nothing bundles, nothing retires,
+	// which is M4's behaviour exactly — and the hosted deployment sets 168h. It is
+	// INDEPENDENT of GenomeHorizon: the hot window moves bytes to a reversible cold
+	// copy, the horizon permanently deletes; a deployment may run either, both, or
+	// neither. The record of what crossed is kept forever at every setting.
+	GenomeHotWindow time.Duration
+	// ColdTierInterval is how often one bundling+retirement pass runs. Defaults to
+	// a minute; it exists so a test does not have to wait one.
+	ColdTierInterval time.Duration
+
+	// MetricsWindow is the raw metrics window (metricsseg.go): how long a CLOSED
+	// metrics segment is kept on this host before it is removed behind a confirmed
+	// off-host copy. ZERO IS OFF AND IS THE DEFAULT. The history an operator reads
+	// survives retirement because each closed day is folded into the persisted
+	// history rollup before its raw segment can retire. The deployment sets 720h.
+	// It is INDEPENDENT of the genome horizon and the hot window.
+	MetricsWindow time.Duration
+	// MetricsMaintenanceInterval is how often the metrics segment pass runs.
+	// Defaults to five minutes. NEGATIVE disables the loop, for a test that drives
+	// MetricsMaintenanceNow by hand.
+	MetricsMaintenanceInterval time.Duration
+
 	// LedgerWindow is how long a CLOSED LEDGER SEGMENT is kept on this host
 	// (segments.go, "THE WINDOW"). It is a raw-lines rule and never an answers
 	// rule: every aggregate the archive publishes is kept forever either way.
@@ -463,6 +488,24 @@ type Archive struct {
 	// archive with no horizon — which is every archive by default. See
 	// eviction.go.
 	evict evictState
+	// cold is the set of genome digests that live in a receipted off-host bundle
+	// (genomecold.go, coldindex.go). It is consulted at every "do I hold this
+	// genome" check so a blob retired to cold counts as HELD and is not re-fetched.
+	// Non-nil from New; empty on an archive that has never tiered anything.
+	cold *coldIndex
+	// coldTier is the genome cold tier's cursor and counters. Zero everywhere on
+	// an archive with no hot window — which is every archive by default. See
+	// genomecold.go.
+	coldTier coldTierState
+	// restore is the on-demand cold-blob restore queue (coldrestore.go). Non-nil
+	// from New; its worker runs only when a hot window is configured.
+	restore *coldRestore
+	// metricsSeg is the metrics window's segment counters (metricsseg.go). Zero
+	// everywhere on an archive with no metrics window.
+	metricsSeg metricsSegState
+	// metricsRollup is the persisted history rollup: the buckets HistoryAllView
+	// survives retirement on (metricshist.go). Non-nil from New.
+	metricsRollup *metricsRollup
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -553,7 +596,9 @@ func New(cfg Config) (*Archive, error) {
 		tally:        newRecordTally(),
 		rollupIndex:  map[int64]LedgerPos{},
 		rollupDirty:  newRollupDirty(),
+		cold:         newColdIndex(),
 	}
+	a.restore = newColdRestore(a)
 	// THE ROLL-UP STATE IS LOADED BEFORE ONE RECORD IS FOLDED (rollup.go). It is
 	// the durable half of the fold below: with it, the replay reads only what the
 	// sidecar does not already cover; without it, the replay is exactly what it
@@ -807,6 +852,27 @@ func New(cfg Config) (*Archive, error) {
 		}
 	}
 	a.logRetiredAtStartup()
+	// THE COLD INDEX IS LOADED FROM THE RETIRED BUNDLES' MANIFESTS, regardless of
+	// whether a hot window is set now: a blob a previous run retired to cold is
+	// still off-host, and every "do I hold this" check must count it as held or the
+	// archive re-fetches what it already moved (genomecold.go). This reads only the
+	// manifests of bundles whose bytes are gone, so it is a few small files.
+	if n := a.loadColdIndexAtStart(); n > 0 {
+		a.log.Info("archive: loaded the genome cold index from retired bundles", "coldGenomes", n,
+			"hotWindow", a.cfg.GenomeHotWindow.String())
+	}
+	// The persisted metrics history rollup: the buckets HistoryAllView survives a
+	// retired raw segment on (metricshist.go). Loaded whether or not a metrics
+	// window is set, for the same reason the cold index is.
+	mr, err := openMetricsRollup(cfg.DataDir)
+	if err != nil {
+		a.log.Error("archive: the metrics history rollup could not be opened; the all-record view "+
+			"falls back to the raw segments still on the host", "err", err)
+	}
+	a.metricsRollup = mr
+	// Any metrics segments a previous run closed but did not fold — a crash between
+	// the rotation and the fold — are folded now, so the rollup never misses a day.
+	a.foldPendingMetricsSegments()
 	return a, nil
 }
 
@@ -972,6 +1038,15 @@ func (a *Archive) Start(ctx context.Context) error {
 	// Rotation, compression of what is closed, and retirement of what is past
 	// the window AND confirmed off-host. See segments.go.
 	a.startLedgerMaintenance()
+	// The genome cold tier: bundle blobs past the hot window and retire them once
+	// an off-host copy is confirmed. Nothing unless a hot window is set. See
+	// genomecold.go. The restore worker brings a cold blob home on demand.
+	a.startColdTier()
+	a.startColdRestore()
+	// The metrics window: rotate metrics.jsonl into dated segments, fold each
+	// closed day into the persisted history rollup, and retire the raw segment
+	// behind a confirmed off-host copy. See metricsseg.go.
+	a.startMetricsMaintenance()
 	a.log.Info("archive: started", "relay", a.cfg.RelayURL, "dataDir", a.cfg.DataDir,
 		"ledger", a.ledger.Path(), "metrics", a.metrics.Path(), "statusPage", a.HTTPAddr())
 	return nil
@@ -1344,7 +1419,7 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	// lock is held and acted on after it is released. A hash already in the store
 	// has no arrival left to fold at (brainhist.go rule 1), so this is the second
 	// of the aggregate's two write points.
-	heldAlready := migrantHash != "" && a.genomes.Has(migrantHash)
+	heldAlready := a.heldOrColdLocked(migrantHash)
 	a.mu.Unlock()
 
 	// THE COVERAGE DENOMINATOR, folded off the lock: one more distinct genome the
@@ -1520,7 +1595,7 @@ func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID
 	entityID int32, crossedAt, now time.Time) {
 
 	hash := h.hash
-	if hash == "" || a.genomes.Has(hash) {
+	if hash == "" || a.heldOrColdLocked(hash) {
 		return
 	}
 	if f, ok := a.pending[hash]; ok {
@@ -1673,8 +1748,9 @@ func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned,
 		}
 		scanned++
 		f := a.pending[hash]
-		if a.genomes.Has(hash) {
-			// Resolved by some other path: retire it and do NOT push it back.
+		if a.heldOrColdLocked(hash) {
+			// Resolved by some other path — a peer served it, or it retired to cold:
+			// retire the gap and do NOT push it back.
 			a.clearInFlightLocked(f)
 			delete(a.pending, hash)
 			a.markGapGoneLocked(hash)
@@ -2055,6 +2131,13 @@ func List(dir string) ([]Migration, LedgerDamage, error) {
 	if err != nil {
 		return nil, LedgerDamage{}, err
 	}
+	// A genome retired to cold is STILL HELD — the off-host bundle holds it — so
+	// the gap report must count it as held rather than as a gap. The cold set is
+	// the union of the retired bundles' manifests, read once here.
+	cold := loadColdSet(dir)
+	isHeld := func(hash string) bool {
+		return hash != "" && (store.Has(hash) || cold.has(hash))
+	}
 	byID := map[string]*Migration{}
 	var order []*Migration
 	// Streamed for the same reason New is (ScanLedger): the join below keeps
@@ -2066,9 +2149,9 @@ func List(dir string) ([]Migration, LedgerDamage, error) {
 		case RecordMigration:
 			m := &Migration{Record: rec, Outcome: "pending"}
 			if rec.Lineage != nil {
-				m.GenomeHeld = rec.Lineage.GenomeHash != "" && store.Has(rec.Lineage.GenomeHash)
+				m.GenomeHeld = isHeld(rec.Lineage.GenomeHash)
 				for _, p := range rec.Lineage.Parents {
-					m.ParentsHeld = append(m.ParentsHeld, p.GenomeHash != "" && store.Has(p.GenomeHash))
+					m.ParentsHeld = append(m.ParentsHeld, isHeld(p.GenomeHash))
 				}
 			}
 			byID[rec.MigrationID] = m

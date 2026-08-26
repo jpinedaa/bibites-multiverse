@@ -67,7 +67,7 @@ The public kit supports these policy shapes:
 | `bounded-ledger` | Keep only the announced post-run horizon. | Keep only that horizon. | Apply the announced blob rule. |
 | `prune-genomes` | Keep it all. | Keep every line on the server. | Remove blobs outside the announced horizon during the run. |
 | `graduate` | Export the approved catalog seed. | Apply the announced catalog policy. | Apply the announced catalog policy. |
-| `rollup-window` | Keep it all, for the run and beyond. | Keep them on the server for the announced window, and off the server for the run. | Remove blobs outside the announced horizon during the run. |
+| `rollup-window` | Keep it all, for the run and beyond. | Keep them on the server for the announced window, and off the server for the run. | Keep them on the server for the announced hot window, and off the server for the run; retire a blob only after a confirmed off-server copy, and fetch it back on demand. |
 
 `rollup-window` is three tiers and not two, so it needs its own explanation.
 
@@ -76,13 +76,23 @@ It is kept for the whole run and beyond. Nothing removes a species, a count, or
 a family link.
 
 The raw crossing lines are the individual entries behind those counts.
-The server keeps them for the announced window, which is the same period as the
-genome horizon. A line older than the window is on the off-server copy only.
+The server keeps them for the announced window. A line older than the window is
+on the off-server copy only.
 
-A line does not leave the server until a confirmed copy exists off the server.
-The operator cannot make it leave sooner.
-This is a capacity rule, not a deletion service. It cannot name a peer, a
-species, or an organism, so it is not a takedown and must not be offered as one.
+The genome blobs are the third tier and follow the same discipline on their own,
+shorter window. The server keeps them in its hot store for the announced hot
+window, then bundles a blob and copies it off the server. A blob older than the
+hot window is on the off-server copy only, and the archive fetches it back on
+demand when a family view needs it. This replaces a permanent delete at the
+horizon with a move to a confirmed off-server copy: the genome is kept, not
+dropped. (The separate permanent-delete horizon still exists as its own knob and
+is independent of this window.)
+
+Neither a line nor a genome blob leaves the server until a confirmed copy exists
+off the server. The operator cannot make it leave sooner.
+This is a capacity rule, not a deletion service. It ages lines and genome blobs
+by date. It cannot name a peer, a species, or an organism, so it is not a
+takedown and must not be offered as one.
 
 The deployment must explain the exact result before participants join.
 Do not change to a shorter horizon without a new participant notice.

@@ -471,12 +471,25 @@ func (a *Archive) HistoryView(window time.Duration, buckets int) (History, error
 	if a.historyKey == key && time.Since(a.historyAt) < historyCacheFor {
 		return a.historyVal, nil
 	}
-	samples, truncated, err := ReadMetricsTail(a.metrics.Path(), historyTailBytes)
-	if err != nil {
-		return History{}, err
+	nowMs := time.Now().UnixMilli()
+	var h History
+	if a.metricsWindowOn() {
+		// The live file holds only today once the metrics window is rotating it, so
+		// a window reaching back into a closed day walks the rotated set too.
+		compact, truncated, err := a.rollingCompactSamples(window, nowMs)
+		if err != nil {
+			return History{}, err
+		}
+		h = buildHistory(compact, nowMs, window, buckets, true)
+		h.Truncated = truncated
+	} else {
+		samples, truncated, err := ReadMetricsTail(a.metrics.Path(), historyTailBytes)
+		if err != nil {
+			return History{}, err
+		}
+		h = BuildHistory(samples, nowMs, window, buckets)
+		h.Truncated = truncated
 	}
-	h := BuildHistory(samples, time.Now().UnixMilli(), window, buckets)
-	h.Truncated = truncated
 	a.historyKey, a.historyAt, a.historyVal = key, time.Now(), h
 	return h, nil
 }
@@ -491,12 +504,28 @@ func (a *Archive) HistoryAllView(buckets int) (History, error) {
 		a.historyAllVal.Buckets == buckets {
 		return a.historyAllVal, nil
 	}
-	samples, truncated, err := ReadHistoryStatuses(a.metrics.Path(), historyAllMaxBytes)
-	if err != nil {
-		return History{}, err
+	nowMs := time.Now().UnixMilli()
+	var h History
+	if a.metricsWindowOn() {
+		// PERSISTED BUCKETS + LIVE TAIL, never a scan of one growing file. The
+		// rollup holds every folded (closed) day — including days whose raw segment
+		// has retired off the host — and the live file holds today.
+		base, carry, haveCarry := a.metricsRollup.snapshot()
+		live, truncated, err := ReadHistoryStatuses(a.metrics.Path(), historyTailBytes)
+		if err != nil {
+			return History{}, err
+		}
+		merged := mergeLiveIntoBase(base, a.metricsRollup.baseMs, carry, haveCarry, live)
+		h = buildHistoryFromBase(merged, nowMs, buckets)
+		h.Truncated = truncated
+	} else {
+		samples, truncated, err := ReadHistoryStatuses(a.metrics.Path(), historyAllMaxBytes)
+		if err != nil {
+			return History{}, err
+		}
+		h = buildAllHistory(samples, nowMs, buckets)
+		h.Truncated = truncated
 	}
-	h := buildAllHistory(samples, time.Now().UnixMilli(), buckets)
-	h.Truncated = truncated
 	a.historyAllAt, a.historyAllVal = time.Now(), h
 	return h, nil
 }
