@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. The candidate sidecar passed the full Go and race suites and its Windows cross-build on 2026-08-24; its production rollout is pending |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. The candidate sidecar passed the full Go and race suites and its Linux amd64 and arm64 cross-builds on 2026-08-24; its production rollout is pending |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. PR116 commit `5850cdb` passed the uncached build and test gates and its Windows cross-build on 2026-08-26. No PR116 binary ran live. The completed Slot 7 live observation used release `b1a29c6` |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. PR116 commit `5850cdb` passed the uncached build and test gates and its Linux amd64 cross-build on 2026-08-26. No PR116 binary ran live |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.8` |
 | `BibitesMultiverse.dll` SHA-256 | `c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc` |
 | `bibites-mod/` tree | `27baa92d9c66c043465d4dac3e736c25dcb2e8a0` |
-| `cmd/sidecar` source commit | `642629292d2a2bc7a3dd539ea64e7db5363b689f` |
-| `cmd/sidecar` input digest | `58677ac6e6aaf69f365d1f258cdf0582241181bb2bd880609ca7fa7ed96f627d` |
-| Tested on | 2026-08-24 |
+| `cmd/sidecar` source commit | `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d` |
+| `cmd/sidecar` input digest | `0bcc4fdf22dc598d1f0ee870e5e16183abc1b8bea4453363e67d65849ee8c1d9` |
+| Tested on | 2026-08-26 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -212,13 +212,19 @@ The `evidence` sentence is where the run is described, and it is written by the 
 changes far more often than the mod, so a re-record often re-attests only the sidecar half while
 the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
 as the `evidence` sentence says which leg proved what — and it must, including when the run
-happened on a host whose game or mod is not the one this matrix names. Today's record re-attests
-the sidecar after the exact queue-refusal progress change. The full uncached Go and race suites,
-host and Windows vet, formatting, every shipped cross-build, the 64-entry pre-4.2 upgrade
-regression, and the release and deploy fixture suites passed. The Contract B 4.2 production
-rollout has not run yet. The unchanged plugin was rebuilt byte-identically and matches the plugin
-in the release machine's game. Its live Windows and Linux evidence remains the controlled
-deployment from 2026-08-23.
+happened on a host whose game or mod is not the one this matrix names. The current record
+re-attests the PR116 Go inputs at commit `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d` after the
+PR117 comment-only change. The Go tree is identical at commits
+`5850cdbcb7a9148a93147a700674c593b82db872` and
+`4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. On 2026-08-26, the uncached host build and the full
+uncached Go suite passed at commit `5850cdbcb7a9148a93147a700674c593b82db872`. The uncached race
+suite also passed. Host and Windows vet, formatting, the 69-case cold-copy suite, and all shipped
+cross-builds passed. The final sidecars came from a clean standalone checkout at commit
+`4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. They carry that revision and
+`vcs.modified=false`. No live runtime exercise used a PR116 binary. The completed Slot 7 live
+observation used release `b1a29c66d392cd5bb24c341fa7135ef62691f14b`, not PR116. The unchanged
+plugin rebuilt byte-identically and matches the plugin in the release machine's game. Its live
+Windows and Linux evidence remains the controlled deployment from 2026-08-23.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -272,10 +278,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
     "bibitesModTree": "27baa92d9c66c043465d4dac3e736c25dcb2e8a0",
-    "sidecarSourceCommit": "642629292d2a2bc7a3dd539ea64e7db5363b689f",
-    "sidecarInputsSha256": "58677ac6e6aaf69f365d1f258cdf0582241181bb2bd880609ca7fa7ed96f627d",
-    "testedOn": "2026-08-24",
-    "evidence": "On 2026-08-24 candidate 6426292 passed the full uncached Go and race suites, host and Windows vet, formatting, every shipped Windows/Linux amd64 and Linux arm64 cross-build, the 64-entry pre-4.2 refusal-upgrade regression, stale and repeated refusal races, crash/reconnect/compaction regressions, all 295 real-game Linux install/uninstall checks, and the release and deploy fixture suites; the release .NET build produced the unchanged mod 0.6.8 plugin byte-identical to both the recorded build and the plugin installed in the release machine game; not yet exercised in production: the Contract B 4.2 relay-first rollout, forced rollback, disk failure, or a private-map runtime"
+    "sidecarSourceCommit": "4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d",
+    "sidecarInputsSha256": "0bcc4fdf22dc598d1f0ee870e5e16183abc1b8bea4453363e67d65849ee8c1d9",
+    "testedOn": "2026-08-26",
+    "evidence": "Commit 4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d matches 5850cdbcb7a9148a93147a700674c593b82db872 in go/ and has clean-stamped sidecars after build and test gates passed without live execution, while Slot 7 used release b1a29c66d392cd5bb24c341fa7135ef62691f14b."
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -292,7 +298,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in five worlds on 2026-08-23; the candidate sidecar passed the full Go and race suites and its Windows cross-build on 2026-08-24; its production rollout is pending"
+      "tested": "the unchanged plugin ran in five worlds on 2026-08-23. PR116 commit 5850cdb passed the uncached build and test gates and its Windows cross-build on 2026-08-26. No PR116 binary ran live. The completed Slot 7 live observation used release b1a29c6"
     },
     {
       "gameVersion": "0.6.3.1",
@@ -306,7 +312,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23; the candidate sidecar passed the full Go and race suites and its Linux amd64 and arm64 cross-builds on 2026-08-24; its production rollout is pending"
+      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23. PR116 commit 5850cdb passed the uncached build and test gates and its Linux amd64 cross-build on 2026-08-26. No PR116 binary ran live"
     }
   ]
 }

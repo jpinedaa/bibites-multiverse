@@ -326,10 +326,14 @@ the owner's machine rather than on a hosted runner.
 
 Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
 untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is green for this release at mod `0.6.8`, recorded on 2026-08-24. The candidate
-sidecar passed the full Go and race suites and every shipped cross-build. Its production rollout
-follows this release. The unchanged plugin rebuilt byte-identically and matches the plugin
-installed in the release machine's tested game.
+been staged. It is green for this release at mod `0.6.8`, recorded on 2026-08-26. The tested-build
+source is commit `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. Its Go tree is identical to PR116
+commit `5850cdbcb7a9148a93147a700674c593b82db872`. PR116 passed the uncached host build and the full
+Go and race suites. It also passed host and Windows vet, formatting, `deploy/test-coldcopy.sh`,
+and every shipped cross-build. The final sidecars carry the tested-build source revision and
+`vcs.modified=false`. No PR116 binary ran live. The completed Slot 7 live observation used release
+`b1a29c66d392cd5bb24c341fa7135ef62691f14b`, not PR116. The unchanged plugin rebuilt
+byte-identically and matches the plugin installed in the release machine's tested game.
 
 **Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
 compares three copies of the plugin — the one this tree builds, the one the record names, and the
