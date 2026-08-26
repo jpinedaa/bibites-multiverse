@@ -965,8 +965,8 @@ MULTIVERSE_GENOME_HOT_WINDOW=${MV_GENOME_HOT_WINDOW:-}
 MULTIVERSE_METRICS_WINDOW=${MV_METRICS_WINDOW:-}
 # On-demand restore of a genome blob that has been tiered to cold storage. When a
 # genealogy read misses the hot store and the hash is in the cold index, the
-# archive shells this script with `--restore <bundle>` to fetch and re-admit the
-# blob. coldcopy.sh sources its own S3 config from deploy.env, so only the path is
+# archive shells this script with the restore verb and a bundle name to fetch and
+# re-admit the blob. coldcopy.sh sources its own S3 config from deploy.env, so only the path is
 # needed here. Empty disables on-demand restore (a cold genome then draws no
 # genealogy ring, a correct answer, never an error). Default to the installed kit
 # path when the cold tier is on so the strengthened availability is real.
