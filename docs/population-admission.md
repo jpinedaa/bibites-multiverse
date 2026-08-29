@@ -114,6 +114,11 @@ The mod reports `targetTimeScale` separately from applied `timeScale`. A world d
 below the configured target contributes no sample; without this distinction, an intentional ×5
 world would look like a machine failing to hold ×10.
 
+The local broadcast runner sets the game target and the admission target to ×6.5.
+It uses one value for both targets.
+The participant package uses ×10 for both targets by default.
+A session speed change below ×10 pauses admission sampling until the requested speed returns to ×10.
+
 ## Configuration
 
 ```text
@@ -142,6 +147,10 @@ health evidence, fixed fallbacks, and rollback conditions must be recorded below
 The peer stats block, `/api/status`, archived `metrics.jsonl`, the settings card, and local
 `multiverse-sidecar --my-slot` view publish the mode, target, estimate, effective limit, committed
 load, sample count, closed/enforcing state, and rejection total.
+
+The map shows `OPEN · WAITING ×n` when the requested speed is less than the admission target.
+It shows `OPEN · TARGET UNKNOWN` when the world does not report its requested speed.
+These states identify why the sample count does not increase.
 
 The live map deliberately distinguishes an **offer** from a **delivery**. A lane's numeric rate and
 recorded migration count come from copied `MIGRATION_PAYLOAD` offers, so they can continue rising

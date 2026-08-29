@@ -837,6 +837,8 @@ func TestPageShowsPopulationAdmissionOnEachLiveMapCell(t *testing.T) {
 		`id="cadm-`, `id="cadmlbl-`, `id="cadmtitle-`,
 		"function admissionView", "function paintAdmission", "paintAdmission(v);",
 		`label:"CLOSED · LIMIT "+limit`, `label:"OPEN · LIMIT "+limit`,
+		`label:"OPEN · TARGET UNKNOWN"`, `label:"OPEN · WAITING ×"+target`,
+		`label:"OPEN · LEARNING"`, `v.targetTimeScale + 0.01 < v.admissionTargetTimeScale`,
 		"admissionPopulationLimit", "admissionEstimatedLimit", "admissionCommitted",
 		"admissionEnforcing", "admissionClosed", ".cell.admission-closed .cellbg",
 		`data-t="admissiongate"`,

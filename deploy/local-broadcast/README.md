@@ -10,6 +10,8 @@ All website viewers receive the same stream.
 The spectator director follows one Bibite until it dies.
 It then selects the youngest living Bibite.
 The simulation runs at `6.5` times normal speed.
+The sidecar sizes its adaptive population limit for the same speed.
+The runner sets both targets from one value, so the estimator can collect valid samples.
 
 The camera uses a zoom of `250`, which is a wider view than the mod default.
 It shows the selected Bibite's vision range.
@@ -268,6 +270,8 @@ powershell.exe -NoProfile -Command \
 ```
 
 The status must report a zoom of `250` and a target time scale of `6.5`.
+The map status must report an admission target time scale of `6.5`.
+The admission sample count must increase once per minute until it reaches 10.
 The `panel` value alternates between `brain` and `biology`.
 The `fieldOfView` value must be `true`.
 The `disabledSpawnSettings` value must be `1`.
