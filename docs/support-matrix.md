@@ -31,7 +31,7 @@ skips it.
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
 | **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit `ab9cdeb` passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested ×5. The admission target changed to ×5. The unchanged plugin passed the M1 auto-test with zero Unity errors. |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. PR116 commit `5850cdb` passed the uncached build and test gates and its Linux amd64 cross-build on 2026-08-26. No PR116 binary ran live |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit `ab9cdeb` passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested ×5. No requested-speed binary has run with the Linux game. |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -269,8 +269,8 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.3.7",
-  "published": "2026-08-24",
+  "release": "0.3.8",
+  "published": "2026-08-30",
   "testedBuild": {
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
@@ -309,7 +309,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23. PR116 commit 5850cdb passed the uncached build and test gates and its Linux amd64 cross-build on 2026-08-26. No PR116 binary ran live"
+      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit ab9cdeb passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested x5. No requested-speed binary has run with the Linux game"
     }
   ]
 }
