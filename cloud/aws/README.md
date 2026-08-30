@@ -225,8 +225,10 @@ The manifest snapshot stays beside `worlds.json`, so its relative save keys keep
 Runtime-only staging does not read a local save directory or replace a mutable artifact, save, or
 `worlds.json`.
 It writes an owner-only receipt with every exact object, digest, and mutable manifest ETag.
-Use this mode only when the protected inputs are unchanged and the transaction will install a
-script, plugin, or sidecar change.
+Use this mode only when the protected inputs are unchanged.
+The receipt can support an in-place runtime transaction or a dormant template reconciliation for
+an existing stack.
+It cannot create a host stack.
 
 Record the bucket and object prefix in private operations storage.
 
@@ -305,9 +307,15 @@ Use the wrapper instead of a direct CloudFormation deployment.
 
 The wrapper also checks every manifest credential parameter.
 Each parameter must be a `SecureString` that uses the default `aws/ssm` KMS key.
-It accepts only a complete staging receipt.
-A runtime-only receipt cannot reuse a local manifest or artifact from an older complete stage.
-The change set binds the receipt's content-addressed manifest name and SHA-256 value.
+A new stack requires a complete staging receipt.
+An existing stack can also use a current runtime-only receipt when its checked runtime pointer
+already exists.
+In that mode, the wrapper downloads the receipt's immutable manifest and checks its digest.
+It rereads mutable `worlds.json` and requires the receipt's exact bytes and ETag.
+It also downloads the mutable game and BepInEx archives and checks their build digests.
+The wrapper rejects an ambient, missing, stale, or mixed receipt value before it creates a change
+set.
+The change set binds the content-addressed manifest name and SHA-256 value.
 
 The wrapper permits only two change-set shapes:
 
@@ -327,6 +335,9 @@ to that version.
 
 The wrapper also detects the legacy managed `DataAttachment` resource.
 It keeps that logical resource in the template and in the stack.
+A legacy update keeps the historical role policy and volume tags unchanged.
+It requires the historical credential prefix that the role already permits.
+The change-set validator then permits only the dormant launch-template change.
 A new stack uses self-attach mode instead, so its Host can complete bootstrap without a
 CloudFormation attachment deadlock.
 

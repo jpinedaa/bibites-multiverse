@@ -35,7 +35,6 @@ done
 
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
-[ -r "$dist/worlds.json" ] || { echo 'stage-artifacts.sh did not stage a manifest' >&2; exit 1; }
 
 # shellcheck source=lib/validation.sh
 . "$validation"
@@ -57,54 +56,114 @@ artifact_bepinex_sha256="${BEPINEX_SHA256:-}"
 # ambient settings make an incomplete receipt look complete.
 unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX RUNTIME_OBJECT \
   STAGING_SCOPE STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256 \
-  MANIFEST_OBJECT MANIFEST_SHA256
+  GAME_OBJECT BEPINEX_OBJECT MANIFEST_OBJECT MANIFEST_SHA256 \
+  MANIFEST_PREIMAGE_ETAG
 # shellcheck source=/dev/null
 . "$dist/staged.env"
+receipt_runtime_sha256="${STAGED_RUNTIME_SHA256:-${RUNTIME_SHA256:-}}"
+receipt_game_sha256="${STAGED_GAME_SHA256:-${GAME_SHA256:-}}"
+receipt_bepinex_sha256="${STAGED_BEPINEX_SHA256:-${BEPINEX_SHA256:-}}"
+receipt_game_object="${GAME_OBJECT:-}"
+receipt_bepinex_object="${BEPINEX_OBJECT:-}"
 RUNTIME_FILE="$artifact_runtime_file"
 RUNTIME_SHA256="$artifact_runtime_sha256"
 GAME_FILE="$artifact_game_file"
 GAME_SHA256="$artifact_game_sha256"
 BEPINEX_FILE="$artifact_bepinex_file"
 BEPINEX_SHA256="$artifact_bepinex_sha256"
-[ "${STAGING_SCOPE:-}" = complete ] || {
-  echo 'deploy-host.sh requires STAGING_SCOPE=complete from stage-artifacts.sh' >&2
-  exit 1
-}
-for receipt_name in STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256; do
-  [ -n "${!receipt_name:-}" ] || {
-    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+staging_scope="${STAGING_SCOPE:-}"
+case "$staging_scope" in
+  complete)
+    [ -r "$dist/worlds.json" ] || {
+      echo 'complete staging did not leave its checked manifest' >&2
+      exit 1
+    }
+    for receipt_name in STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256; do
+      [ -n "${!receipt_name:-}" ] || {
+        echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+        exit 1
+      }
+      bibites_require_sha256 "${!receipt_name}" "$receipt_name"
+    done
+    [ "$receipt_runtime_sha256" = "${RUNTIME_SHA256:-}" ] &&
+      [ "$receipt_game_sha256" = "${GAME_SHA256:-}" ] &&
+      [ "$receipt_bepinex_sha256" = "${BEPINEX_SHA256:-}" ] || {
+      echo 'the complete staging receipt does not match artifacts.env; run stage-artifacts.sh again' >&2
+      exit 1
+    }
+    [ "${RUNTIME_OBJECT:-}" = "runtime/$receipt_runtime_sha256.tar.gz" ] || {
+      echo 'the complete staging receipt runtime object does not match its digest' >&2
+      exit 1
+    }
+    manifest_path="$dist/worlds.json"
+    ;;
+  runtime-only)
+    for receipt_name in receipt_runtime_sha256 receipt_game_sha256 \
+      receipt_bepinex_sha256 receipt_game_object receipt_bepinex_object \
+      MANIFEST_OBJECT MANIFEST_SHA256 MANIFEST_PREIMAGE_ETAG; do
+      [ -n "${!receipt_name:-}" ] || {
+        echo "the runtime-only staging receipt is missing $receipt_name; run stage-artifacts.sh --runtime-only again" >&2
+        exit 1
+      }
+    done
+    for receipt_name in receipt_runtime_sha256 receipt_game_sha256 \
+      receipt_bepinex_sha256; do
+      bibites_require_sha256 "${!receipt_name}" "$receipt_name"
+    done
+    [ "$receipt_runtime_sha256" = "${RUNTIME_SHA256:-}" ] &&
+      [ "$receipt_game_sha256" = "${GAME_SHA256:-}" ] &&
+      [ "$receipt_bepinex_sha256" = "${BEPINEX_SHA256:-}" ] || {
+      echo 'the runtime-only staging receipt does not match artifacts.env' >&2
+      echo 'run build-artifacts.sh and stage-artifacts.sh --runtime-only again' >&2
+      exit 1
+    }
+    [ "${RUNTIME_OBJECT:-}" = "runtime/$receipt_runtime_sha256.tar.gz" ] || {
+      echo 'the runtime-only staging receipt runtime object does not match its digest' >&2
+      exit 1
+    }
+    [ "$receipt_game_object" = "runtime-inputs/game/$receipt_game_sha256.zip" ] || {
+      echo 'the runtime-only staging receipt game object does not match its digest' >&2
+      exit 1
+    }
+    [ "$receipt_bepinex_object" = "runtime-inputs/bepinex/$receipt_bepinex_sha256.zip" ] || {
+      echo 'the runtime-only staging receipt BepInEx object does not match its digest' >&2
+      exit 1
+    }
+    bibites_require_s3_key "$receipt_game_object" \
+      'runtime-only staging receipt game object'
+    bibites_require_s3_key "$receipt_bepinex_object" \
+      'runtime-only staging receipt BepInEx object'
+    if [[ ! "$MANIFEST_PREIMAGE_ETAG" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]]; then
+      echo 'the runtime-only staging receipt has an invalid manifest ETag' >&2
+      exit 1
+    fi
+    manifest_path=''
+    ;;
+  *)
+    echo 'deploy-host.sh requires a complete or runtime-only receipt from stage-artifacts.sh' >&2
     exit 1
-  }
-  bibites_require_sha256 "${!receipt_name}" "$receipt_name"
-done
-[ "$STAGED_RUNTIME_SHA256" = "${RUNTIME_SHA256:-}" ] &&
-  [ "$STAGED_GAME_SHA256" = "${GAME_SHA256:-}" ] &&
-  [ "$STAGED_BEPINEX_SHA256" = "${BEPINEX_SHA256:-}" ] || {
-  echo 'the complete staging receipt does not match artifacts.env; run stage-artifacts.sh again' >&2
-  exit 1
-}
-[ "${RUNTIME_OBJECT:-}" = "runtime/$STAGED_RUNTIME_SHA256.tar.gz" ] || {
-  echo 'the complete staging receipt runtime object does not match its digest' >&2
-  exit 1
-}
+    ;;
+esac
 for receipt_name in MANIFEST_OBJECT MANIFEST_SHA256; do
   [ -n "${!receipt_name:-}" ] || {
-    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+    echo "the $staging_scope staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
     exit 1
   }
 done
 bibites_require_sha256 "$MANIFEST_SHA256" MANIFEST_SHA256
 bibites_require_s3_filename "$MANIFEST_OBJECT" MANIFEST_OBJECT
 [ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
-  echo 'the complete staging receipt manifest object does not match its digest' >&2
+  echo "the $staging_scope staging receipt manifest object does not match its digest" >&2
   exit 1
 }
-local_manifest_sha256="$(sha256sum "$dist/worlds.json" | awk '{print $1}')"
-[ "$local_manifest_sha256" = "$MANIFEST_SHA256" ] || {
-  echo 'the staged manifest does not match the complete staging receipt' >&2
-  echo 'run stage-artifacts.sh again' >&2
-  exit 1
-}
+if [ "$staging_scope" = complete ]; then
+  local_manifest_sha256="$(sha256sum "$manifest_path" | awk '{print $1}')"
+  [ "$local_manifest_sha256" = "$MANIFEST_SHA256" ] || {
+    echo 'the staged manifest does not match the complete staging receipt' >&2
+    echo 'run stage-artifacts.sh again' >&2
+    exit 1
+  }
+fi
 
 : "${RUNTIME_OBJECT:?run stage-artifacts.sh again to create an immutable runtime object}"
 : "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
@@ -149,7 +208,9 @@ for key in \
   "$ARTIFACT_PREFIX/$MANIFEST_OBJECT"; do
   bibites_require_s3_key "$key" "deployment object key $key"
 done
-jq -e -f "$manifest_validator" "$dist/worlds.json" >/dev/null
+if [ "$staging_scope" = complete ]; then
+  jq -e -f "$manifest_validator" "$manifest_path" >/dev/null
+fi
 
 case "$enable_peering" in
   0|1) ;;
@@ -172,7 +233,11 @@ lookup_error="$(mktemp)"
 pointer_archive="$(mktemp)"
 pointer_path="$(mktemp)"
 current_pointer_path="$(mktemp)"
-trap 'rm -f "$lookup_error" "$pointer_archive" "$pointer_path" "$current_pointer_path"' EXIT
+receipt_manifest_path="$(mktemp)"
+mutable_manifest_path="$(mktemp)"
+remote_game_path="$(mktemp)"
+remote_bepinex_path="$(mktemp)"
+trap 'rm -f "$lookup_error" "$pointer_archive" "$pointer_path" "$current_pointer_path" "$receipt_manifest_path" "$mutable_manifest_path" "$remote_game_path" "$remote_bepinex_path"' EXIT
 if stack_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
   describe-stacks --stack-name "$stack" --output json 2>"$lookup_error")"; then
   stack_status="$(jq -er '.Stacks[0].StackStatus' <<<"$stack_description")"
@@ -273,6 +338,63 @@ if [ "$pointer_missing" -eq 1 ] && [ "$stack_exists" -eq 1 ] &&
   exit 1
 fi
 
+if [ "$staging_scope" = runtime-only ]; then
+  [ "$stack_exists" -eq 1 ] && [ "$pointer_missing" -eq 0 ] || {
+    echo 'a runtime-only receipt can reconcile only an existing stack with a checked runtime pointer' >&2
+    exit 1
+  }
+  immutable_manifest_metadata="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+    s3api get-object --bucket "$ARTIFACT_BUCKET" \
+    --key "$ARTIFACT_PREFIX/$MANIFEST_OBJECT" "$receipt_manifest_path" \
+    --output json)"
+  immutable_manifest_etag="$(jq -er '.ETag | select(type == "string")' \
+    <<<"$immutable_manifest_metadata")"
+  [[ "$immutable_manifest_etag" =~ ^\"[0-9A-Fa-f]{32}(-[0-9]+)?\"$ ]] || {
+    echo 'the immutable manifest returned an invalid ETag' >&2
+    exit 1
+  }
+  printf '%s  %s\n' "$MANIFEST_SHA256" "$receipt_manifest_path" | \
+    sha256sum -c - >/dev/null || {
+    echo 'the immutable manifest does not match the runtime-only receipt' >&2
+    exit 1
+  }
+  mutable_manifest_metadata="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+    s3api get-object --bucket "$ARTIFACT_BUCKET" \
+    --key "$ARTIFACT_PREFIX/worlds.json" "$mutable_manifest_path" \
+    --output json)"
+  mutable_manifest_etag="$(jq -er '.ETag | select(type == "string")' \
+    <<<"$mutable_manifest_metadata")"
+  [ "$mutable_manifest_etag" = "$MANIFEST_PREIMAGE_ETAG" ] || {
+    echo 'the mutable manifest ETag changed after runtime-only staging' >&2
+    echo 'run stage-artifacts.sh --runtime-only again' >&2
+    exit 1
+  }
+  cmp -s "$receipt_manifest_path" "$mutable_manifest_path" || {
+    echo 'the mutable manifest bytes changed after runtime-only staging' >&2
+    echo 'run stage-artifacts.sh --runtime-only again' >&2
+    exit 1
+  }
+  manifest_path="$receipt_manifest_path"
+  jq -e -f "$manifest_validator" "$manifest_path" >/dev/null
+
+  aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$GAME_FILE" \
+    "$remote_game_path" --only-show-errors
+  printf '%s  %s\n' "$GAME_SHA256" "$remote_game_path" | \
+    sha256sum -c - >/dev/null || {
+    echo 'the mutable game archive does not match artifacts.env' >&2
+    exit 1
+  }
+  aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$BEPINEX_FILE" \
+    "$remote_bepinex_path" --only-show-errors
+  printf '%s  %s\n' "$BEPINEX_SHA256" "$remote_bepinex_path" | \
+    sha256sum -c - >/dev/null || {
+    echo 'the mutable BepInEx archive does not match artifacts.env' >&2
+    exit 1
+  }
+fi
+
 use_legacy_attachment=false
 host_launch_template_version=1
 if [ "$stack_exists" -eq 1 ]; then
@@ -289,6 +411,12 @@ if [ "$stack_exists" -eq 1 ]; then
   IFS=$'\t' read -r bound_host_id launch_template_id host_launch_template_version \
     <<<"$(bibites_live_host_launch_template_binding "$stack_resources" "$live_host")"
   [ "$bound_host_id" = "$host_id" ]
+  if [ "$use_legacy_attachment" = true ] &&
+     [ "$BIBITES_CREDENTIAL_PARAMETER_PREFIX" != /bibites-multiverse/cloud ]; then
+    echo 'the legacy stack role has the fixed /bibites-multiverse/cloud credential boundary' >&2
+    echo 'use that exact prefix so the reviewed change leaves live IAM unchanged' >&2
+    exit 1
+  fi
 fi
 
 subnet_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-subnets \
@@ -323,7 +451,7 @@ while IFS= read -r parameter; do
     echo "invalid credential parameter: $parameter" >&2
     missing=1
   fi
-done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")
+done < <(jq -r '.worlds[].credentialParameter' "$manifest_path")
 [ "$missing" -eq 0 ] || exit 1
 
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \

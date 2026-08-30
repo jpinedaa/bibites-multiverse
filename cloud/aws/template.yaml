@@ -114,21 +114,33 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CredentialParameterPrefix}/*
-              - Effect: Allow
-                Action: cloudformation:SignalResource
-                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
-              - Effect: Allow
-                Action: ec2:AttachVolume
-                Resource:
-                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/${DataVolume}
-                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
-                Condition:
-                  StringEquals:
-                    ec2:ResourceTag/Project: bibites-multiverse
-              - Effect: Allow
-                Action: ec2:DescribeVolumes
-                Resource: '*'
+                Resource: !If
+                  - KeepLegacyDataAttachment
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/bibites-multiverse/cloud/*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CredentialParameterPrefix}/*
+              - !If
+                - KeepLegacyDataAttachment
+                - !Ref AWS::NoValue
+                - Effect: Allow
+                  Action: cloudformation:SignalResource
+                  Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+              - !If
+                - KeepLegacyDataAttachment
+                - !Ref AWS::NoValue
+                - Effect: Allow
+                  Action: ec2:AttachVolume
+                  Resource:
+                    - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/${DataVolume}
+                    - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  Condition:
+                    StringEquals:
+                      ec2:ResourceTag/Project: bibites-multiverse
+              - !If
+                - KeepLegacyDataAttachment
+                - !Ref AWS::NoValue
+                - Effect: Allow
+                  Action: ec2:DescribeVolumes
+                  Resource: '*'
 
   HostProfile:
     Type: AWS::IAM::InstanceProfile
@@ -147,7 +159,10 @@ Resources:
       Tags:
         - {Key: Name, Value: bibites-cloud-worlds-data}
         - {Key: Project, Value: bibites-multiverse}
-        - {Key: BibitesBackup, Value: daily}
+        - !If
+          - KeepLegacyDataAttachment
+          - !Ref AWS::NoValue
+          - {Key: BibitesBackup, Value: daily}
 
   HostLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
