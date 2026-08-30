@@ -103,9 +103,15 @@ reject 'wrong legacy attachment type' bibites_legacy_attachment_mode \
 
 live_host='{"Reservations":[{"Instances":[{
   "InstanceId":"i-0123456789abcdef0",
-  "LaunchTemplate":{"LaunchTemplateId":"lt-0123456789abcdef0","Version":"7"}}]}]}'
+  "LaunchTemplate":{"LaunchTemplateId":"lt-0123456789abcdef0","Version":"7"},
+  "Tags":[
+    {"Key":"aws:ec2launchtemplate:id","Value":"lt-0123456789abcdef0"},
+    {"Key":"aws:ec2launchtemplate:version","Value":"7"}]}]}]}'
 binding="$(bibites_live_host_launch_template_binding "$resources" "$live_host")"
 [ "$binding" = $'i-0123456789abcdef0\tlt-0123456789abcdef0\t7' ]
+tag_only_host="$(jq 'del(.Reservations[0].Instances[0].LaunchTemplate)' <<<"$live_host")"
+[ "$(bibites_live_host_launch_template_binding "$resources" "$tag_only_host")" = \
+  $'i-0123456789abcdef0\tlt-0123456789abcdef0\t7' ]
 reject 'live Host on a different launch template' \
   bibites_live_host_launch_template_binding "$resources" \
   "$(jq '.Reservations[0].Instances[0].LaunchTemplate.LaunchTemplateId =
@@ -114,6 +120,23 @@ reject 'live Host using a symbolic launch-template version' \
   bibites_live_host_launch_template_binding "$resources" \
   "$(jq '.Reservations[0].Instances[0].LaunchTemplate.Version = "$Latest"' \
     <<<"$live_host")"
+reject 'reserved launch-template id differs from the direct binding' \
+  bibites_live_host_launch_template_binding "$resources" \
+  "$(jq '.Reservations[0].Instances[0].Tags[0].Value =
+    "lt-fedcba98765432100"' <<<"$live_host")"
+reject 'tag-only Host using a symbolic launch-template version' \
+  bibites_live_host_launch_template_binding "$resources" \
+  "$(jq 'del(.Reservations[0].Instances[0].LaunchTemplate) |
+    .Reservations[0].Instances[0].Tags[1].Value = "$Latest"' <<<"$live_host")"
+reject 'tag-only Host missing the reserved launch-template version' \
+  bibites_live_host_launch_template_binding "$resources" \
+  "$(jq 'del(.Reservations[0].Instances[0].LaunchTemplate) |
+    del(.Reservations[0].Instances[0].Tags[1])' <<<"$live_host")"
+reject 'tag-only Host with duplicate reserved launch-template versions' \
+  bibites_live_host_launch_template_binding "$resources" \
+  "$(jq 'del(.Reservations[0].Instances[0].LaunchTemplate) |
+    .Reservations[0].Instances[0].Tags +=
+      [{"Key":"aws:ec2launchtemplate:version","Value":"7"}]' <<<"$live_host")"
 
 test_root="$(mktemp -d)"
 trap 'find "$test_root" -depth -delete' EXIT
@@ -269,7 +292,9 @@ case "$args" in
     ;;
   *' ec2 describe-instances '*)
     printf '%s\n' '{"Reservations":[{"Instances":[{"InstanceId":"i-0123456789abcdef0",
-      "LaunchTemplate":{"LaunchTemplateId":"lt-0123456789abcdef0","Version":"7"}}]}]}'
+      "Tags":[
+        {"Key":"aws:ec2launchtemplate:id","Value":"lt-0123456789abcdef0"},
+        {"Key":"aws:ec2launchtemplate:version","Value":"7"}]}]}]}'
     ;;
   *' ec2 describe-subnets '*)
     printf '%s\n' '{"Subnets":[{"SubnetId":"subnet-0123456789abcdef0",

@@ -81,19 +81,41 @@ bibites_live_host_launch_template_binding() {
   bibites_require_resource_id "$host_id" 'stack Host resource' i || return 1
   bibites_require_resource_id "$launch_template_id" \
     'stack HostLaunchTemplate resource' lt || return 1
-  jq -e --arg host "$host_id" --arg launch_template "$launch_template_id" '
-    [.Reservations[].Instances[]] as $instances |
-    ($instances | length) == 1 and
-    $instances[0].InstanceId == $host and
-    $instances[0].LaunchTemplate.LaunchTemplateId == $launch_template and
-    ($instances[0].LaunchTemplate.Version | test("^[1-9][0-9]*$"))
-  ' <<<"$live_host" >/dev/null || {
+  version="$(jq -er --arg host "$host_id" --arg launch_template "$launch_template_id" '
+    def numeric_version:
+      type == "string" and test("^[1-9][0-9]*$");
+    ([.Reservations[]?.Instances[]?] |
+      if length == 1 and .[0].InstanceId == $host then .[0]
+      else error("missing or different live Host")
+      end) as $instance |
+    [$instance.Tags[]? |
+      select(.Key == "aws:ec2launchtemplate:id") | .Value] as $tag_ids |
+    [$instance.Tags[]? |
+      select(.Key == "aws:ec2launchtemplate:version") | .Value] as $tag_versions |
+    ($instance.LaunchTemplate? // null) as $direct |
+    if $direct != null then
+      if $direct.LaunchTemplateId == $launch_template and
+         ($direct.Version | numeric_version) and
+         ((($tag_ids | length) == 0 and ($tag_versions | length) == 0) or
+          (($tag_ids | length) == 1 and ($tag_versions | length) == 1 and
+           $tag_ids[0] == $direct.LaunchTemplateId and
+           $tag_versions[0] == $direct.Version))
+      then $direct.Version
+      else error("invalid direct launch-template binding")
+      end
+    else
+      if ($tag_ids | length) == 1 and ($tag_versions | length) == 1 and
+         $tag_ids[0] == $launch_template and
+         ($tag_versions[0] | numeric_version)
+      then $tag_versions[0]
+      else error("invalid reserved launch-template tags")
+      end
+    end
+  ' <<<"$live_host")" || {
     bibites_validation_error \
-      'live Host does not use one numeric version of the stack launch template'
+      'live Host does not prove one numeric version of the stack launch template'
     return 1
   }
-  version="$(jq -r '.Reservations[0].Instances[0].LaunchTemplate.Version' \
-    <<<"$live_host")"
   bibites_require_launch_template_version "$version" \
     'live Host launch-template version' || return 1
   printf '%s\t%s\t%s\n' "$host_id" "$launch_template_id" "$version"
