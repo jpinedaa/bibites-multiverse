@@ -42,7 +42,8 @@ grep -Fq -- '"$repo/cloud/aws/promote-runtime.sh" --if-absent' \
   "$repo/cloud/aws/deploy-host.sh"
 grep -Fq 's3api get-object' "$repo/cloud/aws/deploy-host.sh"
 grep -Fq 'pointer_snapshot_canonical' "$repo/cloud/aws/deploy-host.sh"
-grep -Fq '[ "${STAGING_SCOPE:-}" = complete ]' \
+grep -Fq 'case "$staging_scope" in' "$repo/cloud/aws/deploy-host.sh"
+grep -Fq 'a runtime-only receipt can reconcile only an existing stack' \
   "$repo/cloud/aws/deploy-host.sh"
 grep -Fq '[ "${STAGING_SCOPE:-}" = runtime-only ]' \
   "$repo/cloud/aws/update-runtime.sh"

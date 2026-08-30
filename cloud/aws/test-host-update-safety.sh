@@ -155,33 +155,38 @@ cp "$repo/cloud/aws/runtime/validate-world-manifest.jq" \
 archive="$test_root/runtime.tar.gz"
 printf 'fixture runtime\n' >"$archive"
 runtime_sha="$(sha256sum "$archive" | awk '{print $1}')"
+game_archive="$test_root/game.zip"
+printf 'fixture game\n' >"$game_archive"
+game_sha="$(sha256sum "$game_archive" | awk '{print $1}')"
+bepinex_archive="$test_root/bepinex.zip"
+printf 'fixture BepInEx\n' >"$bepinex_archive"
+bepinex_sha="$(sha256sum "$bepinex_archive" | awk '{print $1}')"
 cat >"$fixture_dist/artifacts.env" <<EOF
 RUNTIME_FILE=bibites-cloud-runtime.tar.gz
 RUNTIME_OBJECT=runtime/$runtime_sha.tar.gz
 RUNTIME_SHA256=$runtime_sha
 GAME_FILE=game.zip
-GAME_SHA256=1111111111111111111111111111111111111111111111111111111111111111
+GAME_SHA256=$game_sha
 BEPINEX_FILE=bepinex.zip
-BEPINEX_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+BEPINEX_SHA256=$bepinex_sha
 EOF
-cat >"$fixture_dist/staged.env" <<'EOF'
+cat >"$fixture_dist/staged.env" <<EOF
 AWS_PROFILE=fixture
 AWS_REGION=us-east-1
 ARTIFACT_BUCKET=fixture-artifacts
 ARTIFACT_PREFIX=cloud/v1
-RUNTIME_OBJECT=runtime/RUNTIME_SHA_PLACEHOLDER.tar.gz
-STAGED_RUNTIME_SHA256=RUNTIME_SHA_PLACEHOLDER
-STAGED_GAME_SHA256=1111111111111111111111111111111111111111111111111111111111111111
-STAGED_BEPINEX_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+RUNTIME_OBJECT=runtime/$runtime_sha.tar.gz
+STAGED_RUNTIME_SHA256=$runtime_sha
+STAGED_GAME_SHA256=$game_sha
+STAGED_BEPINEX_SHA256=$bepinex_sha
 MANIFEST_OBJECT=worlds.MANIFEST_SHA_PLACEHOLDER.json
 MANIFEST_SHA256=MANIFEST_SHA_PLACEHOLDER
 STAGING_SCOPE=complete
 EOF
-sed -i "s/RUNTIME_SHA_PLACEHOLDER/$runtime_sha/g" "$fixture_dist/staged.env"
 cat >"$fixture_dist/worlds.json" <<'EOF'
 {"schema":1,"worlds":[{"id":"slot-1","peerId":"slot-1-fixture",
 "worldName":"Fixture-World","sidecarPort":8787,"saveKey":"imports/Fixture-World.zip",
-"credentialParameter":"/bibites/cloud/slot-1/peer-secret","position":"0,0",
+"credentialParameter":"/bibites-multiverse/cloud/slot-1/peer-secret","position":"0,0",
 "preferredSlot":1,"targetTimeScale":1,"saveMinutes":10,"saveKeep":6,
 "enabled":true}]}
 EOF
@@ -275,27 +280,37 @@ case "$args" in
       "ProcessorInfo":{"SupportedArchitectures":["x86_64"]}}]}'
     ;;
   *' ssm describe-parameters '*)
-    printf '%s\n' '{"Parameters":[{"Name":"/bibites/cloud/slot-1/peer-secret",
+    printf '%s\n' '{"Parameters":[{"Name":"/bibites-multiverse/cloud/slot-1/peer-secret",
       "Type":"SecureString","KeyId":"alias/aws/ssm"}]}'
     ;;
   *' s3api get-object '*)
-    destination=''
+    destination=''; key=''
     while [ "$#" -gt 0 ]; do
       case "$1" in
         get-object) shift ;;
-        --bucket|--key|--output) shift 2 ;;
+        --key) key="$2"; shift 2 ;;
+        --bucket|--output) shift 2 ;;
         --*) shift ;;
         *) destination="$1"; shift ;;
       esac
     done
     [ -n "$destination" ] || exit 65
-    if [ -e "$MOCK_POINTER_STATE" ]; then
-      cp "$MOCK_POINTER_STATE" "$destination"
-      jq -nc --arg etag "$(<"$MOCK_POINTER_ETAG_STATE")" '{ETag:$etag}'
-    else
-      echo 'An error occurred (NoSuchKey): 404 Not Found' >&2
-      exit 1
-    fi
+    case "$key" in
+      */runtime/current.json)
+        if [ -e "$MOCK_POINTER_STATE" ]; then
+          cp "$MOCK_POINTER_STATE" "$destination"
+          jq -nc --arg etag "$(<"$MOCK_POINTER_ETAG_STATE")" '{ETag:$etag}'
+        else
+          echo 'An error occurred (NoSuchKey): 404 Not Found' >&2
+          exit 1
+        fi
+        ;;
+      */worlds.json|*/worlds.*.json)
+        cp "$MOCK_MANIFEST_PATH" "$destination"
+        jq -nc --arg etag "$MOCK_MANIFEST_ETAG" '{ETag:$etag}'
+        ;;
+      *) exit 65 ;;
+    esac
     ;;
   *' s3 cp '*)
     source=''; destination=''
@@ -310,6 +325,10 @@ case "$args" in
         echo '404 Not Found' >&2
         exit 1
       fi
+    elif [[ "$source" == */game.zip ]]; then
+      cp "$MOCK_GAME_ARCHIVE" "$destination"
+    elif [[ "$source" == */bepinex.zip ]]; then
+      cp "$MOCK_BEPINEX_ARCHIVE" "$destination"
     else
       cp "$MOCK_ARCHIVE" "$destination"
     fi
@@ -348,6 +367,7 @@ case "$args" in
         {"ResourceChange":{"LogicalResourceId":"Host","ResourceType":"AWS::EC2::Instance","Action":"Add","Replacement":"False"}}]'
     fi
     jq -nc --arg type "$type" --arg runtime "$runtime" --arg sha "$MOCK_RUNTIME_SHA" \
+      --arg game_sha "$MOCK_GAME_SHA" --arg bepinex_sha "$MOCK_BEPINEX_SHA" \
       --arg manifest "$MOCK_MANIFEST_OBJECT" --arg manifest_sha "$MOCK_MANIFEST_SHA" \
       --arg version "$version" --arg legacy "$legacy" --argjson changes "$changes" '{
       ChangeSetName:"fixture-change",ChangeSetType:$type,Status:"CREATE_COMPLETE",
@@ -361,15 +381,15 @@ case "$args" in
         {ParameterKey:"RuntimeObject",ParameterValue:$runtime},
         {ParameterKey:"RuntimeSha256",ParameterValue:$sha},
         {ParameterKey:"GameFile",ParameterValue:"game.zip"},
-        {ParameterKey:"GameSha256",ParameterValue:"1111111111111111111111111111111111111111111111111111111111111111"},
+        {ParameterKey:"GameSha256",ParameterValue:$game_sha},
         {ParameterKey:"BepInExFile",ParameterValue:"bepinex.zip"},
-        {ParameterKey:"BepInExSha256",ParameterValue:"2222222222222222222222222222222222222222222222222222222222222222"},
+        {ParameterKey:"BepInExSha256",ParameterValue:$bepinex_sha},
         {ParameterKey:"ManifestFile",ParameterValue:$manifest},
         {ParameterKey:"ManifestSha256",ParameterValue:$manifest_sha},
         {ParameterKey:"DataVolumeGiB",ParameterValue:"40"},
         {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.5"},
         {ParameterKey:"RelayDomain",ParameterValue:"relay.example.net"},
-        {ParameterKey:"CredentialParameterPrefix",ParameterValue:"/bibites/cloud"},
+        {ParameterKey:"CredentialParameterPrefix",ParameterValue:"/bibites-multiverse/cloud"},
         {ParameterKey:"HostLaunchTemplateVersion",ParameterValue:$version},
         {ParameterKey:"UseLegacyDataAttachment",ParameterValue:$legacy}],Changes:$changes}'
     ;;
@@ -393,10 +413,14 @@ run_deploy_fixture() {
     BIBITES_SUBNET_ID=subnet-0123456789abcdef0 \
     BIBITES_VPC_ID=vpc-0123456789abcdef0 BIBITES_AVAILABILITY_ZONE=us-east-1a \
     BIBITES_RELAY_PRIVATE_IP=10.0.0.5 BIBITES_RELAY_DOMAIN=relay.example.net \
-    BIBITES_CREDENTIAL_PARAMETER_PREFIX=/bibites/cloud BIBITES_INSTANCE_TYPE=m6i.large \
+    BIBITES_CREDENTIAL_PARAMETER_PREFIX=/bibites-multiverse/cloud BIBITES_INSTANCE_TYPE=m6i.large \
     MOCK_SCENARIO="$scenario" MOCK_RUNTIME_SHA="$runtime_sha" MOCK_ARCHIVE="$archive" \
+    MOCK_GAME_SHA="$game_sha" MOCK_GAME_ARCHIVE="$game_archive" \
+    MOCK_BEPINEX_SHA="$bepinex_sha" MOCK_BEPINEX_ARCHIVE="$bepinex_archive" \
     MOCK_MANIFEST_OBJECT="worlds.$manifest_sha.json" \
     MOCK_MANIFEST_SHA="$manifest_sha" \
+    MOCK_MANIFEST_PATH="$fixture_dist/worlds.json" \
+    MOCK_MANIFEST_ETAG='"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"' \
     MOCK_AWS_LOG="$test_root/aws.log" MOCK_EXECUTE_STATE="$test_root/executed" \
     MOCK_AWS_CALL_LOG="$test_root/aws-calls.log" \
     MOCK_POINTER_STATE="$test_root/pointer.json" \
@@ -405,30 +429,31 @@ run_deploy_fixture() {
     "$fixture_cloud/deploy-host.sh" --change-set-name fixture-change "$@"
 }
 
-for invalid_scope in runtime-only missing; do
-  sed -i '/^STAGING_SCOPE=/d' "$fixture_dist/staged.env"
-  if [ "$invalid_scope" = runtime-only ]; then
-    printf 'STAGING_SCOPE=runtime-only\n' >>"$fixture_dist/staged.env"
-  else
-    export STAGING_SCOPE=complete
-  fi
-  : >"$test_root/aws.log"
-  : >"$test_root/aws-calls.log"
-  set +e
-  scope_output="$(run_deploy_fixture create_preview 2>&1)"
-  scope_status=$?
-  set -e
-  [ "$scope_status" -ne 0 ] || {
-    echo "$invalid_scope staging scope reached deployment" >&2
-    exit 1
-  }
-  [ ! -s "$test_root/aws-calls.log" ] || {
-    echo "$invalid_scope staging scope reached AWS" >&2
-    exit 1
-  }
-  grep -Fq 'requires STAGING_SCOPE=complete' <<<"$scope_output"
-  unset STAGING_SCOPE
-done
+seed_pointer() {
+  local etag="$1"
+  jq -nc --arg file "runtime/$runtime_sha.tar.gz" --arg sha "$runtime_sha" \
+    '{schema:1,runtimeFile:$file,runtimeSha256:$sha}' >"$test_root/pointer.json"
+  printf '%s\n' "$etag" >"$test_root/pointer.etag"
+}
+
+sed -i '/^STAGING_SCOPE=/d' "$fixture_dist/staged.env"
+export STAGING_SCOPE=complete
+: >"$test_root/aws.log"
+: >"$test_root/aws-calls.log"
+set +e
+scope_output="$(run_deploy_fixture create_preview 2>&1)"
+scope_status=$?
+set -e
+[ "$scope_status" -ne 0 ] || {
+  echo 'missing staging scope reached deployment' >&2
+  exit 1
+}
+[ ! -s "$test_root/aws-calls.log" ] || {
+  echo 'missing staging scope reached AWS' >&2
+  exit 1
+}
+grep -Fq 'requires a complete or runtime-only receipt' <<<"$scope_output"
+unset STAGING_SCOPE
 sed -i '/^STAGING_SCOPE=/d' "$fixture_dist/staged.env"
 printf 'STAGING_SCOPE=complete\n' >>"$fixture_dist/staged.env"
 
@@ -549,6 +574,61 @@ run_deploy_fixture legacy_preview >/dev/null
 grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=7' "$test_root/aws.log"
 grep -Fq 'ParameterKey=UseLegacyDataAttachment,ParameterValue=true' "$test_root/aws.log"
 
+cat >"$fixture_dist/staged.env" <<EOF
+AWS_PROFILE=fixture
+AWS_REGION=us-east-1
+ARTIFACT_BUCKET=fixture-artifacts
+ARTIFACT_PREFIX=cloud/v1
+RUNTIME_OBJECT=runtime/$runtime_sha.tar.gz
+RUNTIME_SHA256=$runtime_sha
+GAME_OBJECT=runtime-inputs/game/$game_sha.zip
+GAME_SHA256=$game_sha
+BEPINEX_OBJECT=runtime-inputs/bepinex/$bepinex_sha.zip
+BEPINEX_SHA256=$bepinex_sha
+MANIFEST_OBJECT=worlds.$manifest_sha.json
+MANIFEST_SHA256=$manifest_sha
+MANIFEST_PREIMAGE_ETAG='"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'
+STAGING_SCOPE=runtime-only
+EOF
+seed_pointer '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+: >"$test_root/aws.log"
+: >"$test_root/aws-calls.log"
+run_deploy_fixture legacy_preview >/dev/null
+grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=7' "$test_root/aws.log"
+grep -Fq "s3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.$manifest_sha.json" \
+  "$test_root/aws-calls.log"
+grep -Fq 's3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.json' \
+  "$test_root/aws-calls.log"
+
+sed -i \
+  's/^MANIFEST_PREIMAGE_ETAG=.*/MANIFEST_PREIMAGE_ETAG='\''"dddddddddddddddddddddddddddddddd"'\''/' \
+  "$fixture_dist/staged.env"
+: >"$test_root/aws.log"
+set +e
+manifest_drift_output="$(run_deploy_fixture legacy_preview 2>&1)"
+manifest_drift_status=$?
+set -e
+[ "$manifest_drift_status" -ne 0 ]
+[ ! -s "$test_root/aws.log" ]
+grep -Fq 'mutable manifest ETag changed after runtime-only staging' \
+  <<<"$manifest_drift_output"
+sed -i \
+  's/^MANIFEST_PREIMAGE_ETAG=.*/MANIFEST_PREIMAGE_ETAG='\''"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'\''/' \
+  "$fixture_dist/staged.env"
+
+: >"$test_root/aws.log"
+set +e
+runtime_create_output="$(run_deploy_fixture create_preview 2>&1)"
+runtime_create_status=$?
+set -e
+[ "$runtime_create_status" -ne 0 ]
+[ ! -s "$test_root/aws.log" ]
+grep -Fq 'runtime-only receipt can reconcile only an existing stack' \
+  <<<"$runtime_create_output"
+
+cp "$test_root/complete-staged.env" "$fixture_dist/staged.env"
+rm -f "$test_root/pointer.json" "$test_root/pointer.etag"
+
 for legacy_mode in preview execute; do
   : >"$test_root/aws.log"
   rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag"
@@ -597,13 +677,6 @@ run_deploy_fixture create_execute_race_identical --execute >/dev/null
 [ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$runtime_sha" ]
 [ "$(wc -l <"$test_root/conditional.log")" -eq 1 ]
 
-seed_pointer() {
-  local etag="$1"
-  jq -nc --arg file "runtime/$runtime_sha.tar.gz" --arg sha "$runtime_sha" \
-    '{schema:1,runtimeFile:$file,runtimeSha256:$sha}' >"$test_root/pointer.json"
-  printf '%s\n' "$etag" >"$test_root/pointer.etag"
-}
-
 rm -f "$test_root/executed" "$test_root/conditional.log"
 seed_pointer '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
 set +e
@@ -635,6 +708,10 @@ grep -Fq '  UseLegacyDataAttachment:' "$template"
 grep -Fq '  KeepLegacyDataAttachment: !Equals' "$template"
 grep -Fq '    Condition: KeepLegacyDataAttachment' "$template"
 grep -Fq '        Version: !Ref HostLaunchTemplateVersion' "$template"
+grep -Fq '                  - KeepLegacyDataAttachment' "$template"
+grep -Fq 'parameter/bibites-multiverse/cloud/*' "$template"
+grep -B3 -F '{Key: BibitesBackup, Value: daily}' "$template" | \
+  grep -Fq -- '- !If'
 if grep -Fq 'LatestVersionNumber' "$template"; then
   echo 'Host still follows the mutable latest launch-template version' >&2
   exit 1
@@ -666,6 +743,8 @@ grep -Fq 'for every preview and execution' <<<"$missing_name_output"
 grep -Fq 'bibites_require_safe_host_change_set "$change_set_description"' "$deploy"
 grep -Fq 'use_legacy_attachment="$(bibites_legacy_attachment_mode' "$deploy"
 grep -Fq 'bibites_live_host_launch_template_binding' "$deploy"
+grep -Fq 'runtime-only receipt can reconcile only an existing stack' "$deploy"
+grep -Fq 'use that exact prefix so the reviewed change leaves live IAM unchanged' "$deploy"
 success_guard_line="$(grep -n '\[ "$terminal_status" -eq 0 \]' "$deploy" | cut -d: -f1)"
 publish_line="$(grep -n '"$repo/cloud/aws/promote-runtime.sh"' "$deploy" | cut -d: -f1)"
 [ "$success_guard_line" -lt "$publish_line" ] || {
