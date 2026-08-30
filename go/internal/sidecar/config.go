@@ -117,6 +117,7 @@ type Config struct {
 	InboundAdmissionMode        string
 	InboundPopulationLimit      int
 	InboundTargetTimeScale      float64
+	InboundTargetAuto           bool
 	InboundPopulationMin        int
 	InboundPopulationMax        int
 	InboundPopulationHysteresis int
@@ -200,6 +201,7 @@ func DefaultConfig() Config {
 		HeartbeatDeliveryGrace:      defaultHeartbeatDeliveryGrace,
 		InboundAdmissionMode:        AdmissionAdaptiveShadow,
 		InboundTargetTimeScale:      defaultAdmissionTarget,
+		InboundTargetAuto:           true,
 		InboundPopulationMin:        defaultAdmissionMin,
 		InboundPopulationMax:        defaultAdmissionMax,
 		InboundPopulationHysteresis: defaultAdmissionHysteresis,

@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.7` on **2026-08-24**, against the code and
+strangers. This audit was updated for release `0.3.7` on **2026-08-30**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -39,7 +39,7 @@ facts shape every verdict:
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 | `MULTIVERSE_STARTUP_TIME_SCALE` | The mod | Every world starts at x10 instead of the game's x1 | **PASS** — it is a target the game itself governs down to protect the frame rate, it costs no disk and no network, and a player moves it with the speed slider they already have |
-| `--inbound-admission` | The sidecar | `adaptive-shadow`: learns and reports a population decision, but refuses nothing on population | **PASS FOR SHADOW ROLLOUT** — no participant behavior changes until a later reviewed promotion to enforcing `adaptive`; queue backpressure remains active |
+| `--inbound-admission` | The sidecar | `adaptive-shadow`: learns and reports a population decision at the game's requested speed, but refuses nothing on population | **PASS FOR SHADOW ROLLOUT** — a session speed change moves the learner's target with it; no participant behavior changes until a later reviewed promotion to enforcing `adaptive`, and queue backpressure remains active |
 | `--forward-timeout` | The sidecar | Records an unanswered forwarded organism lost after five wall-clock minutes | **PASS WITH A STATED LOSS** — the deadline bounds a full outbound journal. It does not send or return the organism again |
 | The launcher's update check | The launcher | One anonymous background `GET` per launcher run to the project's own homepage, which can only add a line of text and a button | **PASS** — nothing waits on it, it carries no identity and no version, a failure is silent, and `MULTIVERSE_NO_UPDATE_CHECK` makes no request at all |
 
@@ -313,14 +313,20 @@ refused with a warning and leaves x1 in place, so a typo cannot pause or stall a
 
 **Today.** The sidecar supports `off`, a configured `fixed` living-population limit, an adaptive
 limit, and `adaptive-shadow`. The adaptive estimate uses the median of one hour of
-`population × achievedTimeScale` samples, a 0.90 safety margin, and the configured target speed.
-It needs ten samples, is bounded to 10–200 by default, and persists its current evidence in the
-world's data directory.
+`population × achievedTimeScale` samples, a 0.90 safety margin, and the target speed. With no
+admission-target override, that target follows the game's requested speed. An explicit
+`--inbound-target-time-scale` or `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` holds it fixed instead.
+The estimate needs ten samples, is bounded to 10–200 by default, and persists its current evidence
+in the world's data directory.
 
-**A bare install.** Uses `adaptive-shadow`. It calculates and publishes the exact decision that
-adaptive mode would make, including whether the gate would be closed, but it never refuses an
-organism because of that decision. The existing 64-entry inbound-journal ceiling remains an
-independent safety control and can still return `OVERLOADED` before custody.
+**A bare install.** Uses `adaptive-shadow`. Its target starts at the package's requested ×10 and
+follows the in-game speed slider for the rest of the session. Selecting ×5 therefore recalculates
+the population decision at ×5; it does not leave the learner waiting for ×10. Existing
+machine-budget samples remain valid across that change, while a paused or not-yet-measurable
+heartbeat changes no sample. Shadow calculates and publishes the exact decision that adaptive
+mode would make, including whether the gate would be closed, but it never refuses an organism
+because of that decision. The existing 64-entry inbound-journal ceiling remains an independent
+safety control and can still return `OVERLOADED` before custody.
 
 **Why shadow is the participant default.** Production history shows a strong population/speed
 relationship, but the safe limit is a property of each machine and ecology rather than one

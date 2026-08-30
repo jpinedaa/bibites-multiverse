@@ -100,26 +100,35 @@ raw limit       = floor(median(last hour of budgets) × 0.90 / target time scale
 ```
 
 Ten valid samples are required. Save stalls are outliers and the median makes them unable to
-control the result. The default target is ×10 and the learned result is clamped to 10–200. A
-decrease moves by at most 10% per sample and an increase by 5%, so one changing interval does not
-open or close the gate by dozens of organisms.
+control the result. The ordinary policy starts at ×10 and then follows the game's current requested
+speed. An operator can instead set an explicit fixed target. The learned result is clamped to
+10–200. A decrease moves by at most 10% per sample and an increase by 5%, so one changing interval
+does not open or close the gate by dozens of organisms.
 
 The last hour of valid samples and the learned limits are atomically persisted in
 `<data-dir>/admission-state.json`. A restart therefore does not create a ten-minute fail-open
 window, and a reviewed promotion from `adaptive-shadow` to `adaptive` uses the shadow evidence it
-already collected. Changing the target, bounds, or safety margin deliberately starts learning
-fresh.
+already collected. Changing an explicit fixed target, the bounds, or the safety margin deliberately
+starts learning fresh. In the ordinary requested-speed policy, a slider change keeps the last
+hour's machine-budget samples and immediately recalculates their limits for the new target.
 
-The mod reports `targetTimeScale` separately from applied `timeScale`. A world deliberately set
-below the configured target contributes no sample; without this distinction, an intentional ×5
-world would look like a machine failing to hold ×10.
+The mod reports `targetTimeScale` separately from applied `timeScale`. The ordinary controller
+adopts each positive, finite requested target, even while the world is paused or before an achieved
+speed window is ready. Those heartbeats can change the target but cannot add a capacity sample.
+With an explicit fixed target, a world requested below that target contributes no sample; without
+this distinction, an intentional ×5 world could look like a machine failing to hold ×10.
+
+The local broadcast runner explicitly fixes both the game and admission targets at ×6.5.
+The participant package starts the game at ×10 but does not set a fixed admission target. If a
+participant selects ×5, the controller learns and publishes a ×5 population limit; returning to
+×10 is not required.
 
 ## Configuration
 
 ```text
 --inbound-admission                    MULTIVERSE_INBOUND_ADMISSION
 --inbound-population-limit             MULTIVERSE_INBOUND_POPULATION_LIMIT
---inbound-target-time-scale            MULTIVERSE_INBOUND_TARGET_TIME_SCALE
+--inbound-target-time-scale            MULTIVERSE_INBOUND_TARGET_TIME_SCALE (optional fixed target)
 --inbound-population-min               MULTIVERSE_INBOUND_POPULATION_MIN
 --inbound-population-max               MULTIVERSE_INBOUND_POPULATION_MAX
 --inbound-population-hysteresis        MULTIVERSE_INBOUND_POPULATION_HYSTERESIS
@@ -142,6 +151,12 @@ health evidence, fixed fallbacks, and rollback conditions must be recorded below
 The peer stats block, `/api/status`, archived `metrics.jsonl`, the settings card, and local
 `multiverse-sidecar --my-slot` view publish the mode, target, estimate, effective limit, committed
 load, sample count, closed/enforcing state, and rejection total.
+
+The map shows `OPEN · WAITING ×n` when an explicitly fixed admission target is above the
+requested speed. Under the ordinary policy, the displayed admission target follows the requested
+speed, so selecting ×5 does not produce a ×10 waiting state. It shows
+`OPEN · TARGET UNKNOWN` when the world does not report its requested speed. These states identify
+why the sample count does not increase.
 
 The live map deliberately distinguishes an **offer** from a **delivery**. A lane's numeric rate and
 recorded migration count come from copied `MIGRATION_PAYLOAD` offers, so they can continue rising
@@ -227,6 +242,12 @@ rollback.
 
 - Unit tests cover robust estimation, shadow non-enforcement, fixed hysteresis, target mismatch,
   directional next-world walking, source skipping, and refusal-set skipping.
+- On 2026-08-30, requested-target regressions proved that an ordinary ×5 participant heartbeat
+  learns and publishes a ×5 limit, a paused slider change immediately reapplies retained budget
+  samples without adding one, valid flag and environment overrides remain fixed, an invalid
+  environment value remains omitted, and persisted ×5 state restores only under the following
+  policy. The full Go vet/test suite, Windows and Linux sidecar cross-builds, tracked Markdown link
+  check, release-link test, runtime-rule test, and release-version consistency check passed.
 - The integration test `TestLivePopulationRefusalSpillsToNextUntriedWorld` creates three live
   worlds: the first sends east, the second refuses at its fixed population limit, and the third
   spawns the same migration exactly once. The source journal records slot 2 in `refusedSlots` and

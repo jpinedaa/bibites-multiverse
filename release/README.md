@@ -324,16 +324,16 @@ the owner's machine rather than on a hosted runner.
 `make-release.sh` still publishes nothing. Publication is `.github/workflows/release.yml`, and a
 `v*` tag on `main` is what starts it.
 
-Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
-untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is green for this release at mod `0.6.8`, recorded on 2026-08-26. The tested-build
-source is commit `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. Its Go tree is identical to PR116
-commit `5850cdbcb7a9148a93147a700674c593b82db872`. PR116 passed the uncached host build and the full
-Go and race suites. It also passed host and Windows vet, formatting, `deploy/test-coldcopy.sh`,
-and every shipped cross-build. The final sidecars carry the tested-build source revision and
-`vcs.modified=false`. No PR116 binary ran live. The completed Slot 7 live observation used release
-`b1a29c66d392cd5bb24c341fa7135ef62691f14b`, not PR116. The unchanged plugin rebuilt
-byte-identically and matches the plugin installed in the release machine's tested game.
+Settle the tested build first. `release/check-drift.sh` must pass before you create a tag.
+An untested tree stops the release build after the game payload is staged.
+
+The record is current at mod `0.6.8` and exact source `ab9cdeb3a85c6ef237b02f659ac485374a678f9c`.
+The full Go suite and both sidecar cross-builds passed on 2026-08-30.
+Both binaries have the clean source stamp and `vcs.modified=false`.
+
+A clean Linux sidecar connected to the supported Windows game at requested ×5.
+The adaptive-shadow admission target changed to ×5. The unchanged plugin passed the M1 auto-test.
+The plugin rebuilt byte-identically and matches the plugin in the release-machine game.
 
 **Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
 compares three copies of the plugin — the one this tree builds, the one the record names, and the

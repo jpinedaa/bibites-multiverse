@@ -50,7 +50,9 @@ fail() {
 
 expect_text "$runner" "MULTIVERSE_BROADCAST_ZOOM = '250'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_HIDE_UI = 'false'"
-expect_text "$runner" "MULTIVERSE_BROADCAST_TIME_SCALE = '6.5'"
+expect_text "$runner" "\$broadcastTimeScale = '6.5'"
+expect_text "$runner" 'MULTIVERSE_INBOUND_TARGET_TIME_SCALE = $broadcastTimeScale'
+expect_text "$runner" 'MULTIVERSE_BROADCAST_TIME_SCALE = $broadcastTimeScale'
 expect_text "$runner" "MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_SHOW_FOV = 'true'"

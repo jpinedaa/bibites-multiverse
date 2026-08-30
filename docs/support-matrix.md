@@ -30,7 +30,7 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. PR116 commit `5850cdb` passed the uncached build and test gates and its Windows cross-build on 2026-08-26. No PR116 binary ran live. The completed Slot 7 live observation used release `b1a29c6` |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit `ab9cdeb` passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested ×5. The admission target changed to ×5. The unchanged plugin passed the M1 auto-test with zero Unity errors. |
 | **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. PR116 commit `5850cdb` passed the uncached build and test gates and its Linux amd64 cross-build on 2026-08-26. No PR116 binary ran live |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.8` |
 | `BibitesMultiverse.dll` SHA-256 | `c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc` |
 | `bibites-mod/` tree | `27baa92d9c66c043465d4dac3e736c25dcb2e8a0` |
-| `cmd/sidecar` source commit | `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d` |
-| `cmd/sidecar` input digest | `0bcc4fdf22dc598d1f0ee870e5e16183abc1b8bea4453363e67d65849ee8c1d9` |
-| Tested on | 2026-08-26 |
+| `cmd/sidecar` source commit | `ab9cdeb3a85c6ef237b02f659ac485374a678f9c` |
+| `cmd/sidecar` input digest | `183420732fab5e7ab3f4444d4ba0c9fec6cf67ac626c25340bcfe767e2039a4a` |
+| Tested on | 2026-08-30 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -209,22 +209,19 @@ a sidecar change that never reached a tested binary — and it does not prove th
 The `evidence` sentence is where the run is described, and it is written by the person who ran it.
 
 **`Tested on` is the date of the most recent leg, not of every value above it.** The sidecar
-changes far more often than the mod, so a re-record often re-attests only the sidecar half while
-the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
-as the `evidence` sentence says which leg proved what — and it must, including when the run
-happened on a host whose game or mod is not the one this matrix names. The current record
-re-attests the PR116 Go inputs at commit `4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d` after the
-PR117 comment-only change. The Go tree is identical at commits
-`5850cdbcb7a9148a93147a700674c593b82db872` and
-`4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. On 2026-08-26, the uncached host build and the full
-uncached Go suite passed at commit `5850cdbcb7a9148a93147a700674c593b82db872`. The uncached race
-suite also passed. Host and Windows vet, formatting, the 69-case cold-copy suite, and all shipped
-cross-builds passed. The final sidecars came from a clean standalone checkout at commit
-`4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d`. They carry that revision and
-`vcs.modified=false`. No live runtime exercise used a PR116 binary. The completed Slot 7 live
-observation used release `b1a29c66d392cd5bb24c341fa7135ef62691f14b`, not PR116. The unchanged
-plugin rebuilt byte-identically and matches the plugin in the release machine's game. Its live
-Windows and Linux evidence remains the controlled deployment from 2026-08-23.
+changes more often than the mod. Thus, a new record can re-attest only the sidecar inputs.
+
+The current record covers exact commit `ab9cdeb3a85c6ef237b02f659ac485374a678f9c`.
+The full Go suite and both sidecar cross-builds passed on 2026-08-30.
+Both binaries have the clean commit stamp and `vcs.modified=false`.
+
+A clean Linux sidecar connected to the supported Windows game and mod `0.6.8`.
+The game requested ×5. The adaptive-shadow admission target changed to ×5.
+The sidecar reported population 10, achieved speed ×5, and one valid sample.
+The unchanged plugin completed the M1 auto-test with zero Unity errors.
+
+The plugin rebuilt byte-identically and matches the plugin in the release-machine game.
+The controlled deployments from 2026-08-23 remain the live Windows and Linux game evidence.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -278,10 +275,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
     "bibitesModTree": "27baa92d9c66c043465d4dac3e736c25dcb2e8a0",
-    "sidecarSourceCommit": "4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d",
-    "sidecarInputsSha256": "0bcc4fdf22dc598d1f0ee870e5e16183abc1b8bea4453363e67d65849ee8c1d9",
-    "testedOn": "2026-08-26",
-    "evidence": "Commit 4ea7f08822c04afc4c9c653f63b9c04b1c6ae38d matches 5850cdbcb7a9148a93147a700674c593b82db872 in go/ and has clean-stamped sidecars after build and test gates passed without live execution, while Slot 7 used release b1a29c66d392cd5bb24c341fa7135ef62691f14b."
+    "sidecarSourceCommit": "ab9cdeb3a85c6ef237b02f659ac485374a678f9c",
+    "sidecarInputsSha256": "183420732fab5e7ab3f4444d4ba0c9fec6cf67ac626c25340bcfe767e2039a4a",
+    "testedOn": "2026-08-30",
+    "evidence": "Exact commit ab9cdeb passed the full Go suite and both cross-builds. Its Linux sidecar ran with the supported Windows game and mod 0.6.8 on 2026-08-30. A live x5 heartbeat set the adaptive-shadow target to x5. The unchanged plugin passed the M1 auto-test with zero Unity errors."
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -298,7 +295,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in five worlds on 2026-08-23. PR116 commit 5850cdb passed the uncached build and test gates and its Windows cross-build on 2026-08-26. No PR116 binary ran live. The completed Slot 7 live observation used release b1a29c6"
+      "tested": "the unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit ab9cdeb passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested x5. The admission target changed to x5. The unchanged plugin passed the M1 auto-test with zero Unity errors"
     },
     {
       "gameVersion": "0.6.3.1",

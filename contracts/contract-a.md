@@ -733,7 +733,7 @@ timer that does not depend on the simulation. A paused sim still heartbeats. See
 | `eggCount` | number (int) | no | Live egg count. It is reported separately for ecology and species-census reconciliation; the living-population admission gate counts bibites, not eggs. |
 | `paused` | bool | yes | `TimeController.paused`. While `true` the sidecar **MUST NOT** count a missing `MIGRATE_IN_ACK` against the mod. |
 | `timeScale` | float | yes | The effective time scale. `0` means stopped. |
-| `targetTimeScale` | float | no | The game's current requested speed (`TimeController.targetTimeScale`), before the minimum-FPS governor lowers the applied `timeScale`. Added for population-capacity estimation: a world deliberately configured for ×5 **MUST NOT** be treated as a machine failing to achieve ×10. Absent means unknown and contributes no adaptive sample. |
+| `targetTimeScale` | float | no | The game's current requested speed (`TimeController.targetTimeScale`), before the minimum-FPS governor lowers the applied `timeScale`. Added for population-capacity estimation: a world deliberately configured for ×5 **MUST NOT** be treated as a machine failing to achieve ×10. Unless an operator explicitly fixes `inboundTargetTimeScale`, the sidecar adopts each positive finite value as the adaptive target (amended — §22, A53). Absent means unknown and contributes no adaptive sample. |
 | `simulationSize` | float | yes | `S`, read live. A change here **MUST** make the sidecar re-check peer agreement, exactly as a `CONFIG_UPDATE` would. This is the belt to `CONFIG_UPDATE`'s braces, because `SimulationSize` is live-mutable (`m2_findings.md` §2.4). |
 | `inFlightOut` | number (int) | no | How many `MIGRATE_OUT`s the mod is currently waiting on. Useful for diagnosing a stuck custody chain. |
 | `pendingIn` | number (int) | no | How many `MIGRATE_IN`s are queued in the mod but not yet spawned — **including frames still unparsed in the transport queue** under §5.7's ingest budget, so the sidecar's pacing sees the whole backlog, not the parsed part of it (amended — §15, A29). |
@@ -2022,7 +2022,7 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `inboundQueueMax` | `64` | sidecar | Un-delivered journal entries before inbound admission control kicks in. |
 | `inboundAdmission` | `adaptive-shadow` | sidecar | Pre-custody population policy: `off`, `fixed`, `adaptive-shadow`, or `adaptive` (`--inbound-admission` / `MULTIVERSE_INBOUND_ADMISSION`). Shadow is the rollout default: it learns and publishes the same decision as adaptive, but refuses nothing. |
 | `inboundPopulationLimit` | unset | sidecar | Living-population ceiling used by `fixed` mode (`--inbound-population-limit` / `MULTIVERSE_INBOUND_POPULATION_LIMIT`). A fixed mode without a positive value is a startup error. |
-| `inboundTargetTimeScale` | `10` | sidecar | Achieved speed the adaptive estimator sizes for (`--inbound-target-time-scale` / `MULTIVERSE_INBOUND_TARGET_TIME_SCALE`). |
+| `inboundTargetTimeScale` | requested speed (initial `10`) | sidecar | Achieved speed the adaptive estimator sizes for (amended — §22, A53). With neither `--inbound-target-time-scale` nor `MULTIVERSE_INBOUND_TARGET_TIME_SCALE`, the target follows positive finite `HEARTBEAT.targetTimeScale`; `10` is only its value before the first such heartbeat. Supplying either knob fixes the target at that value, and a world requested below it contributes no capacity sample. |
 | `inboundPopulationMin` / `inboundPopulationMax` | `10` / `200` | sidecar | Bounds on an adaptive estimate. The estimator samples at most once a wall-clock minute, takes the median of the last hour's `population × achievedTimeScale` machine budgets after ten valid samples, applies a 0.90 safety margin, and divides by the target. |
 | `inboundPopulationHysteresis` | `5` | sidecar | Once closed, the population gate reopens only at `limit − 5`, preventing one birth/death around the boundary from chattering the portal. |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Bounds custody reassertion (§7.4). |
@@ -5171,3 +5171,36 @@ upgrade has lost an organism to bookkeeping (D2).
 only the major, exactly as A23 requires — and the sidecar additionally owns the retired
 `/contract-a/v1` and its `4000`, which A47's token does not change, because a peer that cannot
 complete a handshake should still learn why (§15, A23).
+
+---
+
+## 22. The admission target follows requested speed (`contract-a/2.4`, 2026-08-30)
+
+This amendment changes one sidecar-local default policy. It adds no field, message, enum, close
+code or NACK code, so the protocol identifier and `/contract-a/v2` path do not move.
+
+### A53 — An omitted admission-target override follows `HEARTBEAT.targetTimeScale` (§5.2, §10)
+
+**Gap.** The heartbeat already separates requested speed from achieved speed so a deliberate ×5
+world is not mistaken for a machine failing to achieve ×10. The sidecar nevertheless initialized
+`inboundTargetTimeScale` to ×10 as a fixed value, whether or not the operator supplied its knob.
+A participant who moved the game slider to ×5 therefore remained `WAITING ×10` and collected no
+population-capacity samples. The wire carried the right fact and the default policy ignored it.
+
+**Resolution.** The sidecar distinguishes omission from an explicit override:
+
+| Case | Required behavior |
+|---|---|
+| Neither target knob is supplied | Start at ×10, then adopt every positive finite `HEARTBEAT.targetTimeScale`. The active target published in peer stats changes with it. |
+| `--inbound-target-time-scale` or `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` is supplied | Keep that fixed target. A requested speed below it contributes no sample, preserving the controlled-host policy. |
+| The requested target changes | Recalculate the estimate and effective limit immediately from the retained `population × achievedTimeScale` budget samples. Do not wait for another ten samples and do not carry a limit divided by the old target. |
+| The world is paused or the achieved-speed window is not ready | Adopt the new requested target, but add no capacity sample. Target selection and capacity evidence are separate decisions. |
+| The sidecar restarts | Restore the positive persisted target and budget samples in requested-speed mode, then reapply them when the next heartbeat reports the current requested target. An explicitly fixed target still rejects persisted state recorded for a different target and learns fresh. |
+
+**Why this is not a wire capability.** `targetTimeScale` has carried the needed value since the
+population controller was introduced, and peer stats already carry the active admission target.
+Only the receiver's choice of default changed. A peer detects nothing by protocol-version
+arithmetic, so spending a minor would claim a field exists when none was added.
+
+**Enforced by:** the sidecar. The mod keeps reporting the requested and applied speeds separately
+and needs no change.

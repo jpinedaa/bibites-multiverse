@@ -272,6 +272,9 @@ checked on every write, so any other edit, and any start, is refused until that 
 | `MULTIVERSE_SAVE_ON_QUIT` | `saveOnQuit` | `true` | Your world is written out when the game closes |
 | `MULTIVERSE_STARTUP_TIME_SCALE` | not in the profile | `10` | Your world starts at x10 rather than the game's own x1. It is a target: the game holds the speed down to keep your frame rate up, so a slower machine runs slower and stays smooth. The speed slider in the game moves it for a session; `off` here means the game's own x1 |
 
+The population learner follows the speed you select in the game. A world at x5 learns an x5
+population limit; it does not have to return to x10.
+
 ## Uninstall
 
 For a setup installation, open **Windows Settings → Apps → Installed apps** and remove

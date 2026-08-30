@@ -2084,9 +2084,23 @@ function admissionView(v){
   var committed = v.admissionCommitted == null ? "unknown" : v.admissionCommitted;
   var target = v.admissionTargetTimeScale == null ? "?" : fmtScale(v.admissionTargetTimeScale);
   if (limit == null){
+    if (v.targetTimeScale == null){
+      return {cls:"learning", label:"OPEN · TARGET UNKNOWN", short:
+        "requested speed unknown ("+samples+" samples)", detail:
+        "population gate is fail-open because the world does not report its requested speed ("+
+        samples+" valid samples, admission target ×"+target+")"};
+    }
+    if (v.admissionTargetTimeScale != null &&
+        v.targetTimeScale + 0.01 < v.admissionTargetTimeScale){
+      var requested = fmtScale(v.targetTimeScale);
+      return {cls:"learning", label:"OPEN · WAITING ×"+target, short:
+        "waiting for requested ×"+target+" (current ×"+requested+", "+samples+" samples)", detail:
+        "population gate is fail-open because sampling waits for requested speed ×"+target+
+        " (current target ×"+requested+", "+samples+" valid samples)"};
+    }
     return {cls:"learning", label:"OPEN · LEARNING", detail:
       "population gate is fail-open while the adaptive limit learns ("+samples+
-      " valid samples, target ×"+target+")"};
+      " valid samples, target ×"+target+")", short:"learning ("+samples+" samples)"};
   }
   var estimate = v.admissionEstimatedLimit == null ? "unknown" : v.admissionEstimatedLimit;
   var common = "effective population limit "+limit+", committed "+committed+
@@ -4772,7 +4786,7 @@ function settingsCard(v){
     admission.appendChild(txt("off"));
   } else {
     var admissionLimit = v.admissionPopulationLimit == null
-      ? "learning (" + (v.admissionSampleCount || 0) + " samples)"
+      ? admissionView(v).short
       : "limit " + v.admissionPopulationLimit + " for ×" + fmtScale(v.admissionTargetTimeScale);
     if (v.admissionEstimatedLimit != null){
       admissionLimit += ", latest raw estimate " + v.admissionEstimatedLimit;
