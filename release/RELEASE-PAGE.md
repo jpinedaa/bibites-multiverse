@@ -5,17 +5,15 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-- **A relay queue refusal cannot fill the sender's custody journal forever.** Contract B 4.2 binds
-  the refusal to one relay session, destination, and reroute attempt. The sender then continues in
-  the original direction to a compatible world that it has not tried.
-- **The refusal walk is durable and bounded.** Restart, reconnect, replay, compaction, and a stale
-  or repeated refusal cannot reset the tried destinations or deadline. The migration bounces once
-  when no safe destination remains.
-- **At-most-once delivery remains the rule.** The sender records an attempt before it can enter the
-  socket. A crash can lose that migration, but no automatic recovery can send it twice.
-- **Older peers remain compatible.** The relay endpoint stays `/contract-b/v4`, and the hosted
-  minimum version does not change. A 4.0 or 4.1 peer can still join; it does not use the new exact
-  queue-refusal progress.
+- **Population learning follows your selected game speed.** If you move the speed slider from ×10
+  to ×5, the default admission learner now targets ×5. You do not have to return to ×10.
+- **A speed change keeps useful evidence.** The sidecar retains its last hour of machine-budget
+  samples and immediately recalculates the population limit for the new requested speed.
+- **Explicit operator targets stay fixed.** `--inbound-target-time-scale` and
+  `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` still override the slider when a map operator needs one
+  fixed target.
+- **The plugin and protocols do not change.** This release keeps mod `0.6.8`, Contract A 2.4,
+  Contract B 4.2, and the same at-most-once migration rule.
 
 ## Upgrading from an earlier release
 
@@ -24,10 +22,12 @@ Your game and saves stay on your computer.
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **Do not clear the journal.** Existing queue entries, identities, and saves remain in place. A
-  4.2 relay gives the upgraded sidecar the exact proof it needs to advance an old refused entry.
-- **No admission setting is required.** The default remains non-enforcing shadow mode. Existing
-  population settings and learned state continue unchanged.
+- **Do not clear the journal or admission state.** Existing queue entries, identities, saves,
+  budget samples, and learned limits remain in place.
+- **No admission setting is required.** The default remains non-enforcing shadow mode. After the
+  next heartbeat, its target follows the speed selected in the game.
+- **Keep a fixed target only when you chose one.** An explicit command-line or environment target
+  remains fixed after the upgrade.
 
 ## What you need
 

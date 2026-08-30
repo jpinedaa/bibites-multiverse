@@ -1,8 +1,8 @@
 # Project status
 
-Last updated: 2026-08-25 UTC.
+Last updated: 2026-08-30 UTC.
 
-Bibites Multiverse `0.3.7` is public. The first announced service period runs from
+Bibites Multiverse `0.3.8` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -93,9 +93,10 @@ each entry once to a different destination.
 
 Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` endpoint. The
 hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
-already speak 4.2 at exact source `c9e4f3a`. The controlled slot 7 and cloud-world sidecar updates
-remain planned. This relay-first order means an old participant can omit the new proof, but no new
-participant must guess whether a refusal belongs to its current attempt.
+already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the requested-speed sidecar. The six
+cloud-world sidecars await the same update. This relay-first order means an old participant can
+omit the new proof, but no new participant must guess whether a refusal belongs to its current
+attempt.
 
 The controlled rollout preflight stopped before it changed a service. The service host has less
 free space than the required deployment and replay margin. Every closed raw segment is still
@@ -251,7 +252,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. The controlled slot 7 and cloud-world sidecar updates remain planned. |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the requested-speed sidecar. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
@@ -279,7 +280,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.7`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.7) |
+| Release | [`v0.3.8`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.8) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -360,6 +361,9 @@ Release `0.3.7` prevents exact relay queue refusals from filling all 64 outbound
 Contract B 4.2 identifies the refused attempt, and the participant records a bounded same-axis walk
 before it tries another compatible destination. The journal remains the custody record throughout
 an upgrade; no identity, save, or queued organism is cleared.
+Release `0.3.8` makes the ordinary population-admission learner follow the speed selected in the
+game. A slider change keeps the last hour of machine-budget samples and immediately recalculates
+their limits for the new target. An explicit command-line or environment target remains fixed.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
