@@ -200,11 +200,63 @@ stack_parameter() {
   ' <<<"$description"
 }
 
+resolved_operational_parameter() {
+  local operational_key="$1" fallback_key="$2" ambient_name="$3"
+  local values count value source ambient_value
+  values="$(jq -c --arg key "$operational_key" '
+    [.Stacks[0].Parameters[] |
+      select(.ParameterKey == $key) | .ParameterValue]
+  ' <<<"$description")" || return 1
+  count="$(jq -r 'length' <<<"$values")" || return 1
+  case "$count" in
+    0)
+      values="$(jq -c --arg key "$fallback_key" '
+        [.Stacks[0].Parameters[] |
+          select(.ParameterKey == $key) | .ParameterValue]
+      ' <<<"$description")" || return 1
+      count="$(jq -r 'length' <<<"$values")" || return 1
+      case "$count" in
+        0)
+          value="${!ambient_name:-}"
+          [ -n "$value" ] || {
+            echo "stack has no $fallback_key parameter; set $ambient_name" >&2
+            return 1
+          }
+          printf '%s\n' "$value"
+          return 0
+          ;;
+        1) source="$fallback_key" ;;
+        *)
+          echo "stack has duplicate $fallback_key parameters" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    1) source="$operational_key" ;;
+    *)
+      echo "stack has duplicate $operational_key parameters" >&2
+      return 1
+      ;;
+  esac
+  value="$(jq -er '.[0] | select(type == "string" and length > 0)' \
+    <<<"$values")" || {
+    echo "stack $source parameter is empty or invalid" >&2
+    return 1
+  }
+  ambient_value="${!ambient_name:-}"
+  if [ -n "$ambient_value" ] && [ "$ambient_value" != "$value" ]; then
+    echo "$ambient_name differs from the stack $source parameter" >&2
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
 instance="$(stack_output InstanceId)"
 volume="$(stack_output DataVolumeId)"
 stack_artifact_bucket="$(stack_parameter ArtifactBucket)"
 stack_artifact_prefix="$(stack_parameter ArtifactPrefix)"
-relay_private_ip="$(stack_parameter RelayPrivateIp)"
+relay_private_ip="$(resolved_operational_parameter \
+  OperationalRelayPrivateIp RelayPrivateIp BIBITES_RELAY_PRIVATE_IP)"
 
 bibites_require_s3_bucket "$stack_artifact_bucket" \
   'ArtifactBucket stack parameter'
@@ -216,69 +268,11 @@ bibites_require_s3_prefix "$stack_artifact_prefix" \
   exit 1
 }
 
-relay_domain_parameters="$(jq -c '
-  [.Stacks[0].Parameters[] |
-    select(.ParameterKey == "RelayDomain") | .ParameterValue]
-' <<<"$description")"
-relay_domain_count="$(jq -r 'length' <<<"$relay_domain_parameters")"
-case "$relay_domain_count" in
-  0)
-    relay_domain="${BIBITES_RELAY_DOMAIN:-}"
-    [ -n "$relay_domain" ] || {
-      echo 'stack has no RelayDomain parameter; set BIBITES_RELAY_DOMAIN' >&2
-      exit 1
-    }
-    ;;
-  1)
-    relay_domain="$(jq -er '
-      .[0] | select(type == "string" and length > 0)
-    ' <<<"$relay_domain_parameters")" || {
-      echo 'stack RelayDomain parameter is empty or invalid' >&2
-      exit 1
-    }
-    if [ -n "${BIBITES_RELAY_DOMAIN:-}" ] &&
-       [ "$BIBITES_RELAY_DOMAIN" != "$relay_domain" ]; then
-      echo 'BIBITES_RELAY_DOMAIN differs from the stack RelayDomain parameter' >&2
-      exit 1
-    fi
-    ;;
-  *)
-    echo 'stack has duplicate RelayDomain parameters' >&2
-    exit 1
-    ;;
-esac
-
-credential_prefix_parameters="$(jq -c '
-  [.Stacks[0].Parameters[] |
-    select(.ParameterKey == "CredentialParameterPrefix") | .ParameterValue]
-' <<<"$description")"
-credential_prefix_count="$(jq -r 'length' <<<"$credential_prefix_parameters")"
-case "$credential_prefix_count" in
-  0)
-    credential_parameter_prefix="${BIBITES_CREDENTIAL_PARAMETER_PREFIX:-}"
-    [ -n "$credential_parameter_prefix" ] || {
-      echo 'stack has no CredentialParameterPrefix parameter; set BIBITES_CREDENTIAL_PARAMETER_PREFIX' >&2
-      exit 1
-    }
-    ;;
-  1)
-    credential_parameter_prefix="$(jq -er '
-      .[0] | select(type == "string" and length > 0)
-    ' <<<"$credential_prefix_parameters")" || {
-      echo 'stack CredentialParameterPrefix parameter is empty or invalid' >&2
-      exit 1
-    }
-    if [ -n "${BIBITES_CREDENTIAL_PARAMETER_PREFIX:-}" ] &&
-       [ "$BIBITES_CREDENTIAL_PARAMETER_PREFIX" != "$credential_parameter_prefix" ]; then
-      echo 'BIBITES_CREDENTIAL_PARAMETER_PREFIX differs from the stack CredentialParameterPrefix parameter' >&2
-      exit 1
-    fi
-    ;;
-  *)
-    echo 'stack has duplicate CredentialParameterPrefix parameters' >&2
-    exit 1
-    ;;
-esac
+relay_domain="$(resolved_operational_parameter \
+  OperationalRelayDomain RelayDomain BIBITES_RELAY_DOMAIN)"
+credential_parameter_prefix="$(resolved_operational_parameter \
+  OperationalCredentialParameterPrefix CredentialParameterPrefix \
+  BIBITES_CREDENTIAL_PARAMETER_PREFIX)"
 
 bibites_require_resource_id "$instance" 'InstanceId stack output' i
 bibites_require_resource_id "$volume" 'DataVolumeId stack output' vol

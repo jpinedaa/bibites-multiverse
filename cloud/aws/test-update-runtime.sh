@@ -123,6 +123,22 @@ case "$joined" in
         {"ParameterKey":"RelayPrivateIp","ParameterValue":"10.1.2.3"},
         {"ParameterKey":"RelayDomain","ParameterValue":"relay.example.test"},
         {"ParameterKey":"CredentialParameterPrefix","ParameterValue":"/bibites/cloud"}]'
+    elif [ "$MOCK_SCENARIO" = operational_metadata ] ||
+         [ "$MOCK_SCENARIO" = operational_duplicate ]; then
+      relay_parameters='[
+        {"ParameterKey":"ArtifactBucket","ParameterValue":"fixture-artifacts"},
+        {"ParameterKey":"ArtifactPrefix","ParameterValue":"cloud/v1"},
+        {"ParameterKey":"RelayPrivateIp","ParameterValue":"10.1.2.3"},
+        {"ParameterKey":"RelayDomain","ParameterValue":"old-relay.example.test"},
+        {"ParameterKey":"CredentialParameterPrefix","ParameterValue":"/old/prefix"},
+        {"ParameterKey":"OperationalRelayPrivateIp","ParameterValue":"10.9.8.7"},
+        {"ParameterKey":"OperationalRelayDomain","ParameterValue":"relay.example.test"},
+        {"ParameterKey":"OperationalCredentialParameterPrefix","ParameterValue":"/bibites/cloud"}]'
+      if [ "$MOCK_SCENARIO" = operational_duplicate ]; then
+        relay_parameters="$(jq -c \
+          '. + [{ParameterKey:"OperationalRelayPrivateIp",ParameterValue:"10.9.8.6"}]' \
+          <<<"$relay_parameters")"
+      fi
     else
       relay_parameters='[
         {"ParameterKey":"ArtifactBucket","ParameterValue":"fixture-artifacts"},
@@ -194,7 +210,7 @@ case "$joined" in
     ;;
   *' ssm get-command-invocation '*)
     case "$MOCK_SCENARIO" in
-      success|legacy_domain|legacy_prefix|execute_remote)
+      success|legacy_domain|legacy_prefix|operational_metadata|execute_remote)
         printf '%s\n' '{"Status":"Success","ResponseCode":0,
           "StandardOutputContent":"transaction complete","StandardErrorContent":""}'
         ;;
@@ -261,6 +277,7 @@ run_case() {
     MOCK_RUNTIME_SHA="$runtime_sha" MOCK_REMOTE_ROOT="$remote_runtime_root" \
     MOCK_TRANSACTION_LOG="$transaction_log" MOCK_REMOTE_OUTPUT="$remote_output" \
     BIBITES_RELAY_DOMAIN="${BIBITES_TEST_RELAY_DOMAIN:-}" \
+    BIBITES_RELAY_PRIVATE_IP="${BIBITES_TEST_RELAY_IP:-}" \
     BIBITES_CREDENTIAL_PARAMETER_PREFIX="${BIBITES_TEST_CREDENTIAL_PREFIX:-}" \
     RUNTIME_SHA256="${BIBITES_TEST_AMBIENT_RUNTIME_SHA256:-}" \
     MANIFEST_PREIMAGE_ETAG="${BIBITES_TEST_AMBIENT_MANIFEST_PREIMAGE_ETAG:-}" \
@@ -294,6 +311,49 @@ done
 if grep -Fq "$raw_secret_canary" "$command_log" ||
    grep -Fq "$raw_secret_canary" <<<"$success_output"; then
   echo 'raw pointer credential escaped into command metadata or output' >&2
+  exit 1
+fi
+
+# A reconciled legacy stack keeps its bootstrap relay values unchanged and
+# stores the current runtime target in dedicated operational parameters.
+: >"$aws_log"
+: >"$command_log"
+operational_output="$(run_case operational_metadata 2>&1)"
+grep -Fq 'transaction complete' <<<"$operational_output"
+for expected in 10.9.8.7 relay.example.test /bibites/cloud; do
+  grep -Fq "$expected" "$command_log"
+done
+for stale in 10.1.2.3 old-relay.example.test /old/prefix; do
+  if grep -Fq "$stale" "$command_log"; then
+    echo "runtime command used stale legacy metadata: $stale" >&2
+    exit 1
+  fi
+done
+
+: >"$aws_log"
+set +e
+operational_mismatch_output="$(BIBITES_TEST_RELAY_IP=10.1.2.3 \
+  run_case operational_metadata 2>&1)"
+operational_mismatch_status=$?
+set -e
+[ "$operational_mismatch_status" -ne 0 ]
+grep -Fq 'BIBITES_RELAY_PRIVATE_IP differs from the stack OperationalRelayPrivateIp parameter' \
+  <<<"$operational_mismatch_output"
+if grep -Fq 'ssm send-command' "$aws_log"; then
+  echo 'operational relay-IP disagreement reached host mutation' >&2
+  exit 1
+fi
+
+: >"$aws_log"
+set +e
+operational_duplicate_output="$(run_case operational_duplicate 2>&1)"
+operational_duplicate_status=$?
+set -e
+[ "$operational_duplicate_status" -ne 0 ]
+grep -Fq 'stack has duplicate OperationalRelayPrivateIp parameters' \
+  <<<"$operational_duplicate_output"
+if grep -Fq 'ssm send-command' "$aws_log"; then
+  echo 'duplicate operational metadata reached host mutation' >&2
   exit 1
 fi
 

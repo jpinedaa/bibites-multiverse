@@ -23,10 +23,29 @@ bibites_require_change_set_parameter() {
   }
 }
 
+bibites_require_change_set_preserved_parameter() {
+  local description="$1" key="$2" expected="$3"
+  jq -e --arg key "$key" --arg expected "$expected" '
+    [.Parameters[] | select(.ParameterKey == $key)] |
+    if length != 1 then
+      error("missing or duplicate preserved change-set parameter " + $key)
+    elif .[0].UsePreviousValue == true then
+      (.[0].ParameterValue? // $expected) == $expected
+    else
+      .[0].ParameterValue == $expected
+    end
+  ' <<<"$description" >/dev/null || {
+    bibites_validation_error \
+      "change-set parameter $key does not preserve the validated stack value"
+    return 1
+  }
+}
+
 bibites_change_set_summary() {
-  jq '{
+  local description="$1" expected_type="$2"
+  jq --arg expected_type "$expected_type" '{
     changeSetName: .ChangeSetName,
-    type: .ChangeSetType,
+    type: $expected_type,
     status: .Status,
     changes: [
       .Changes[]?.ResourceChange |
@@ -34,10 +53,11 @@ bibites_change_set_summary() {
         action: .Action,
         logicalResourceId: .LogicalResourceId,
         resourceType: .ResourceType,
-        replacement: (.Replacement // "NotApplicable")
+        replacement: (.Replacement // "NotApplicable"),
+        scope: (.Scope // [])
       }
     ]
-  }' <<<"$1"
+  }' <<<"$description"
 }
 
 bibites_legacy_attachment_mode() {
@@ -122,10 +142,18 @@ bibites_live_host_launch_template_binding() {
 }
 
 bibites_require_safe_host_change_set() {
-  local description="$1"
-  jq -e '
+  local description="$1" expected_type="$2" legacy_mode="$3"
+  case "$expected_type:$legacy_mode" in
+    CREATE:false|UPDATE:false|UPDATE:true) ;;
+    *)
+      bibites_validation_error 'invalid expected change-set type or legacy mode'
+      return 1
+      ;;
+  esac
+  jq -e --arg expected_type "$expected_type" --argjson legacy_mode "$legacy_mode" '
     .Status == "CREATE_COMPLETE" and
-    if .ChangeSetType == "CREATE" then
+    (.ChangeSetType? // $expected_type) == $expected_type and
+    if $expected_type == "CREATE" then
       ([.Changes[]?.ResourceChange | .LogicalResourceId] | sort) ==
         (["DataVolume", "Host", "HostLaunchTemplate", "HostProfile",
           "HostRole", "HostSecurityGroup"] | sort) and
@@ -141,8 +169,25 @@ bibites_require_safe_host_change_set() {
          (.LogicalResourceId == "HostRole" and .ResourceType == "AWS::IAM::Role") or
          (.LogicalResourceId == "HostSecurityGroup" and
           .ResourceType == "AWS::EC2::SecurityGroup")))
-    elif .ChangeSetType == "UPDATE" then
-      (.Changes | length) == 1 and
+    elif $expected_type == "UPDATE" and $legacy_mode then
+      ((.Changes // []) | length) == 1 and
+      .Changes[0].ResourceChange.LogicalResourceId == "HostLaunchTemplate" and
+      .Changes[0].ResourceChange.ResourceType == "AWS::EC2::LaunchTemplate" and
+      .Changes[0].ResourceChange.Action == "Modify" and
+      (.Changes[0].ResourceChange.Replacement // "False") == "False" and
+      (.Changes[0].ResourceChange.Scope | sort) == ["Metadata"] and
+      (.Changes[0].ResourceChange.Details | length) >= 1 and
+      all(.Changes[0].ResourceChange.Details[];
+        .Target.Attribute == "Metadata" and
+        .Target.RequiresRecreation == "Never" and
+        .Evaluation == "Static" and
+        (.ChangeSource == "DirectModification" or
+         (.ChangeSource == "ParameterReference" and
+          (.CausingEntity == "OperationalRelayPrivateIp" or
+           .CausingEntity == "OperationalRelayDomain" or
+           .CausingEntity == "OperationalCredentialParameterPrefix"))))
+    elif $expected_type == "UPDATE" then
+      ((.Changes // []) | length) == 1 and
       .Changes[0].ResourceChange.LogicalResourceId == "HostLaunchTemplate" and
       .Changes[0].ResourceChange.ResourceType == "AWS::EC2::LaunchTemplate" and
       .Changes[0].ResourceChange.Action == "Modify" and
@@ -151,7 +196,7 @@ bibites_require_safe_host_change_set() {
     end
   ' <<<"$description" >/dev/null || {
     bibites_validation_error \
-      'host deployment allows only an initial stack create or one dormant launch-template update; Host, DataAttachment, DataVolume, live IAM or network, and unrelated resource changes are blocked'
+      'host deployment allows only an initial stack create, one legacy launch-template Metadata-only update, or one dormant launch-template update; Host, DataAttachment, DataVolume, live IAM or network, and unrelated resource changes are blocked'
     return 1
   }
 }
@@ -164,7 +209,7 @@ bibites_wait_change_set() {
   while (( $(date +%s) < deadline )); do
     description="$(aws --profile "$profile" --region "$region" cloudformation \
       describe-change-set --stack-name "$stack" --change-set-name "$change_set" \
-      --include-property-values --output json)" || return 2
+      --output json)" || return 2
     status="$(jq -er '.Status | select(type == "string")' <<<"$description")" || return 2
     case "$status" in
       CREATE_COMPLETE)
