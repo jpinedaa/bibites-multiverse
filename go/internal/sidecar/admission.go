@@ -60,16 +60,17 @@ type admissionDiskState struct {
 }
 
 type admissionController struct {
-	mode       string
-	fixedLimit int
-	target     float64
-	minLimit   int
-	maxLimit   int
-	hysteresis int
-	margin     float64
-	minSamples int
-	every      time.Duration
-	window     time.Duration
+	mode            string
+	fixedLimit      int
+	target          float64
+	followRequested bool
+	minLimit        int
+	maxLimit        int
+	hysteresis      int
+	margin          float64
+	minSamples      int
+	every           time.Duration
+	window          time.Duration
 
 	samples   []admissionSample
 	next      time.Time
@@ -135,17 +136,18 @@ func validateAdmissionConfig(cfg Config) error {
 
 func newAdmissionController(cfg Config) admissionController {
 	return admissionController{
-		mode:       strings.ToLower(strings.TrimSpace(cfg.InboundAdmissionMode)),
-		fixedLimit: cfg.InboundPopulationLimit,
-		target:     cfg.InboundTargetTimeScale,
-		minLimit:   cfg.InboundPopulationMin,
-		maxLimit:   cfg.InboundPopulationMax,
-		hysteresis: cfg.InboundPopulationHysteresis,
-		margin:     cfg.AdmissionSafetyMargin,
-		minSamples: cfg.AdmissionMinSamples,
-		every:      cfg.AdmissionSampleInterval,
-		window:     cfg.AdmissionSampleWindow,
-		reason:     "waiting_for_population",
+		mode:            strings.ToLower(strings.TrimSpace(cfg.InboundAdmissionMode)),
+		fixedLimit:      cfg.InboundPopulationLimit,
+		target:          cfg.InboundTargetTimeScale,
+		followRequested: cfg.InboundTargetAuto,
+		minLimit:        cfg.InboundPopulationMin,
+		maxLimit:        cfg.InboundPopulationMax,
+		hysteresis:      cfg.InboundPopulationHysteresis,
+		margin:          cfg.AdmissionSafetyMargin,
+		minSamples:      cfg.AdmissionMinSamples,
+		every:           cfg.AdmissionSampleInterval,
+		window:          cfg.AdmissionSampleWindow,
+		reason:          "waiting_for_population",
 	}
 }
 
@@ -158,18 +160,43 @@ func newAdmissionController(cfg Config) admissionController {
 func (a *admissionController) observe(now time.Time, population int, achieved,
 	requestedTarget float64, paused bool) bool {
 	a.trim(now)
+	changed := a.followRequestedTarget(requestedTarget)
 	if a.mode == AdmissionOff || paused || population <= 0 || achieved <= 0 ||
-		requestedTarget+0.01 < a.target {
-		return false
+		requestedTarget <= 0 || !wireFinite(requestedTarget) {
+		return changed
+	}
+	if !a.followRequested && requestedTarget+0.01 < a.target {
+		return changed
 	}
 	if !a.next.IsZero() && now.Before(a.next) {
-		return false
+		return changed
 	}
 	a.next = now.Add(a.every)
 	a.samples = append(a.samples, admissionSample{at: now, budget: float64(population) * achieved})
 	a.trim(now)
+	a.recalculate(false)
+	return true
+}
+
+// followRequestedTarget makes the ordinary participant default follow the
+// speed selected in the game. An explicit operator target leaves this disabled
+// and retains the fixed-target sampling gate above.
+func (a *admissionController) followRequestedTarget(requested float64) bool {
+	if !a.followRequested || requested <= 0 || !wireFinite(requested) ||
+		math.Abs(requested-a.target) <= 0.01 {
+		return false
+	}
+	a.target = requested
+	// Existing samples are machine budgets, not target-specific limits. Reapply
+	// them immediately at the new requested speed so an enforcing controller
+	// never carries a stale limit across a slider change.
+	a.recalculate(true)
+	return true
+}
+
+func (a *admissionController) recalculate(resetEffective bool) {
 	if len(a.samples) < a.minSamples {
-		return true
+		return
 	}
 	budgets := make([]float64, 0, len(a.samples))
 	for _, sample := range a.samples {
@@ -183,10 +210,10 @@ func (a *admissionController) observe(now time.Time, population int, achieved,
 	estimate := int(math.Floor(median * a.margin / a.target))
 	estimate = clampInt(estimate, a.minLimit, a.maxLimit)
 	a.estimated = estimate
-	if !a.ready {
+	if !a.ready || resetEffective {
 		a.ready = true
 		a.effective = estimate
-		return true
+		return
 	}
 	// A slowly moving control value avoids a single changing hour of ecology
 	// opening and closing the gate by dozens of organisms at once. Downward
@@ -198,7 +225,6 @@ func (a *admissionController) observe(now time.Time, population int, achieved,
 		step := maxInt(1, int(math.Ceil(float64(a.effective)*0.05)))
 		a.effective = minInt(estimate, a.effective+step)
 	}
-	return true
 }
 
 func (a *admissionController) trim(now time.Time) {
@@ -324,8 +350,16 @@ func (a *admissionController) diskState(now time.Time) admissionDiskState {
 }
 
 func (a *admissionController) restore(d admissionDiskState, now time.Time) bool {
-	if d.Schema != admissionStateSchema || d.Target != a.target || d.Minimum != a.minLimit ||
+	if d.Schema != admissionStateSchema || d.Minimum != a.minLimit ||
 		d.Maximum != a.maxLimit || d.Margin != a.margin {
+		return false
+	}
+	if a.followRequested {
+		if d.Target <= 0 || !wireFinite(d.Target) {
+			return false
+		}
+		a.target = d.Target
+	} else if d.Target != a.target {
 		return false
 	}
 	a.samples = nil

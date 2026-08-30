@@ -103,7 +103,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"hard living-population limit used by --inbound-admission=fixed; must be positive")
 	inboundTargetScale := fs.Float64("inbound-target-time-scale",
 		envFloat("MULTIVERSE_INBOUND_TARGET_TIME_SCALE", defaultAdmissionTarget),
-		"achieved simulation speed the adaptive population estimator is sized to hold (default x10)")
+		"fixed achieved simulation speed the adaptive population estimator is sized to hold. "+
+			"When omitted, the estimator follows the game's requested speed (starting at x10)")
 	inboundPopulationMin := fs.Int("inbound-population-min",
 		envInt("MULTIVERSE_INBOUND_POPULATION_MIN", defaultAdmissionMin),
 		"lowest population limit the adaptive estimator may learn")
@@ -182,6 +183,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	inboundTargetExplicit := inboundTargetWasExplicit(fs)
 
 	// THE TWO READ-ONLY COMMANDS RUN BEFORE THE LOGGER IS OPENED, and that
 	// ordering is a rule rather than a tidy-up. --log-file has an environment
@@ -254,13 +256,18 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.InboundAdmissionMode = strings.ToLower(strings.TrimSpace(*inboundAdmission))
 	cfg.InboundPopulationLimit = *inboundPopulationLimit
 	cfg.InboundTargetTimeScale = *inboundTargetScale
+	cfg.InboundTargetAuto = !inboundTargetExplicit
 	cfg.InboundPopulationMin = *inboundPopulationMin
 	cfg.InboundPopulationMax = *inboundPopulationMax
 	cfg.InboundPopulationHysteresis = *inboundPopulationHysteresis
 	cfg.Logger = logger
+	targetPolicy := "fixed"
+	if cfg.InboundTargetAuto {
+		targetPolicy = "requested"
+	}
 	logger.Info("sidecar: inbound population admission configured",
 		"mode", cfg.InboundAdmissionMode, "fixedLimit", cfg.InboundPopulationLimit,
-		"targetTimeScale", cfg.InboundTargetTimeScale,
+		"targetTimeScale", cfg.InboundTargetTimeScale, "targetPolicy", targetPolicy,
 		"adaptiveMin", cfg.InboundPopulationMin, "adaptiveMax", cfg.InboundPopulationMax,
 		"hysteresis", cfg.InboundPopulationHysteresis,
 		"note", "adaptive-shadow learns and reports but never refuses")
@@ -579,6 +586,20 @@ func parsePosition(v string) (*contractb.Position, error) {
 		return nil, fmt.Errorf("row %q is not a non-negative integer", rowStr)
 	}
 	return &contractb.Position{Col: col, Row: row}, nil
+}
+
+func inboundTargetWasExplicit(fs *flag.FlagSet) bool {
+	explicit := false
+	if raw := os.Getenv("MULTIVERSE_INBOUND_TARGET_TIME_SCALE"); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		explicit = err == nil && value > 0
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "inbound-target-time-scale" {
+			explicit = true
+		}
+	})
+	return explicit
 }
 
 func env(name, fallback string) string {

@@ -572,7 +572,8 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		// clock that jumps a day is not a rate.
 		wallNow := time.Now()
 		s.achieved.observe(sess.sessionID, wallNow, *hb.SimulatedTime)
-		if achieved, _, ok := s.achieved.rate(wallNow); ok && sess.haveTargetTimeScale {
+		achieved, _, _ := s.achieved.rate(wallNow)
+		if sess.haveTargetTimeScale {
 			admissionChanged = s.admission.observe(wallNow, sess.population, achieved,
 				sess.targetTimeScale, sess.paused)
 		}
