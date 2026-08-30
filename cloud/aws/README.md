@@ -328,7 +328,14 @@ change, and an unrelated resource change.
 Do not use a direct CloudFormation deployment to bypass these checks.
 
 For an existing stack, the wrapper reads the launch-template version from the live Host.
-It passes that exact numeric version back to CloudFormation.
+[EC2 automatically adds](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/launch-instances-from-launch-template.html)
+reserved launch-template identifier and version tags when it launches an instance from a template.
+EC2 prevents edits to those tags.
+The direct `LaunchTemplate` block can be absent after a persistent Spot instance resumes.
+In that case, the wrapper requires exactly one reserved tag pair and uses its numeric version.
+If both sources exist, they must agree.
+The wrapper rejects missing, duplicate, conflicting, or nonnumeric bindings.
+It passes the proved numeric version back to CloudFormation.
 A new stack uses launch-template version `1`.
 A template update can create a dormant launch-template version, but it cannot move the live Host
 to that version.
