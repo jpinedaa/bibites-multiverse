@@ -4,7 +4,9 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
-template="$repo/cloud/aws/template.yaml"
+modern_template="$repo/cloud/aws/template.yaml"
+legacy_template="$repo/cloud/aws/legacy-template.yaml"
+template="$modern_template"
 validation="$repo/cloud/aws/lib/validation.sh"
 host_change="$repo/cloud/aws/lib/host-change.sh"
 manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
@@ -398,9 +400,38 @@ fi
 use_legacy_attachment=false
 host_launch_template_version=1
 if [ "$stack_exists" -eq 1 ]; then
+  stack_parameter() {
+    local key="$1"
+    jq -er --arg key "$key" '
+      [.Stacks[0].Parameters[] |
+        select(.ParameterKey == $key) | .ParameterValue] |
+      if length == 1 then .[0]
+      else error("missing or duplicate stack parameter " + $key)
+      end
+    ' <<<"$stack_description"
+  }
+  require_stack_input() {
+    local key="$1" expected="$2" actual
+    actual="$(stack_parameter "$key")" || exit 1
+    [ "$actual" = "$expected" ] || {
+      echo "deployment input differs from the existing stack parameter $key" >&2
+      exit 1
+    }
+  }
+  require_stack_input InstanceType "$instance_type"
+  require_stack_input AvailabilityZone "$BIBITES_AVAILABILITY_ZONE"
+  require_stack_input SubnetId "$BIBITES_SUBNET_ID"
+  require_stack_input VpcId "$BIBITES_VPC_ID"
+  require_stack_input ArtifactBucket "$ARTIFACT_BUCKET"
+  require_stack_input ArtifactPrefix "$ARTIFACT_PREFIX"
+  require_stack_input DataVolumeGiB "$data_volume_gib"
+
   stack_resources="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
     list-stack-resources --stack-name "$stack" --output json)"
   use_legacy_attachment="$(bibites_legacy_attachment_mode "$stack_resources")"
+  if [ "$use_legacy_attachment" = true ]; then
+    template="$legacy_template"
+  fi
   host_id="$(jq -er '[.StackResourceSummaries[] | select(
     .LogicalResourceId == "Host" and .ResourceType == "AWS::EC2::Instance") |
     .PhysicalResourceId] | if length == 1 then .[0] else error("Host") end' \
@@ -459,30 +490,47 @@ aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
   "$pointer_archive" --only-show-errors
 printf '%s  %s\n' "$runtime_sha256" "$pointer_archive" | sha256sum -c - >/dev/null
 
-parameters=(
-  "ParameterKey=InstanceType,ParameterValue=$instance_type"
-  "ParameterKey=AvailabilityZone,ParameterValue=$BIBITES_AVAILABILITY_ZONE"
-  "ParameterKey=SubnetId,ParameterValue=$BIBITES_SUBNET_ID"
-  "ParameterKey=VpcId,ParameterValue=$BIBITES_VPC_ID"
-  "ParameterKey=ArtifactBucket,ParameterValue=$ARTIFACT_BUCKET"
-  "ParameterKey=ArtifactPrefix,ParameterValue=$ARTIFACT_PREFIX"
-  "ParameterKey=RuntimeObject,ParameterValue=$runtime_object"
-  "ParameterKey=RuntimeSha256,ParameterValue=$runtime_sha256"
-  "ParameterKey=GameFile,ParameterValue=$GAME_FILE"
-  "ParameterKey=GameSha256,ParameterValue=$GAME_SHA256"
-  "ParameterKey=BepInExFile,ParameterValue=$BEPINEX_FILE"
-  "ParameterKey=BepInExSha256,ParameterValue=$BEPINEX_SHA256"
-  "ParameterKey=ManifestFile,ParameterValue=$MANIFEST_OBJECT"
-  "ParameterKey=ManifestSha256,ParameterValue=$MANIFEST_SHA256"
-  "ParameterKey=DataVolumeGiB,ParameterValue=$data_volume_gib"
-  "ParameterKey=RelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
-  "ParameterKey=RelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
-  "ParameterKey=CredentialParameterPrefix,ParameterValue=$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
-  "ParameterKey=HostLaunchTemplateVersion,ParameterValue=$host_launch_template_version"
-  "ParameterKey=UseLegacyDataAttachment,ParameterValue=$use_legacy_attachment"
+legacy_previous_parameters=(
+  InstanceType AvailabilityZone SubnetId VpcId ArtifactBucket ArtifactPrefix
+  RuntimeFile RuntimeSha256 GameFile GameSha256 BepInExFile BepInExSha256
+  ManifestFile DataVolumeGiB RelayPrivateIp UbuntuAmi
 )
-if [ "$stack_exists" -eq 1 ]; then
-  parameters+=("ParameterKey=UbuntuAmi,UsePreviousValue=true")
+if [ "$use_legacy_attachment" = true ]; then
+  parameters=()
+  for key in "${legacy_previous_parameters[@]}"; do
+    parameters+=("ParameterKey=$key,UsePreviousValue=true")
+  done
+  parameters+=(
+    "ParameterKey=OperationalRelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
+    "ParameterKey=OperationalRelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
+    "ParameterKey=OperationalCredentialParameterPrefix,ParameterValue=$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+  )
+else
+  parameters=(
+    "ParameterKey=InstanceType,ParameterValue=$instance_type"
+    "ParameterKey=AvailabilityZone,ParameterValue=$BIBITES_AVAILABILITY_ZONE"
+    "ParameterKey=SubnetId,ParameterValue=$BIBITES_SUBNET_ID"
+    "ParameterKey=VpcId,ParameterValue=$BIBITES_VPC_ID"
+    "ParameterKey=ArtifactBucket,ParameterValue=$ARTIFACT_BUCKET"
+    "ParameterKey=ArtifactPrefix,ParameterValue=$ARTIFACT_PREFIX"
+    "ParameterKey=RuntimeObject,ParameterValue=$runtime_object"
+    "ParameterKey=RuntimeSha256,ParameterValue=$runtime_sha256"
+    "ParameterKey=GameFile,ParameterValue=$GAME_FILE"
+    "ParameterKey=GameSha256,ParameterValue=$GAME_SHA256"
+    "ParameterKey=BepInExFile,ParameterValue=$BEPINEX_FILE"
+    "ParameterKey=BepInExSha256,ParameterValue=$BEPINEX_SHA256"
+    "ParameterKey=ManifestFile,ParameterValue=$MANIFEST_OBJECT"
+    "ParameterKey=ManifestSha256,ParameterValue=$MANIFEST_SHA256"
+    "ParameterKey=DataVolumeGiB,ParameterValue=$data_volume_gib"
+    "ParameterKey=RelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
+    "ParameterKey=RelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
+    "ParameterKey=CredentialParameterPrefix,ParameterValue=$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+    "ParameterKey=HostLaunchTemplateVersion,ParameterValue=$host_launch_template_version"
+    "ParameterKey=UseLegacyDataAttachment,ParameterValue=false"
+  )
+  if [ "$stack_exists" -eq 1 ]; then
+    parameters+=("ParameterKey=UbuntuAmi,UsePreviousValue=true")
+  fi
 fi
 change_set_type="$(bibites_change_set_type_for_stack_status "$stack_status")"
 
@@ -490,14 +538,15 @@ if [ "$execute" -eq 0 ]; then
   aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation create-change-set \
     --stack-name "$stack" --change-set-name "$change_set_name" \
     --change-set-type "$change_set_type" --template-body "file://$template" \
-    --description 'Preview fail-closed Bibites host-stack change' \
+    --description 'Preview fail-closed Bibites host-stack reconciliation' \
     --capabilities CAPABILITY_NAMED_IAM --parameters "${parameters[@]}" >/dev/null
   set +e
   change_set_description="$(bibites_wait_change_set "$AWS_PROFILE" "$AWS_REGION" \
     "$stack" "$change_set_name")"
   change_set_status=$?
   set -e
-  [ -z "$change_set_description" ] || bibites_change_set_summary "$change_set_description"
+  [ -z "$change_set_description" ] || \
+    bibites_change_set_summary "$change_set_description" "$change_set_type"
   if [ "$change_set_status" -ne 0 ]; then
     reason="$(jq -r '.StatusReason // "unknown change-set failure"' \
       <<<"${change_set_description:-{}}")"
@@ -507,41 +556,53 @@ if [ "$execute" -eq 0 ]; then
 else
   change_set_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" \
     cloudformation describe-change-set --stack-name "$stack" \
-    --change-set-name "$change_set_name" --include-property-values --output json)"
-  jq -e --arg name "$change_set_name" --arg type "$change_set_type" '
-    .ChangeSetName == $name and .ChangeSetType == $type and
+    --change-set-name "$change_set_name" --output json)"
+  jq -e --arg name "$change_set_name" '
+    .ChangeSetName == $name and
     .Status == "CREATE_COMPLETE" and .ExecutionStatus == "AVAILABLE"
   ' <<<"$change_set_description" >/dev/null || {
     echo 'named change set is not the reviewed executable change set for this operation' >&2
     exit 1
   }
-  bibites_change_set_summary "$change_set_description"
+  bibites_change_set_summary "$change_set_description" "$change_set_type"
 fi
 
 require_change_parameter() {
   bibites_require_change_set_parameter "$change_set_description" "$1" "$2"
 }
-require_change_parameter InstanceType "$instance_type"
-require_change_parameter AvailabilityZone "$BIBITES_AVAILABILITY_ZONE"
-require_change_parameter SubnetId "$BIBITES_SUBNET_ID"
-require_change_parameter VpcId "$BIBITES_VPC_ID"
-require_change_parameter ArtifactBucket "$ARTIFACT_BUCKET"
-require_change_parameter ArtifactPrefix "$ARTIFACT_PREFIX"
-require_change_parameter RuntimeObject "$runtime_object"
-require_change_parameter RuntimeSha256 "$runtime_sha256"
-require_change_parameter GameFile "$GAME_FILE"
-require_change_parameter GameSha256 "$GAME_SHA256"
-require_change_parameter BepInExFile "$BEPINEX_FILE"
-require_change_parameter BepInExSha256 "$BEPINEX_SHA256"
-require_change_parameter ManifestFile "$MANIFEST_OBJECT"
-require_change_parameter ManifestSha256 "$MANIFEST_SHA256"
-require_change_parameter DataVolumeGiB "$data_volume_gib"
-require_change_parameter RelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
-require_change_parameter RelayDomain "$BIBITES_RELAY_DOMAIN"
-require_change_parameter CredentialParameterPrefix "$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
-require_change_parameter HostLaunchTemplateVersion "$host_launch_template_version"
-require_change_parameter UseLegacyDataAttachment "$use_legacy_attachment"
-bibites_require_safe_host_change_set "$change_set_description"
+if [ "$use_legacy_attachment" = true ]; then
+  for key in "${legacy_previous_parameters[@]}"; do
+    bibites_require_change_set_preserved_parameter \
+      "$change_set_description" "$key" "$(stack_parameter "$key")"
+  done
+  require_change_parameter OperationalRelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
+  require_change_parameter OperationalRelayDomain "$BIBITES_RELAY_DOMAIN"
+  require_change_parameter OperationalCredentialParameterPrefix \
+    "$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+else
+  require_change_parameter InstanceType "$instance_type"
+  require_change_parameter AvailabilityZone "$BIBITES_AVAILABILITY_ZONE"
+  require_change_parameter SubnetId "$BIBITES_SUBNET_ID"
+  require_change_parameter VpcId "$BIBITES_VPC_ID"
+  require_change_parameter ArtifactBucket "$ARTIFACT_BUCKET"
+  require_change_parameter ArtifactPrefix "$ARTIFACT_PREFIX"
+  require_change_parameter RuntimeObject "$runtime_object"
+  require_change_parameter RuntimeSha256 "$runtime_sha256"
+  require_change_parameter GameFile "$GAME_FILE"
+  require_change_parameter GameSha256 "$GAME_SHA256"
+  require_change_parameter BepInExFile "$BEPINEX_FILE"
+  require_change_parameter BepInExSha256 "$BEPINEX_SHA256"
+  require_change_parameter ManifestFile "$MANIFEST_OBJECT"
+  require_change_parameter ManifestSha256 "$MANIFEST_SHA256"
+  require_change_parameter DataVolumeGiB "$data_volume_gib"
+  require_change_parameter RelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
+  require_change_parameter RelayDomain "$BIBITES_RELAY_DOMAIN"
+  require_change_parameter CredentialParameterPrefix "$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+  require_change_parameter HostLaunchTemplateVersion "$host_launch_template_version"
+  require_change_parameter UseLegacyDataAttachment false
+fi
+bibites_require_safe_host_change_set \
+  "$change_set_description" "$change_set_type" "$use_legacy_attachment"
 
 if [ "$execute" -eq 0 ]; then
   echo "safe change set $change_set_name is ready; no stack resource was changed"

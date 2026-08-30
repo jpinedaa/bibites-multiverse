@@ -32,13 +32,36 @@ $(change Host AWS::EC2::Instance Add False)
 EOF
 )"
 create_description="$(jq -nc --argjson changes "$create_changes" \
-  '{Status:"CREATE_COMPLETE",ChangeSetType:"CREATE",Changes:$changes}')"
-bibites_require_safe_host_change_set "$create_description"
+  '{Status:"CREATE_COMPLETE",Changes:$changes}')"
+bibites_require_safe_host_change_set "$create_description" CREATE false
 
 update_description="$(jq -nc --argjson change \
   "$(change HostLaunchTemplate AWS::EC2::LaunchTemplate Modify False)" \
-  '{Status:"CREATE_COMPLETE",ChangeSetType:"UPDATE",Changes:[$change]}')"
-bibites_require_safe_host_change_set "$update_description"
+  '{Status:"CREATE_COMPLETE",Changes:[$change]}')"
+bibites_require_safe_host_change_set "$update_description" UPDATE false
+
+legacy_description='{"Status":"CREATE_COMPLETE","Changes":[{"ResourceChange":{
+  "LogicalResourceId":"HostLaunchTemplate",
+  "ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify","Replacement":"False",
+  "Scope":["Metadata"],"Details":[{"Target":{"Attribute":"Metadata",
+  "RequiresRecreation":"Never"},"Evaluation":"Static",
+  "ChangeSource":"ParameterReference","CausingEntity":"OperationalRelayPrivateIp"}]}}]}'
+bibites_require_safe_host_change_set "$legacy_description" UPDATE true
+reject 'reported change-set type disagreement' \
+  bibites_require_safe_host_change_set \
+  "$(jq '.ChangeSetType = "CREATE"' <<<"$legacy_description")" UPDATE true
+reject 'legacy metadata update with a property scope' \
+  bibites_require_safe_host_change_set \
+  "$(jq '.Changes[0].ResourceChange.Scope = ["Metadata", "Properties"]' \
+    <<<"$legacy_description")" UPDATE true
+reject 'legacy metadata update with possible recreation' \
+  bibites_require_safe_host_change_set \
+  "$(jq '.Changes[0].ResourceChange.Details[0].Target.RequiresRecreation = "Conditionally"' \
+    <<<"$legacy_description")" UPDATE true
+reject 'legacy metadata update from an unrelated parameter' \
+  bibites_require_safe_host_change_set \
+  "$(jq '.Changes[0].ResourceChange.Details[0].CausingEntity = "InstanceType"' \
+    <<<"$legacy_description")" UPDATE true
 
 for unsafe in \
   "$(change Host AWS::EC2::Instance Modify True)" \
@@ -49,25 +72,32 @@ for unsafe in \
   "$(change HostRole AWS::IAM::Role Modify False)" \
   "$(change HostSecurityGroup AWS::EC2::SecurityGroup Modify False)"; do
   description="$(jq -nc --argjson change "$unsafe" \
-    '{Status:"CREATE_COMPLETE",ChangeSetType:"UPDATE",Changes:[$change]}')"
-  reject 'unsafe update change' bibites_require_safe_host_change_set "$description"
+    '{Status:"CREATE_COMPLETE",Changes:[$change]}')"
+  reject 'unsafe update change' \
+    bibites_require_safe_host_change_set "$description" UPDATE false
+  reject 'unsafe legacy update change' \
+    bibites_require_safe_host_change_set "$description" UPDATE true
 done
 
 extra_change="$(jq -nc \
   --argjson launch "$(change HostLaunchTemplate AWS::EC2::LaunchTemplate Modify False)" \
   --argjson role "$(change HostRole AWS::IAM::Role Modify False)" \
-  '{Status:"CREATE_COMPLETE",ChangeSetType:"UPDATE",Changes:[$launch,$role]}')"
+  '{Status:"CREATE_COMPLETE",Changes:[$launch,$role]}')"
 reject 'dormant launch-template update with an unrelated change' \
-  bibites_require_safe_host_change_set "$extra_change"
+  bibites_require_safe_host_change_set "$extra_change" UPDATE false
 
 coupled_replacement="$(jq -nc \
   --argjson launch "$(change HostLaunchTemplate AWS::EC2::LaunchTemplate Modify False)" \
   --argjson host "$(change Host AWS::EC2::Instance Modify True)" \
   --argjson attachment "$(change DataAttachment AWS::EC2::VolumeAttachment Remove False)" \
-  '{Status:"CREATE_COMPLETE",ChangeSetType:"UPDATE",
-    Changes:[$launch,$host,$attachment]}')"
+  '{Status:"CREATE_COMPLETE",Changes:[$launch,$host,$attachment]}')"
 reject 'launch-template update coupled to Host replacement and attachment removal' \
-  bibites_require_safe_host_change_set "$coupled_replacement"
+  bibites_require_safe_host_change_set "$coupled_replacement" UPDATE false
+
+reject 'legacy mode on CREATE' \
+  bibites_require_safe_host_change_set "$create_description" CREATE true
+reject 'unknown expected type' \
+  bibites_require_safe_host_change_set "$create_description" IMPORT false
 
 parameter_description='{"Parameters":[
   {"ParameterKey":"RuntimeObject","ParameterValue":"runtime/abc.tar.gz"},
@@ -78,6 +108,15 @@ reject 'runtime pointer drift' bibites_require_change_set_parameter \
   "$parameter_description" RuntimeObject runtime/other.tar.gz
 reject 'launch-template version drift' bibites_require_change_set_parameter \
   "$parameter_description" HostLaunchTemplateVersion 8
+preserved_description='{"Parameters":[
+  {"ParameterKey":"RuntimeFile","UsePreviousValue":true},
+  {"ParameterKey":"RelayPrivateIp","ParameterValue":"10.0.0.4"}]}'
+bibites_require_change_set_preserved_parameter \
+  "$preserved_description" RuntimeFile runtime.tar.gz
+bibites_require_change_set_preserved_parameter \
+  "$preserved_description" RelayPrivateIp 10.0.0.4
+reject 'changed preserved parameter' bibites_require_change_set_preserved_parameter \
+  "$preserved_description" RelayPrivateIp 10.0.0.5
 
 [ "$(bibites_change_set_type_for_stack_status '')" = CREATE ]
 [ "$(bibites_change_set_type_for_stack_status REVIEW_IN_PROGRESS)" = CREATE ]
@@ -169,6 +208,7 @@ fixture_bin="$test_root/bin"
 install -d "$fixture_cloud/lib" "$fixture_cloud/runtime" "$fixture_dist" "$fixture_bin"
 cp "$repo/cloud/aws/deploy-host.sh" "$fixture_cloud/deploy-host.sh"
 cp "$repo/cloud/aws/template.yaml" "$fixture_cloud/template.yaml"
+cp "$repo/cloud/aws/legacy-template.yaml" "$fixture_cloud/legacy-template.yaml"
 cp "$repo/cloud/aws/lib/validation.sh" "$fixture_cloud/lib/validation.sh"
 cp "$repo/cloud/aws/lib/host-change.sh" "$fixture_cloud/lib/host-change.sh"
 cp "$repo/cloud/aws/promote-runtime.sh" "$fixture_cloud/promote-runtime.sh"
@@ -232,13 +272,27 @@ case "$args" in
         else
           legacy_runtime=legacy/runtime.tar.gz
         fi
-        jq -nc --arg sha "$MOCK_RUNTIME_SHA" --arg runtime "$legacy_runtime" '{Stacks:[{
+        jq -nc --arg sha "$MOCK_RUNTIME_SHA" --arg runtime "$legacy_runtime" \
+          --arg game_sha "$MOCK_GAME_SHA" --arg bepinex_sha "$MOCK_BEPINEX_SHA" \
+          '{Stacks:[{
           StackStatus:"UPDATE_COMPLETE",StackId:"arn:aws:cloudformation:us-east-1:123456789012:stack/fixture/1",
           CreationTime:"old",LastUpdatedTime:"old",Parameters:[
+            {ParameterKey:"InstanceType",ParameterValue:"m6i.large"},
+            {ParameterKey:"AvailabilityZone",ParameterValue:"us-east-1a"},
+            {ParameterKey:"SubnetId",ParameterValue:"subnet-0123456789abcdef0"},
+            {ParameterKey:"VpcId",ParameterValue:"vpc-0123456789abcdef0"},
             {ParameterKey:"ArtifactBucket",ParameterValue:"fixture-artifacts"},
             {ParameterKey:"ArtifactPrefix",ParameterValue:"cloud/v1"},
             {ParameterKey:"RuntimeFile",ParameterValue:$runtime},
-            {ParameterKey:"RuntimeSha256",ParameterValue:$sha}]}]}'
+            {ParameterKey:"RuntimeSha256",ParameterValue:$sha},
+            {ParameterKey:"GameFile",ParameterValue:"game.zip"},
+            {ParameterKey:"GameSha256",ParameterValue:$game_sha},
+            {ParameterKey:"BepInExFile",ParameterValue:"bepinex.zip"},
+            {ParameterKey:"BepInExSha256",ParameterValue:$bepinex_sha},
+            {ParameterKey:"ManifestFile",ParameterValue:"worlds.json"},
+            {ParameterKey:"DataVolumeGiB",ParameterValue:"40"},
+            {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.4"},
+            {ParameterKey:"UbuntuAmi",ParameterValue:"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"}]}]}'
         ;;
       create_preview)
         echo 'Stack with id fixture does not exist' >&2
@@ -378,11 +432,42 @@ case "$args" in
     printf '%s\n' "$*" >>"$MOCK_AWS_LOG"
     ;;
   *' cloudformation describe-change-set '*)
+    if [[ "$args" == *' --include-property-values '* ]]; then
+      echo 'property-value change-set view is not canonical' >&2
+      exit 65
+    fi
     if [ "$MOCK_SCENARIO" = legacy_preview ]; then
-      type=UPDATE; runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"; version=7; legacy=true
-      changes='[{"ResourceChange":{"LogicalResourceId":"HostLaunchTemplate","ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify","Replacement":"False"}}]'
+      changes='[{"ResourceChange":{
+        "LogicalResourceId":"HostLaunchTemplate",
+        "ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify",
+        "Replacement":"False","Scope":["Metadata"],"Details":[{
+          "Target":{"Attribute":"Metadata","RequiresRecreation":"Never"},
+          "Evaluation":"Static","ChangeSource":"ParameterReference",
+          "CausingEntity":"OperationalRelayPrivateIp"}]}}]'
+      parameters="$(jq -nc \
+        --arg sha "$MOCK_RUNTIME_SHA" --arg game_sha "$MOCK_GAME_SHA" \
+        --arg bepinex_sha "$MOCK_BEPINEX_SHA" '[
+        {ParameterKey:"InstanceType",UsePreviousValue:true},
+        {ParameterKey:"AvailabilityZone",UsePreviousValue:true},
+        {ParameterKey:"SubnetId",UsePreviousValue:true},
+        {ParameterKey:"VpcId",UsePreviousValue:true},
+        {ParameterKey:"ArtifactBucket",UsePreviousValue:true},
+        {ParameterKey:"ArtifactPrefix",UsePreviousValue:true},
+        {ParameterKey:"RuntimeFile",UsePreviousValue:true},
+        {ParameterKey:"RuntimeSha256",ParameterValue:$sha},
+        {ParameterKey:"GameFile",UsePreviousValue:true},
+        {ParameterKey:"GameSha256",ParameterValue:$game_sha},
+        {ParameterKey:"BepInExFile",UsePreviousValue:true},
+        {ParameterKey:"BepInExSha256",ParameterValue:$bepinex_sha},
+        {ParameterKey:"ManifestFile",UsePreviousValue:true},
+        {ParameterKey:"DataVolumeGiB",UsePreviousValue:true},
+        {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.4"},
+        {ParameterKey:"UbuntuAmi",UsePreviousValue:true},
+        {ParameterKey:"OperationalRelayPrivateIp",ParameterValue:"10.0.0.5"},
+        {ParameterKey:"OperationalRelayDomain",ParameterValue:"relay.example.net"},
+        {ParameterKey:"OperationalCredentialParameterPrefix",ParameterValue:"/bibites-multiverse/cloud"}
+      ]')"
     else
-      type=CREATE; runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"; version=1; legacy=false
       changes='[
         {"ResourceChange":{"LogicalResourceId":"HostSecurityGroup","ResourceType":"AWS::EC2::SecurityGroup","Action":"Add","Replacement":"False"}},
         {"ResourceChange":{"LogicalResourceId":"HostRole","ResourceType":"AWS::IAM::Role","Action":"Add","Replacement":"False"}},
@@ -390,13 +475,10 @@ case "$args" in
         {"ResourceChange":{"LogicalResourceId":"DataVolume","ResourceType":"AWS::EC2::Volume","Action":"Add","Replacement":"False"}},
         {"ResourceChange":{"LogicalResourceId":"HostLaunchTemplate","ResourceType":"AWS::EC2::LaunchTemplate","Action":"Add","Replacement":"False"}},
         {"ResourceChange":{"LogicalResourceId":"Host","ResourceType":"AWS::EC2::Instance","Action":"Add","Replacement":"False"}}]'
-    fi
-    jq -nc --arg type "$type" --arg runtime "$runtime" --arg sha "$MOCK_RUNTIME_SHA" \
-      --arg game_sha "$MOCK_GAME_SHA" --arg bepinex_sha "$MOCK_BEPINEX_SHA" \
-      --arg manifest "$MOCK_MANIFEST_OBJECT" --arg manifest_sha "$MOCK_MANIFEST_SHA" \
-      --arg version "$version" --arg legacy "$legacy" --argjson changes "$changes" '{
-      ChangeSetName:"fixture-change",ChangeSetType:$type,Status:"CREATE_COMPLETE",
-      ExecutionStatus:"AVAILABLE",Parameters:[
+      parameters="$(jq -nc --arg runtime "runtime/$MOCK_RUNTIME_SHA.tar.gz" \
+        --arg sha "$MOCK_RUNTIME_SHA" --arg game_sha "$MOCK_GAME_SHA" \
+        --arg bepinex_sha "$MOCK_BEPINEX_SHA" \
+        --arg manifest "$MOCK_MANIFEST_OBJECT" --arg manifest_sha "$MOCK_MANIFEST_SHA" '[
         {ParameterKey:"InstanceType",ParameterValue:"m6i.large"},
         {ParameterKey:"AvailabilityZone",ParameterValue:"us-east-1a"},
         {ParameterKey:"SubnetId",ParameterValue:"subnet-0123456789abcdef0"},
@@ -415,8 +497,13 @@ case "$args" in
         {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.5"},
         {ParameterKey:"RelayDomain",ParameterValue:"relay.example.net"},
         {ParameterKey:"CredentialParameterPrefix",ParameterValue:"/bibites-multiverse/cloud"},
-        {ParameterKey:"HostLaunchTemplateVersion",ParameterValue:$version},
-        {ParameterKey:"UseLegacyDataAttachment",ParameterValue:$legacy}],Changes:$changes}'
+        {ParameterKey:"HostLaunchTemplateVersion",ParameterValue:"1"},
+        {ParameterKey:"UseLegacyDataAttachment",ParameterValue:"false"}
+      ]')"
+    fi
+    jq -nc --argjson parameters "$parameters" --argjson changes "$changes" '{
+      ChangeSetName:"fixture-change",Status:"CREATE_COMPLETE",
+      ExecutionStatus:"AVAILABLE",Parameters:$parameters,Changes:$changes}'
     ;;
   *' cloudformation execute-change-set '*)
     printf '%s\n' "$*" >>"$MOCK_AWS_LOG"
@@ -596,8 +683,16 @@ grep -Fq "ParameterKey=ManifestSha256,ParameterValue=$manifest_sha" \
 
 : >"$test_root/aws.log"
 run_deploy_fixture legacy_preview >/dev/null
-grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=7' "$test_root/aws.log"
-grep -Fq 'ParameterKey=UseLegacyDataAttachment,ParameterValue=true' "$test_root/aws.log"
+grep -Fq -- "--template-body file://$fixture_cloud/legacy-template.yaml" \
+  "$test_root/aws.log"
+grep -Fq 'ParameterKey=InstanceType,UsePreviousValue=true' "$test_root/aws.log"
+grep -Fq 'ParameterKey=RelayPrivateIp,UsePreviousValue=true' "$test_root/aws.log"
+grep -Fq 'ParameterKey=OperationalRelayPrivateIp,ParameterValue=10.0.0.5' \
+  "$test_root/aws.log"
+grep -Fq 'ParameterKey=OperationalRelayDomain,ParameterValue=relay.example.net' \
+  "$test_root/aws.log"
+grep -Fq 'ParameterKey=OperationalCredentialParameterPrefix,ParameterValue=/bibites-multiverse/cloud' \
+  "$test_root/aws.log"
 
 cat >"$fixture_dist/staged.env" <<EOF
 AWS_PROFILE=fixture
@@ -619,7 +714,8 @@ seed_pointer '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
 : >"$test_root/aws.log"
 : >"$test_root/aws-calls.log"
 run_deploy_fixture legacy_preview >/dev/null
-grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=7' "$test_root/aws.log"
+grep -Fq 'ParameterKey=OperationalRelayPrivateIp,ParameterValue=10.0.0.5' \
+  "$test_root/aws.log"
 grep -Fq "s3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.$manifest_sha.json" \
   "$test_root/aws-calls.log"
 grep -Fq 's3api get-object --bucket fixture-artifacts --key cloud/v1/worlds.json' \
@@ -725,6 +821,7 @@ run_deploy_fixture create_execute_pointer_same --execute >/dev/null
 [ "$(<"$test_root/pointer.etag")" = '"cccccccccccccccccccccccccccccccc"' ]
 
 template="$repo/cloud/aws/template.yaml"
+legacy_template="$repo/cloud/aws/legacy-template.yaml"
 deploy="$repo/cloud/aws/deploy-host.sh"
 install_host="$repo/cloud/aws/runtime/install-host"
 sync_worlds="$repo/cloud/aws/runtime/bibites-sync-worlds"
@@ -758,6 +855,22 @@ if grep -Fq 'runtime/current.json' "$template"; then
   echo 'bootstrap still dereferences the mutable runtime pointer' >&2
   exit 1
 fi
+grep -Fq '  OperationalRelayPrivateIp:' "$legacy_template"
+grep -Fq '  OperationalRelayDomain:' "$legacy_template"
+grep -Fq '  OperationalCredentialParameterPrefix:' "$legacy_template"
+grep -Fq '        Version: !GetAtt HostLaunchTemplate.LatestVersionNumber' \
+  "$legacy_template"
+grep -Fq '        PrivateIp: !Ref OperationalRelayPrivateIp' "$legacy_template"
+grep -Fq '        Domain: !Ref OperationalRelayDomain' "$legacy_template"
+grep -Fq '        CredentialParameterPrefix: !Ref OperationalCredentialParameterPrefix' \
+  "$legacy_template"
+[ "$(grep -c Operational "$legacy_template")" -eq 7 ]
+if grep -Fq 'CreationPolicy:' "$legacy_template" ||
+   grep -Fq '{Key: BibitesBackup, Value: daily}' "$legacy_template" ||
+   grep -Fq 'xfsprogs xvfb' "$legacy_template"; then
+  echo 'legacy template differs from the deployed resource shape' >&2
+  exit 1
+fi
 
 set +e
 missing_name_output="$(env -u BIBITES_CHANGE_SET_NAME "$deploy" 2>&1)"
@@ -765,9 +878,15 @@ missing_name_status=$?
 set -e
 [ "$missing_name_status" -eq 2 ]
 grep -Fq 'for every preview and execution' <<<"$missing_name_output"
-grep -Fq 'bibites_require_safe_host_change_set "$change_set_description"' "$deploy"
+grep -Fq 'bibites_require_safe_host_change_set \' "$deploy"
 grep -Fq 'use_legacy_attachment="$(bibites_legacy_attachment_mode' "$deploy"
 grep -Fq 'bibites_live_host_launch_template_binding' "$deploy"
+grep -Fq 'template="$legacy_template"' "$deploy"
+if grep -Fq -- '--include-property-values' "$deploy" ||
+   grep -Fq -- '--include-property-values' "$repo/cloud/aws/lib/host-change.sh"; then
+  echo 'host deployment still validates a noncanonical change-set view' >&2
+  exit 1
+fi
 grep -Fq 'runtime-only receipt can reconcile only an existing stack' "$deploy"
 grep -Fq 'use that exact prefix so the reviewed change leaves live IAM unchanged' "$deploy"
 success_guard_line="$(grep -n '\[ "$terminal_status" -eq 0 \]' "$deploy" | cut -d: -f1)"

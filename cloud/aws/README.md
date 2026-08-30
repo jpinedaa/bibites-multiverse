@@ -289,7 +289,7 @@ export BIBITES_CHANGE_SET_NAME=<reviewed-change-set-name>
 ./cloud/aws/deploy-host.sh --change-set-name "$BIBITES_CHANGE_SET_NAME"
 ```
 
-The first command creates a named change set and prints its resource changes.
+The first command creates a named change set and prints its canonical resource changes.
 It does not execute the change set.
 Review the printed change set.
 Then get separate authorization and execute that same named change set:
@@ -317,14 +317,18 @@ The wrapper rejects an ambient, missing, stale, or mixed receipt value before it
 set.
 The change set binds the content-addressed manifest name and SHA-256 value.
 
-The wrapper permits only two change-set shapes:
+The wrapper permits only three change-set shapes:
 
 - A new stack can add the six expected host resources.
-- An existing stack can modify only `HostLaunchTemplate` without replacement.
+- A legacy stack can modify only `HostLaunchTemplate` metadata without replacement.
+- A current stack can modify only the dormant `HostLaunchTemplate` without replacement.
 
 The wrapper rejects every Host change.
 It also rejects a DataAttachment change, a DataVolume change, a live IAM or network resource
 change, and an unrelated resource change.
+It reads the default `DescribeChangeSet` response for every safety decision.
+It does not use the property-value response because that response can omit resource changes and
+replacement flags.
 Do not use a direct CloudFormation deployment to bypass these checks.
 
 For an existing stack, the wrapper reads the launch-template version from the live Host.
@@ -341,10 +345,18 @@ A template update can create a dormant launch-template version, but it cannot mo
 to that version.
 
 The wrapper also detects the legacy managed `DataAttachment` resource.
-It keeps that logical resource in the template and in the stack.
-A legacy update keeps the historical role policy and volume tags unchanged.
+It then selects `legacy-template.yaml`.
+That template keeps the deployed resource properties, policies, and attachment unchanged.
+The wrapper passes every historical bootstrap parameter with `UsePreviousValue=true`.
+It also requires the supplied topology, storage, and artifact inputs to match the stack.
 It requires the historical credential prefix that the role already permits.
-The change-set validator then permits only the dormant launch-template change.
+The template stores the current relay IP, relay domain, and credential prefix as operational
+parameters in `HostLaunchTemplate` metadata.
+[CloudFormation does not interpret resource metadata](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-metadata.html)
+as launch-template properties.
+The change-set validator requires exactly one static `Metadata` scope whose recreation value is
+`Never`.
+It rejects a property, policy, tag, or lifecycle-attribute change.
 A new stack uses self-attach mode instead, so its Host can complete bootstrap without a
 CloudFormation attachment deadlock.
 
@@ -530,6 +542,9 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 `update-runtime.sh` accepts only a runtime-only staging record.
 That record pins immutable copies of the current game, BepInEx, and manifest inputs for candidate
 activation and automatic rollback.
+For a reconciled legacy stack, the command uses the operational relay parameters before the stale
+bootstrap parameters.
+It rejects duplicate parameters and any explicit input that differs from the selected stack value.
 The record also binds the SHA-256 and quoted ETag of the mutable `worlds.json` staging preimage.
 It does not overwrite an existing save or replace mutable `worlds.json` in S3.
 Activation reapplies the pinned manifest, current credentials, environment files, and unit state.
