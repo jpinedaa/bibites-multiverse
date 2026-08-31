@@ -12,10 +12,13 @@
 param(
     [switch]$Probe,
     [string]$InstallRoot = '',
-    # Dot-source this file with -DefineOnly to load the function below without
-    # opening a window, writing the setup log or touching anything else. It is
-    # how release/test-installer-wait.ps1 calls the real wait; nothing that
-    # installs ever passes it.
+    # Dot-source this file with -DefineOnly to load the functions above the
+    # `if ($DefineOnly) { return }` line - the install wait, and the two published
+    # names' reader, bounds and quoting - without opening a window, writing the
+    # setup log or touching anything else. It is how release/test-installer-wait.ps1
+    # calls the real wait and how release/test-install-uninstall.ps1 tests what
+    # this window puts in its boxes and hands to the installer, against the real
+    # code rather than a copy of it. Nothing that installs ever passes it.
     [switch]$DefineOnly
 )
 
@@ -66,6 +69,186 @@ function Invoke-BibitesInstaller {
     return $code
 }
 
+# ------------------------------------------- the two names, and what this computer already publishes
+#
+# THE BOXES BELOW ARE FILLED IN FROM THE INSTALLATION THAT IS ALREADY HERE, and
+# only a computer with none of one gets the Windows account name offered.
+#
+# WHY THAT IS NOT A DETAIL. This window always passes -Keeper and -WorldName, and
+# a named flag beats the stored answer in the installer below (Get-PreviousSetting's
+# first rule). So a window that filled its boxes from $env:UserName was not
+# SUGGESTING a name on an upgrade - it was OVERWRITING one. Somebody who had been
+# on the map as "Nightjar" for a year, or who had deliberately published nothing,
+# double-clicked the newest release and became their Windows account name, with
+# nothing on screen to say it had happened.
+#
+# So this reads what the installer would read, the same two files in the same
+# order it reads them in (Install-BibitesMultiverse.ps1, Get-PreviousInstall and
+# Find-PreviousSetting): the launcher's profile first, because that is what this
+# installation is running now and what its own edits go into, and the install
+# record behind it. AN EMPTY STORED VALUE IS AN ANSWER - somebody's decline - and
+# it fills the box with nothing, which is this window's way of saying "publish
+# none". It is not the same as a missing key, which is a question this computer
+# has never been asked.
+#
+# IT READS NOTHING ELSE AND IT NEVER FAILS. A file that is missing, unreadable or
+# describes another folder leaves both boxes on the fresh-install suggestion,
+# which is where this window was before any of it existed.
+$MaxPublicNameBytes = 64
+
+function Read-SetupJson {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Test-SameFolder {
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    # Windows file names are case-insensitive, so this comparison is too.
+    return ($A.TrimEnd('\', '/') -eq $B.TrimEnd('\', '/'))
+}
+
+function Get-JsonMember {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
+    return $Object.$Name
+}
+
+function Get-PreviousPublicNames {
+    param([string]$DataRoot, [string]$ProgramRoot)
+    $answer = [pscustomobject]@{
+        Present           = $false
+        Keeper            = ''
+        KeeperAnswered    = $false
+        WorldName         = ''
+        WorldNameAnswered = $false
+    }
+    if (-not $DataRoot) { return $answer }
+
+    # A record with no dataRoot of its own is one an older release wrote, and it
+    # belongs to the folder it is in. One that names a different folder does not.
+    $record = Read-SetupJson (Join-Path $DataRoot 'install-record.json')
+    $recordRoot = [string](Get-JsonMember $record 'dataRoot')
+    if ($record -and ((-not $recordRoot) -or (Test-SameFolder $recordRoot $DataRoot))) {
+        $answer.Present = $true
+    } else {
+        $record = $null
+    }
+    $profileData = $null
+    if ($ProgramRoot) {
+        $profileData = Read-SetupJson (Join-Path $ProgramRoot 'profiles\default.json')
+        if ($profileData -and (Test-SameFolder ([string](Get-JsonMember $profileData 'dataRoot')) $DataRoot)) {
+            $answer.Present = $true
+        } else {
+            $profileData = $null
+        }
+    }
+
+    $settings = Get-JsonMember $record 'settings'
+    foreach ($field in @('keeper', 'worldName')) {
+        $value = $null
+        $found = $false
+        if ($profileData -and $profileData.PSObject.Properties.Match($field).Count -gt 0) {
+            $value = $profileData.$field
+            $found = $true
+        } elseif ($settings -and $settings.PSObject.Properties.Match($field).Count -gt 0) {
+            $value = $settings.$field
+            $found = $true
+        }
+        if (-not $found) { continue }
+        if ($field -eq 'keeper') {
+            $answer.Keeper = "$value"
+            $answer.KeeperAnswered = $true
+        } else {
+            $answer.WorldName = "$value"
+            $answer.WorldNameAnswered = $true
+        }
+    }
+    return $answer
+}
+
+function Get-PublicNameProblem {
+    # The same two bounds Install-BibitesMultiverse.ps1's Resolve-PublicName
+    # applies, in the same words, so that a name this window accepts is a name
+    # the installer accepts. See the button handler for why they are checked HERE
+    # rather than left to the child process.
+    param([string]$Value)
+    if ([System.Text.Encoding]::UTF8.GetByteCount($Value) -gt $MaxPublicNameBytes) {
+        return ("That is longer than $MaxPublicNameBytes bytes, which is the most the map carries " +
+                "(an accented or non-Latin letter is more than one byte).")
+    }
+    foreach ($ch in $Value.ToCharArray()) {
+        if ([char]::IsControl($ch)) {
+            return 'That holds a control character, which no map, log or web page can show.'
+        }
+    }
+    return ''
+}
+
+function Get-SuggestedKeeperName {
+    # OFFERED, NEVER TAKEN, and only on a computer that has never answered. The
+    # account name is reduced to the part a person would recognise - 'CORP\alice'
+    # is how a machine spells an account, not a handle - and an account name this
+    # window would then refuse is not offered at all.
+    $name = "$env:UserName".Trim()
+    $cut = $name.LastIndexOfAny([char[]]@('\', '/'))
+    if ($cut -ge 0) { $name = $name.Substring($cut + 1) }
+    if (-not $name -or (Get-PublicNameProblem $name)) { return '' }
+    return $name
+}
+
+function Get-PublishedNameArgument {
+    # An empty box publishes nothing, and it is passed as '-' rather than as an
+    # empty string: an empty argument is the one thing Windows argument parsing
+    # can quietly drop on the way to a child process, and a dropped argument here
+    # would leave the installer thinking nobody had answered.
+    param([string]$Value)
+    $trimmed = "$Value".Trim()
+    if (-not $trimmed) { return '-' }
+    return $trimmed
+}
+
+function ConvertTo-NativeArgument {
+    # ONE ARGUMENT, QUOTED THE WAY WINDOWS TAKES IT APART AGAIN.
+    #
+    # There is no argument array underneath any of this: a Windows process is
+    # handed ONE string and splits it itself, by CommandLineToArgvW's rules. A
+    # quoted run may hold spaces; a backslash is an ordinary character EXCEPT in
+    # the run immediately before a double quote, where the run is halved and the
+    # quote it precedes is escaped.
+    #
+    # WHICH IS WHY WRAPPING A VALUE IN QUOTES IS NOT ENOUGH. This wrapped each
+    # argument and escaped the quotes inside it, and that is right until a value
+    # ENDS IN A BACKSLASH - a game folder somebody typed with a trailing slash, a
+    # keeper handle that ends in one. That backslash then escaped the closing
+    # quote this window had just added, and everything after it, up to the next
+    # quote, arrived as part of the same argument: -GameDir swallowed
+    # -StartAfterInstall, or a name swallowed the flag behind it.
+    #
+    # The run before a quote - the closing one included - is doubled here, which
+    # is the whole of the fix and the whole of the rule.
+    param([string]$Value)
+    $quoted = New-Object System.Text.StringBuilder
+    [void]$quoted.Append('"')
+    $slashes = 0
+    foreach ($ch in "$Value".ToCharArray()) {
+        if ($ch -eq '\') { $slashes++; continue }
+        if ($ch -eq '"') {
+            [void]$quoted.Append('\' * (2 * $slashes + 1))
+            [void]$quoted.Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$quoted.Append('\' * $slashes); $slashes = 0 }
+        [void]$quoted.Append($ch)
+    }
+    [void]$quoted.Append('\' * (2 * $slashes))
+    [void]$quoted.Append('"')
+    return $quoted.ToString()
+}
+
 if ($DefineOnly) { return }
 
 # ---------------------------------------------------------------- diagnostic log
@@ -108,6 +291,8 @@ $foundGame = Find-BibitesGameDirectory
 $defaultRuntime = if ($hasBundledGame) { 'bundled' } else { 'external' }
 Write-SetupLog "hasBundledGame=$hasBundledGame defaultRuntime=$defaultRuntime foundGame=$foundGame"
 
+
+
 if ($Probe) {
     $manifestMatches = $true
     $manifestFiles = 0
@@ -144,6 +329,18 @@ if ($Probe) {
     exit 0
 }
 
+# Read after the probe, which opens no window and installs nothing: what is
+# already here only matters to the two boxes this window is about to fill in.
+# The data root is the installer's own default, because this window never passes
+# -DataRoot, and the application folder is the one it would install into.
+$previousDataRoot = ''
+if ($env:LOCALAPPDATA) { $previousDataRoot = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse' }
+$previousNames = Get-PreviousPublicNames `
+    -DataRoot    $previousDataRoot `
+    -ProgramRoot $(if ($InstallRoot) { $InstallRoot } else { $Here })
+Write-SetupLog ("previousInstall={0} keeperAnswered={1} worldNameAnswered={2}" -f `
+    $previousNames.Present, $previousNames.KeeperAnswered, $previousNames.WorldNameAnswered)
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -151,7 +348,7 @@ Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Install Bibites Multiverse 0.3.8'
 $form.StartPosition = 'CenterScreen'
-$form.ClientSize = New-Object System.Drawing.Size(650, 440)
+$form.ClientSize = New-Object System.Drawing.Size(650, 576)
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
@@ -245,30 +442,104 @@ $browse.Add_Click({
     $dialog.Dispose()
 })
 
+# THE TWO NAMES THIS WORLD IS PUBLISHED UNDER, on the screen that installs it.
+#
+# They are filled in and they are EDITABLE, and WHAT THEY ARE FILLED IN WITH
+# depends on whether this computer has answered before:
+#
+#   an upgrade    the names this installation already publishes, read above. An
+#                 empty box is a decline somebody made and it stays empty.
+#   a fresh one   the Windows account name, offered and never taken, with
+#                 "<that name>'s world" beside it.
+#
+# Either way nothing is derived behind the person's back and nothing is taken
+# without being shown first, which is the whole rule these two fields carry
+# (contract-b-m4.md §33, B49) - so they are on the form, above the button that
+# publishes them, rather than in a setting somebody would have to go looking for
+# afterwards.
+$namesTitle = New-Object System.Windows.Forms.Label
+$namesTitle.Text = 'How your world is shown to everyone else'
+$namesTitle.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 10)
+$namesTitle.AutoSize = $true
+$namesTitle.Location = New-Object System.Drawing.Point(30, 284)
+$form.Controls.Add($namesTitle)
+
+$keeperLabel = New-Object System.Windows.Forms.Label
+$keeperLabel.Text = 'Your name on the map'
+$keeperLabel.AutoSize = $true
+$keeperLabel.Location = New-Object System.Drawing.Point(30, 318)
+$form.Controls.Add($keeperLabel)
+
+$keeperBox = New-Object System.Windows.Forms.TextBox
+$keeperBox.Location = New-Object System.Drawing.Point(230, 315)
+$keeperBox.Size = New-Object System.Drawing.Size(290, 27)
+$keeperBox.Text = if ($previousNames.KeeperAnswered) {
+    $previousNames.Keeper
+} else {
+    Get-SuggestedKeeperName
+}
+$form.Controls.Add($keeperBox)
+
+$worldNameLabel = New-Object System.Windows.Forms.Label
+$worldNameLabel.Text = "This world's name"
+$worldNameLabel.AutoSize = $true
+$worldNameLabel.Location = New-Object System.Drawing.Point(30, 352)
+$form.Controls.Add($worldNameLabel)
+
+$worldNameBox = New-Object System.Windows.Forms.TextBox
+$worldNameBox.Location = New-Object System.Drawing.Point(230, 349)
+$worldNameBox.Size = New-Object System.Drawing.Size(290, 27)
+$worldNameBox.Text = if ($previousNames.WorldNameAnswered) {
+    $previousNames.WorldName
+} elseif ($keeperBox.Text -and -not (Get-PublicNameProblem "$($keeperBox.Text)'s world")) {
+    "$($keeperBox.Text)'s world"
+} else {
+    ''
+}
+$form.Controls.Add($worldNameBox)
+
+$namesNote = New-Object System.Windows.Forms.Label
+# TWO LINES, EITHER WAY. There is room for two above the checkbox below and no
+# more, so the upgrade wording says where the values came from and keeps the one
+# instruction that is not obvious: an emptied box publishes nothing.
+$namesNote.Text = if ($previousNames.Present) {
+    'These are the names this installation already publishes, and everyone on the' +
+    [Environment]::NewLine +
+    'map sees them exactly as typed. Empty a box to publish nothing in its place.'
+} else {
+    'Both are published publicly with your world: everyone on the map sees them,' +
+    [Environment]::NewLine +
+    'exactly as typed. Empty a box to publish nothing in its place.'
+}
+$namesNote.AutoSize = $true
+$namesNote.ForeColor = [System.Drawing.Color]::DimGray
+$namesNote.Location = New-Object System.Drawing.Point(30, 384)
+$form.Controls.Add($namesNote)
+
 $startAfter = New-Object System.Windows.Forms.CheckBox
 $startAfter.Text = 'After installation, start The Bibites, connect, and open the launcher'
 $startAfter.AutoSize = $true
 $startAfter.Checked = $true
-$startAfter.Location = New-Object System.Drawing.Point(30, 300)
+$startAfter.Location = New-Object System.Drawing.Point(30, 436)
 $form.Controls.Add($startAfter)
 
 $connectionNote = New-Object System.Windows.Forms.Label
 $connectionNote.Text = 'The map gives this installation a unique identity. No join string is shared with another player.'
 $connectionNote.AutoSize = $true
 $connectionNote.ForeColor = [System.Drawing.Color]::DimGray
-$connectionNote.Location = New-Object System.Drawing.Point(50, 328)
+$connectionNote.Location = New-Object System.Drawing.Point(50, 464)
 $form.Controls.Add($connectionNote)
 
 $cancel = New-Object System.Windows.Forms.Button
 $cancel.Text = 'Cancel'
 $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-$cancel.Location = New-Object System.Drawing.Point(430, 382)
+$cancel.Location = New-Object System.Drawing.Point(430, 518)
 $cancel.Size = New-Object System.Drawing.Size(90, 34)
 $form.Controls.Add($cancel)
 
 $install = New-Object System.Windows.Forms.Button
 $install.Text = 'Install'
-$install.Location = New-Object System.Drawing.Point(530, 382)
+$install.Location = New-Object System.Drawing.Point(530, 518)
 $install.Size = New-Object System.Drawing.Size(90, 34)
 $form.Controls.Add($install)
 $form.AcceptButton = $install
@@ -284,6 +555,40 @@ $install.Add_Click({
             'Game not found',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning)
+        return
+    }
+
+    # THE TWO NAMES ARE CHECKED HERE, ON THE FORM, BEFORE ANYTHING STARTS.
+    #
+    # The installer below refuses a name it cannot carry, and it refuses it at
+    # step 8 - after step 6 has enrolled this world with the map and step 7 has
+    # imported a certificate. In a hidden console with its output redirected that
+    # refusal is a red line in a log file nobody is reading, and what this window
+    # would show is "Installation stopped" over a machine that is now half
+    # changed: an identity taken on the map, a mod inside the game, no launcher
+    # and no way back but the uninstaller.
+    #
+    # A box is a keyboard, and every other keyboard in this project gets told and
+    # asked again. So this one does too, before the child process exists.
+    foreach ($field in @(
+        @{ Box = $keeperBox;    What = 'Your name on the map' },
+        @{ Box = $worldNameBox; What = "This world's name" })) {
+        $typed = "$($field.Box.Text)".Trim()
+        # An empty box, and the '-' somebody may type into one, are both the
+        # decline. There is nothing to bound about publishing nothing.
+        if (-not $typed -or $typed -eq '-') { continue }
+        $problem = Get-PublicNameProblem $typed
+        if (-not $problem) { continue }
+        Write-SetupLog "refused $($field.What): $problem"
+        [void][System.Windows.Forms.MessageBox]::Show(
+            $form,
+            ($problem + [Environment]::NewLine + [Environment]::NewLine +
+             'Type another one, or empty the box to publish nothing in its place.'),
+            ("$($field.What) cannot be published"),
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning)
+        [void]$field.Box.Focus()
+        $field.Box.SelectAll()
         return
     }
 
@@ -306,13 +611,31 @@ $install.Add_Click({
     }
     $log = Join-Path $logDir ('install-' + $logStamp + '.log')
     Write-SetupLog "installLog=$log"
+    # -Unattended: this window is the keyboard, and the process it starts has a
+    # hidden console nobody can type into. Every question the installer would ask
+    # is answered here or not asked at all.
     $arguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $installer,
-                   '-RuntimeSelection', $runtime)
+                   '-RuntimeSelection', $runtime, '-Unattended')
     if ($InstallRoot) { $arguments += @('-InstallRoot', $InstallRoot) }
     if ($external.Checked) { $arguments += @('-GameDir', $pathBox.Text) }
     if ($startAfter.Checked) { $arguments += '-StartAfterInstall' }
+    # BOTH ARE ALWAYS PASSED, and an emptied box is passed as '-' - the same
+    # character every prompt in this project takes as "publish none".
+    #
+    # ALWAYS is the load-bearing word. The installer below asks at the keyboard
+    # for a name it was not given, and the process this window starts has a
+    # hidden console with its output redirected: a question asked there would
+    # wait forever, on a screen that says "Installing. Keep this window open."
+    # An answer given here is an answer it never has to ask for.
+    #
+    # WHAT IS PASSED IS WHAT IS IN THE BOX, which on an upgrade is what this
+    # installation already publishes unless somebody edited it on this screen.
+    # These flags beat the stored value in the installer, so filling the boxes
+    # from the install above is what keeps that from being a silent rename.
+    $arguments += @('-Keeper',    (Get-PublishedNameArgument $keeperBox.Text))
+    $arguments += @('-WorldName', (Get-PublishedNameArgument $worldNameBox.Text))
 
-    $quoted = @($arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join ' '
+    $quoted = @($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
     $form.UseWaitCursor = $true
     $form.Controls | ForEach-Object { $_.Enabled = $false }
     $gameStatus.Text = 'Installing. Keep this window open.'

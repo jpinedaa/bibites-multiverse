@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Every rule a world has to satisfy before the launcher will write it down.
@@ -368,6 +370,79 @@ func resolveExcludeSpecies(value string, noExclusion bool) (string, error) {
 	return value, nil
 }
 
+// resolvePublicName is the ONE reader of a keeper handle or a world name,
+// wherever it came from: a flag, a console prompt, the menu, or a dialog in the
+// window. It returns the value that may be written down, and it refuses rather
+// than repairs — a name is published under somebody's own hand, so a value this
+// program had to fix is a value they should be asked about again.
+//
+// declineToken is the whole of the decline, and it is the same character at
+// every prompt: blank takes the value on offer, '-' leaves the field unset.
+func resolvePublicName(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == declineToken {
+		return "", nil
+	}
+	if !utf8.ValidString(trimmed) {
+		return "", fmt.Errorf("that is not valid text (UTF-8), and a name is published exactly as it is typed")
+	}
+	for _, r := range trimmed {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("that holds a control character, which is not something a map, " +
+				"a log or a web page can show. Type it again without it")
+		}
+	}
+	if len(trimmed) > MaxPublicNameBytes {
+		return "", fmt.Errorf("that is %d bytes long and a published name may be at most %d "+
+			"(an accented or non-Latin letter is more than one byte). Shorten it, or type %s to publish none",
+			len(trimmed), MaxPublicNameBytes, declineToken)
+	}
+	return trimmed, nil
+}
+
+// validatePublicNames re-runs that rule on the whole profile, so a value that
+// reached a write without going through a prompt — a dialog in the window, a
+// hand-edited file being written back — is judged by it too.
+func validatePublicNames(p Profile) error {
+	for _, field := range []struct {
+		what  string
+		value string
+	}{
+		{"the keeper handle ('keeper')", p.Keeper},
+		{"this world's published name ('worldName')", p.WorldName},
+	} {
+		if field.value == "" {
+			continue
+		}
+		clean, err := resolvePublicName(field.value)
+		if err != nil {
+			return fmt.Errorf("%s cannot be published: %w", field.what, err)
+		}
+		// A value that only SURVIVED the rule after being trimmed is not the
+		// value that was written down, and what is written down is what the
+		// sidecar publishes. It is refused here so that the file and the map
+		// cannot disagree about somebody's name.
+		//
+		// THE TWO WAYS THAT HAPPENS GET THEIR OWN SENTENCE, because a message
+		// about spaces over a value that has none is worse than no message: it
+		// sends somebody looking for whitespace in a field holding one character.
+		// Every path that ASKS resolves the decline before it gets here, so a
+		// profile holding the token itself is a hand-edited file — the one reader
+		// that never saw a prompt — and the honest answer is that the decline is
+		// an EMPTY field rather than a character written into one.
+		if clean != field.value {
+			if strings.TrimSpace(field.value) == declineToken {
+				return fmt.Errorf("%s is written as '%s'. That is what a person TYPES at a "+
+					"prompt to publish no name; what gets written down for that answer is an "+
+					"empty value. Leave it empty", field.what, declineToken)
+			}
+			return fmt.Errorf("%s has spaces around it. Write it without them, or leave it "+
+				"empty to publish none", field.what)
+		}
+	}
+	return nil
+}
+
 // noExclusionWarning is the same warning the installer prints when the policy
 // is off, so the two front doors say the same thing.
 const noExclusionWarning = `  species that       NONE - the exclusion policy is OFF
@@ -446,6 +521,13 @@ func validateNewProfile(p Profile, others []Profile, install Install) error {
 		return err
 	}
 	if err := validateSaveKeep(p.SaveKeep); err != nil {
+		return err
+	}
+	// The two public names are checked on every write and NOT on the read
+	// (validateProfileStructure): a keeper handle somebody typed a byte too much
+	// of is a thing to say no to at the prompt, never a reason to refuse to load
+	// a world that is already on the map.
+	if err := validatePublicNames(p); err != nil {
 		return err
 	}
 	return nil

@@ -48,18 +48,20 @@ var noteColour = walk.RGB(96, 96, 96)
 func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error) {
 	form := FormFor(p)
 	var (
-		dlg      *walk.Dialog
-		accept   *walk.PushButton
-		cancel   *walk.PushButton
-		save     *walk.LineEdit
-		port     *walk.LineEdit
-		headless *walk.CheckBox
-		edges    *walk.LineEdit
-		species  *walk.LineEdit
-		minutes  *walk.LineEdit
-		keep     *walk.LineEdit
-		onQuit   *walk.CheckBox
-		gameDir  *walk.LineEdit
+		dlg       *walk.Dialog
+		accept    *walk.PushButton
+		cancel    *walk.PushButton
+		save      *walk.LineEdit
+		port      *walk.LineEdit
+		headless  *walk.CheckBox
+		edges     *walk.LineEdit
+		species   *walk.LineEdit
+		minutes   *walk.LineEdit
+		keep      *walk.LineEdit
+		onQuit    *walk.CheckBox
+		gameDir   *walk.LineEdit
+		keeper    *walk.LineEdit
+		worldName *walk.LineEdit
 	)
 	var out WorldForm
 	accepted := false
@@ -69,7 +71,7 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 		Title:         "Settings for the world '" + p.Name + "'",
 		DefaultButton: &accept,
 		CancelButton:  &cancel,
-		MinSize:       d.Size{Width: dialogWidth, Height: 460},
+		MinSize:       d.Size{Width: dialogWidth, Height: 600},
 		Layout:        d.VBox{},
 		Children: []d.Widget{
 			d.GroupBox{
@@ -106,6 +108,26 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 					d.LineEdit{AssignTo: &species, Text: form.ExcludeSpecies,
 						CueBanner: "empty means every species may leave", ToolTipText: TipDialogSpecies},
 					note(DefaultNote(form.ExcludeSpecies, launcher.DefaultExcludeSpecies)),
+				},
+			},
+			d.GroupBox{
+				Title:  "How this world is shown to everyone else",
+				Layout: d.Grid{Columns: 3},
+				Children: []d.Widget{
+					label("Your name on the map"),
+					d.LineEdit{AssignTo: &keeper, Text: form.Keeper,
+						CueBanner: "empty publishes no name", ToolTipText: TipDialogKeeper},
+					note(""),
+
+					label("This world's name"),
+					d.LineEdit{AssignTo: &worldName, Text: form.WorldName,
+						CueBanner: "empty publishes no name", ToolTipText: TipDialogWorldName},
+					note(""),
+
+					d.TextLabel{
+						ColumnSpan: 3, MinSize: d.Size{Width: dialogWidth - 80},
+						TextColor: noteColour, Text: ProsePublishedNames,
+					},
 				},
 			},
 			d.GroupBox{
@@ -149,6 +171,8 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 								SaveKeep:       keep.Text(),
 								SaveOnQuit:     onQuit.Checked(),
 								GameDir:        gameDir.Text(),
+								Keeper:         keeper.Text(),
+								WorldName:      worldName.Text(),
 							}
 							accepted = true
 							dlg.Accept()
@@ -192,17 +216,19 @@ func label(text string) d.Widget {
 // core's own sentences, immediately above the button that acts on them.
 func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr error) (launcher.CreateSpec, bool, error) {
 	var (
-		dlg      *walk.Dialog
-		accept   *walk.PushButton
-		cancel   *walk.PushButton
-		advanced *walk.PushButton
-		more     *walk.Composite
-		name     *walk.LineEdit
-		world    *walk.LineEdit
-		port     *walk.LineEdit
-		dataRoot *walk.LineEdit
-		gameDir  *walk.LineEdit
-		headless *walk.CheckBox
+		dlg       *walk.Dialog
+		accept    *walk.PushButton
+		cancel    *walk.PushButton
+		advanced  *walk.PushButton
+		more      *walk.Composite
+		name      *walk.LineEdit
+		keeper    *walk.LineEdit
+		worldName *walk.LineEdit
+		world     *walk.LineEdit
+		port      *walk.LineEdit
+		dataRoot  *walk.LineEdit
+		gameDir   *walk.LineEdit
+		headless  *walk.CheckBox
 	)
 	out := spec
 	accepted := false
@@ -227,7 +253,7 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 		Title:         "Create a world on this computer",
 		DefaultButton: &accept,
 		CancelButton:  &cancel,
-		MinSize:       d.Size{Width: dialogWidth, Height: 400},
+		MinSize:       d.Size{Width: dialogWidth, Height: 540},
 		Layout:        d.VBox{},
 		Children: []d.Widget{
 			d.TextLabel{MinSize: d.Size{Width: dialogWidth - 40}, Text: ProseWhatIsAWorld},
@@ -244,6 +270,29 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 				Children: []d.Widget{
 					label("A name for the new world"),
 					d.LineEdit{AssignTo: &name, Text: spec.Name, ToolTipText: TipDialogName},
+				},
+			},
+			// THE TWO PUBLISHED NAMES ARE NOT BEHIND 'advanced'. Everything under
+			// that button is a setting about this computer; these two are the only
+			// things on this form other people read, so they are on screen before
+			// the button that publishes them - filled in, editable, and with the
+			// sentence that says what they are above them.
+			d.GroupBox{
+				Title:  "How this world is shown to everyone else",
+				Layout: d.Grid{Columns: 2},
+				Children: []d.Widget{
+					label("Your name on the map"),
+					d.LineEdit{AssignTo: &keeper, Text: spec.Keeper,
+						CueBanner: "empty publishes no name", ToolTipText: TipDialogKeeper},
+
+					label("This world's name"),
+					d.LineEdit{AssignTo: &worldName, Text: spec.WorldName,
+						CueBanner: "empty publishes no name", ToolTipText: TipDialogWorldName},
+
+					d.TextLabel{
+						ColumnSpan: 2, MinSize: d.Size{Width: dialogWidth - 80},
+						TextColor: noteColour, Text: ProsePublishedNames,
+					},
 				},
 			},
 			d.Composite{
@@ -299,6 +348,11 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 						Text:     ButtonDialogCreate,
 						OnClicked: func() {
 							out.Name = strings.TrimSpace(name.Text())
+							// An emptied box publishes nothing, and it
+							// reaches the core as nothing rather than as a
+							// value the core would have to interpret.
+							out.Keeper = strings.TrimSpace(keeper.Text())
+							out.WorldName = strings.TrimSpace(worldName.Text())
 							out.World = strings.TrimSpace(world.Text())
 							out.DataRoot = strings.TrimSpace(dataRoot.Text())
 							out.GameDir = strings.TrimSpace(gameDir.Text())

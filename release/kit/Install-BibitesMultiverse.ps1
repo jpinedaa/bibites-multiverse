@@ -99,6 +99,34 @@
     The name of the world this install runs. Defaults to Multiverse. The game
     seeds it on the first start.
 
+.PARAMETER Keeper
+    THE HANDLE THIS WORLD IS PUBLISHED UNDER, and it is PUBLIC: every other world
+    on the map, and everyone the map's operator has authorised to watch it, sees
+    it. It is a caption and never an address - nothing routes, logs in or looks
+    your world up by it.
+
+    Left out, an installer with somebody at the keyboard OFFERS your Windows
+    account name and waits for you to accept it, change it or decline; an
+    installer with nobody there publishes nothing. Pass '-' to publish nothing
+    without being asked, which is what the graphical setup passes for a box you
+    cleared. NOTHING IS EVER DERIVED SILENTLY: a world with no keeper is shown
+    as unknown, which is a choice and not a gap.
+
+.PARAMETER WorldName
+    The name this world is shown under on the map, on the same terms as -Keeper:
+    public, offered rather than assumed, '-' to publish none. The value offered
+    is "<your keeper>'s world".
+
+.PARAMETER Unattended
+    Ask nothing at the keyboard. This run uses only what it was given, and a
+    value nobody supplied stays unset rather than being guessed at.
+
+    It is for a script, a packager or a test that runs this installer from
+    another script - anything that would sit for ever at a question nobody is
+    watching. It changes no value's meaning: an unattended run simply publishes
+    no name it was not handed, and an upgrade still keeps what this installation
+    already had.
+
 .PARAMETER ExportEdges
     The edges your world exports through. THE DEFAULT IS ALL FOUR and the
     installer writes the value explicitly, so a future change to the mod's own
@@ -152,6 +180,8 @@ param(
     [string]$DataRoot = '',
     [string]$InstallRoot = '',
     [string]$World = 'Multiverse',
+    [string]$Keeper = '',
+    [string]$WorldName = '',
     [string]$ExportEdges = 'E,N,W,S',
     [string]$ExcludeSpecies = 'Basic bibite',
     [switch]$NoMigrationExclusion,
@@ -161,7 +191,8 @@ param(
     [ValidateSet('on', 'off')][string]$SaveOnQuit = 'on',
     [switch]$StartAfterInstall,
     [switch]$SkipCaImport,
-    [switch]$ReplaceWorldIdentity
+    [switch]$ReplaceWorldIdentity,
+    [switch]$Unattended
 )
 
 $ErrorActionPreference = 'Stop'
@@ -218,6 +249,161 @@ function Stop-Setup {
 function Get-Sha256 {
     param([string]$Path)
     return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+# ------------------------------------------------- the two names this world publishes
+#
+# -Keeper and -WorldName are the only two settings in this script that are
+# PUBLISHED TO OTHER PEOPLE rather than applied to this computer, and they are
+# the only two a participant chooses for themselves (contract-b-m4.md §33, B49).
+# So they get their own rules, and the rules are the same three everywhere in
+# this project - the launcher, the console menu, both installers:
+#
+#   a blank answer TAKES THE VALUE ON SCREEN, which was shown before it was taken;
+#   '-' publishes nothing;
+#   nothing is ever derived in silence. With nobody at the keyboard, both stay
+#   unset, and no Windows account name reaches the map because a script ran
+#   unattended.
+$DeclineToken = '-'
+$MaxPublicNameBytes = 64
+
+function Test-CanAskAtKeyboard {
+    # WHETHER THERE IS SOMEBODY THERE, and the answer is NO unless this can be
+    # proven. A hidden console with redirected output - which is exactly how the
+    # graphical setup runs this script - must never reach a Read-Host: it would
+    # wait on a keyboard nobody can see, for as long as the person is willing to
+    # watch an installer do nothing.
+    #
+    # -Unattended is the caller SAYING SO, and it wins over every guess below: a
+    # script that runs this installer from another script has a console with a
+    # keyboard attached and nobody sitting at it.
+    if ($Unattended) { return $false }
+    try {
+        if ([Console]::IsInputRedirected) { return $false }
+        if ([Console]::IsOutputRedirected) { return $false }
+        return [Environment]::UserInteractive
+    } catch {
+        return $false
+    }
+}
+
+function Get-PublicNameProblem {
+    # The sidecar clips a name it is handed and says so in its log, because a
+    # configuration file must not stop a world joining the map. A person typing
+    # one can be told instead, so this refuses rather than repairs.
+    param([string]$Value)
+    if ([System.Text.Encoding]::UTF8.GetByteCount($Value) -gt $MaxPublicNameBytes) {
+        return ("that is longer than $MaxPublicNameBytes bytes, which is the most the map carries " +
+                "(an accented or non-Latin letter is more than one byte)")
+    }
+    foreach ($ch in $Value.ToCharArray()) {
+        if ([char]::IsControl($ch)) {
+            return 'that holds a control character, which no map, log or web page can show'
+        }
+    }
+    return ''
+}
+
+function Resolve-PublicName {
+    # One reader for a value that came from a parameter. '-' and empty both mean
+    # PUBLISH NOTHING, which is the whole of the decline.
+    param([string]$Value, [string]$Parameter)
+    $trimmed = "$Value".Trim()
+    if (-not $trimmed -or $trimmed -eq $DeclineToken) { return '' }
+    $problem = Get-PublicNameProblem $trimmed
+    if ($problem) { Stop-Setup "$($Parameter): $problem." }
+    return $trimmed
+}
+
+function Read-PublicName {
+    # One question, with the value it would publish ON SCREEN before it is taken.
+    param([string]$What, [string]$Suggested)
+    while ($true) {
+        $shown = if ($Suggested) { $Suggested } else { 'none' }
+        # A HOST WITH NO KEYBOARD THROWS HERE, and the answer to a question that
+        # could not be asked is the same as the answer to one nobody typed into:
+        # nothing is published. It is never the suggestion.
+        try {
+            $answer = Read-Host -Prompt "     $What, published publicly [$shown]"
+        } catch {
+            return ''
+        }
+        if ($null -eq $answer) { return '' }
+        $answer = $answer.Trim()
+        if (-not $answer) { return $Suggested }
+        if ($answer -eq $DeclineToken) { return '' }
+        $problem = Get-PublicNameProblem $answer
+        if (-not $problem) { return $answer }
+        Say "$problem."
+        Say "Type it again, or $DeclineToken to publish none."
+    }
+}
+
+function Get-SuggestedKeeper {
+    # OFFERED, NEVER TAKEN. The Windows account name is what a person would
+    # recognise as themselves and is exactly the kind of name they might not want
+    # published, which is why it appears on screen and waits.
+    $name = "$env:UserName".Trim()
+    $cut = $name.LastIndexOfAny([char[]]@('\', '/'))
+    if ($cut -ge 0) { $name = $name.Substring($cut + 1) }
+    if (-not $name -or (Get-PublicNameProblem $name)) { return '' }
+    return $name
+}
+
+function Get-SuggestedWorldName {
+    param([string]$Keeper)
+    if (-not $Keeper) { return '' }
+    $name = "$Keeper's world"
+    if (Get-PublicNameProblem $name) { return '' }
+    return $name
+}
+
+# EVERY FILE THIS INSTALLER WRITES IS ASCII, and the two functions below are why
+# that is still true now that a participant may type their own name into it.
+#
+# A .ps1 with no byte order mark is read as the system code page by Windows
+# PowerShell and as UTF-8 by PowerShell 7, so a generated script with a literal
+# accented letter in it would mean two different names on two editions of the
+# same shell - and the JSON write below would turn one into a question mark
+# outright. Both are escaped instead, so what a person typed survives on both.
+
+function ConvertTo-StartScriptLiteral {
+    # The value as a PowerShell expression for the generated start script.
+    #
+    # A PLAIN NAME STAYS A PLAIN QUOTED STRING, because that file is one a
+    # participant is invited to edit, and an apostrophe - which the offered world
+    # name, "<keeper>'s world", always has - is doubled, the way PowerShell
+    # spells one inside single quotes. Anything outside ASCII is written as the
+    # escape for exactly the characters that were typed.
+    param([string]$Value)
+    $plain = $true
+    foreach ($ch in "$Value".ToCharArray()) {
+        if ([int]$ch -gt 126) { $plain = $false; break }
+    }
+    if ($plain) { return "'" + "$Value".Replace("'", "''") + "'" }
+    $escaped = New-Object System.Text.StringBuilder
+    foreach ($ch in "$Value".ToCharArray()) {
+        if ([int]$ch -gt 126)  { [void]$escaped.AppendFormat('\u{0:x4}', [int]$ch) }
+        elseif ($ch -eq '\')   { [void]$escaped.Append('\\') }
+        else                   { [void]$escaped.Append($ch) }
+    }
+    return "[regex]::Unescape('" + $escaped.ToString().Replace("'", "''") + "')"
+}
+
+function ConvertTo-AsciiJson {
+    # JSON with every character above ASCII written as \uXXXX, which is JSON's
+    # own escape and is what Windows PowerShell's ConvertTo-Json already emits.
+    # PowerShell 7's does not, and the ASCII write would then replace the
+    # character with a question mark - a name nobody typed, published under
+    # somebody's own hand. Only string contents can be non-ASCII in JSON, so
+    # escaping the whole document is safe.
+    param([string]$Json)
+    $out = New-Object System.Text.StringBuilder
+    foreach ($ch in "$Json".ToCharArray()) {
+        if ([int]$ch -gt 126) { [void]$out.AppendFormat('\u{0:x4}', [int]$ch) }
+        else                  { [void]$out.Append($ch) }
+    }
+    return $out.ToString()
 }
 
 # ------------------------------------------------- 0. nothing of this may be running
@@ -652,6 +838,39 @@ function Get-PreviousInstall {
     return $previous
 }
 
+function Find-PreviousSetting {
+    # WHERE AN UPGRADE'S VALUES COME FROM, in one place, so that everything which
+    # asks about them asks the same two files in the same order:
+    #
+    #   1. the launcher's profile - what this installation is running now.
+    #   2. the previous install record - what this installer last set.
+    #
+    # It answers with BOTH whether a source carried the setting and what it said,
+    # because for the two published names those are different questions: an empty
+    # keeper that IS in the profile is somebody's decline, and an absent one is a
+    # question this installation has never been asked.
+    param($Previous, [string]$ProfileField, [string]$RecordField)
+    if ($Previous.Present) {
+        if ($Previous.Profile -and $ProfileField -and
+            $Previous.Profile.PSObject.Properties.Match($ProfileField).Count -gt 0) {
+            return [pscustomobject]@{ Found = $true; Value = $Previous.Profile.$ProfileField }
+        }
+        if ($Previous.Record -and $RecordField) {
+            $source = $Previous.Record
+            $found = $true
+            foreach ($part in ($RecordField -split '\.')) {
+                if ($null -eq $source -or $source.PSObject.Properties.Match($part).Count -eq 0) {
+                    $found = $false
+                    break
+                }
+                $source = $source.$part
+            }
+            if ($found) { return [pscustomobject]@{ Found = $true; Value = $source } }
+        }
+    }
+    return [pscustomobject]@{ Found = $false; Value = $null }
+}
+
 function Get-PreviousSetting {
     # ONE VALUE, FROM THE STRONGEST SOURCE THAT HAS IT. The order is the whole
     # rule of an upgrade:
@@ -666,22 +885,24 @@ function Get-PreviousSetting {
     # only thing that can tell "-World Multiverse" from a default that happens to
     # equal it.
     param($Previous, [bool]$Named, [string]$ProfileField, [string]$RecordField, $Current)
-    if ($Named -or -not $Previous.Present) { return $Current }
-    if ($Previous.Profile -and $ProfileField -and
-        $Previous.Profile.PSObject.Properties.Match($ProfileField).Count -gt 0) {
-        return $Previous.Profile.$ProfileField
-    }
-    if ($Previous.Record -and $RecordField) {
-        $source = $Previous.Record
-        foreach ($part in ($RecordField -split '\.')) {
-            if ($null -eq $source -or $source.PSObject.Properties.Match($part).Count -eq 0) {
-                return $Current
-            }
-            $source = $source.$part
-        }
-        return $source
-    }
+    if ($Named) { return $Current }
+    $previousValue = Find-PreviousSetting $Previous $ProfileField $RecordField
+    if ($previousValue.Found) { return $previousValue.Value }
     return $Current
+}
+
+function Test-PreviousSetting {
+    # WHETHER THIS INSTALLATION HAS AN ANSWER TO THAT QUESTION AT ALL, from the
+    # same two sources in the same order Get-PreviousSetting adopts from.
+    #
+    # THE TWO HAVE TO AGREE, and they did not: this asked the profile alone while
+    # the adoption above also took the install record, so an installation whose
+    # record carried a decline and whose profile was missing - a launcher profile
+    # somebody deleted, a data root restored without the application folder - was
+    # told it had never been asked, and an upgrade at a keyboard offered the
+    # Windows account name over a name its keeper had already refused.
+    param($Previous, [string]$ProfileField, [string]$RecordField)
+    return (Find-PreviousSetting $Previous $ProfileField $RecordField).Found
 }
 
 Step "0 of 9 - check that nothing of this installation is running"
@@ -2254,7 +2475,42 @@ if ($previousInstall.Present) {
             $NoMigrationExclusion = $true
         }
     }
+    $Keeper    = [string](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('Keeper')) `
+                                'keeper' 'settings.keeper' $Keeper)
+    $WorldName = [string](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('WorldName')) `
+                                'worldName' 'settings.worldName' $WorldName)
     Say "keeping the settings this installation already had; name a flag to change one."
+}
+
+# THE TWO PUBLISHED NAMES, ASKED FOR ONCE.
+#
+# A value on the command line is an answer and is never asked about again; so is
+# a value this installation already carries, INCLUDING AN EMPTY ONE - a
+# participant who declined last time is not asked every upgrade. What is left is
+# an installation that has never been through the question, and it is asked only
+# when there is somebody at the keyboard to answer.
+$Keeper    = Resolve-PublicName $Keeper '-Keeper'
+$WorldName = Resolve-PublicName $WorldName '-WorldName'
+$keeperAnswered = $PSBoundParameters.ContainsKey('Keeper') -or
+                  (Test-PreviousSetting $previousInstall 'keeper' 'settings.keeper')
+$worldNameAnswered = $PSBoundParameters.ContainsKey('WorldName') -or
+                     (Test-PreviousSetting $previousInstall 'worldName' 'settings.worldName')
+if ((-not ($keeperAnswered -and $worldNameAnswered)) -and (Test-CanAskAtKeyboard)) {
+    Write-Host ""
+    Say "Two names go out with this world, and they are the only two on the map you"
+    Say "choose yourself: the handle you are known by, and this world's own name. Both"
+    Say "are PUBLIC - every other world on the map, and everyone its operator has"
+    Say "authorised to watch it, sees them exactly as you type them here."
+    Say "Press Enter to take what is offered, type your own, or type $DeclineToken to publish none."
+    Write-Host ""
+    if (-not $keeperAnswered) {
+        $suggested = if ($Keeper) { $Keeper } else { Get-SuggestedKeeper }
+        $Keeper = Read-PublicName 'your keeper handle' $suggested
+    }
+    if (-not $worldNameAnswered) {
+        $suggested = if ($WorldName) { $WorldName } else { Get-SuggestedWorldName $Keeper }
+        $WorldName = Read-PublicName "this world's name" $suggested
+    }
 }
 
 $edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
@@ -2314,6 +2570,19 @@ Say "                     $SaveKeep copies of your world on your disk. The inter
 Say "                     often your world pauses to write itself out"
 Say "  save on quit       $SaveOnQuit"
 Say "                     your world is written out when the game closes, so stopping is not losing"
+if ($Keeper) {
+    Say "  keeper handle      '$Keeper'"
+    Say "                     PUBLIC: shown beside your world to everyone on the map"
+} else {
+    Say "  keeper handle      none - your world is shown as unknown, and nothing invents a name"
+    Say "                     for you. Set one later with the launcher's 'profile set' command"
+}
+if ($WorldName) {
+    Say "  world name         '$WorldName'"
+    Say "                     PUBLIC, on the same terms. It is a caption, never an address"
+} else {
+    Say "  world name         none - your world is shown by its place on the map alone"
+}
 Say "  speed              starts at x$StartupTimeScale"
 Say "                     the game's own speed is x1, and the map around you does not run that slow."
 Say "                     Your machine is not asked for more than it can draw: the game holds the"
@@ -2438,6 +2707,13 @@ $SidecarExe  = '@@SIDECAREXE@@'
 $PeerId      = '@@PEERID@@'
 $World       = '@@WORLD@@'
 $SidecarPort = '@@SIDECARPORT@@'
+# The two names this world is PUBLISHED under, which you chose when you
+# installed it. Empty means this world publishes none, and that is a choice the
+# sidecar carries out exactly: an empty value here sends no flag at all, and
+# nothing downstream invents a name for a world that published none. Edit them
+# here to change what the map shows, or use the launcher's 'profile set'.
+$Keeper      = @@KEEPER@@
+$WorldName   = @@WORLDNAME@@
 
 $dataDir        = Join-Path $DataRoot 'data'
 $logDir         = Join-Path $DataRoot 'logs'
@@ -2535,6 +2811,49 @@ if (-not (Test-Path $credentialFile)) {
 }
 
 Remove-Item -Path $log, "$log.out" -ErrorAction SilentlyContinue
+
+function ConvertTo-NativeArgument {
+    # ONE ARGUMENT, QUOTED THE WAY WINDOWS TAKES IT APART AGAIN.
+    #
+    # WHY THIS EXISTS. Start-Process does not quote anything for you: it joins
+    # -ArgumentList with single spaces and hands Windows the result, on Windows
+    # PowerShell 5.1 and on PowerShell 7 alike. So the world name this installer
+    # offers - "<keeper>'s world", which ALWAYS has a space in it - was handed
+    # over as two arguments, and a world published as "Alice's world" reached the
+    # map as "Alice's". Nothing failed and nothing said so.
+    #
+    # THERE IS NO ARGUMENT ARRAY UNDERNEATH. A Windows process is given ONE
+    # string and splits it itself, by CommandLineToArgvW's rules, which are the
+    # three this function implements:
+    #
+    #   * a run inside double quotes may hold spaces;
+    #   * a backslash is an ordinary character EXCEPT in the run immediately
+    #     before a double quote, where the run is halved and the quote it
+    #     precedes is escaped;
+    #   * so the backslashes before a quote - the closing one included - must be
+    #     DOUBLED here. A value ending in a backslash, wrapped in quotes the
+    #     obvious way, escapes its own closing quote and swallows the rest of
+    #     the command line.
+    param([string]$Value)
+    $quoted = New-Object System.Text.StringBuilder
+    [void]$quoted.Append('"')
+    $slashes = 0
+    foreach ($ch in "$Value".ToCharArray()) {
+        if ($ch -eq '\') { $slashes++; continue }
+        if ($ch -eq '"') {
+            [void]$quoted.Append('\' * (2 * $slashes + 1))
+            [void]$quoted.Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$quoted.Append('\' * $slashes); $slashes = 0 }
+        [void]$quoted.Append($ch)
+    }
+    [void]$quoted.Append('\' * (2 * $slashes))
+    [void]$quoted.Append('"')
+    return $quoted.ToString()
+}
+
 # --credential-file carries the SECRET HALF only. The identity half is
 # --peer-id, and the relay refuses any connection whose credential does not
 # authenticate the identity it claims.
@@ -2545,7 +2864,15 @@ $sidecarArgs = @(
     '--data-dir',        $dataDir,
     '--credential-file', $credentialFile
 )
-$sidecar = Start-Process -FilePath $SidecarExe -PassThru -WindowStyle Hidden -WorkingDirectory $DataRoot -ArgumentList $sidecarArgs -RedirectStandardError $log -RedirectStandardOutput "$log.out"
+# AN UNSET NAME SENDS NO FLAG. --keeper '' is not the same thing as no --keeper:
+# unset is what somebody who declined chose, and a world that publishes none
+# publishes none.
+if ($Keeper)    { $sidecarArgs += @('--keeper',     $Keeper) }
+if ($WorldName) { $sidecarArgs += @('--world-name', $WorldName) }
+# ONE STRING, QUOTED HERE. Both editions of PowerShell pass a single -ArgumentList
+# string on unchanged, so this is the one form that means the same thing on both.
+$sidecarCommandLine = (@($sidecarArgs | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
+$sidecar = Start-Process -FilePath $SidecarExe -PassThru -WindowStyle Hidden -WorkingDirectory $DataRoot -ArgumentList $sidecarCommandLine -RedirectStandardError $log -RedirectStandardOutput "$log.out"
 Set-Content -Path $sidecarPidFile -Value $sidecar.Id -Encoding ASCII
 Write-Host "sidecar started (pid $($sidecar.Id)) -> $RelayUrl"
 Write-Host "waiting for the map to grant this world a place ..."
@@ -2809,6 +3136,8 @@ function Expand-Template {
                  Replace('@@SIDECAREXE@@',     $sidecarExe).
                  Replace('@@PEERID@@',         $peerId).
                  Replace('@@WORLD@@',          $World).
+                 Replace('@@KEEPER@@',         (ConvertTo-StartScriptLiteral $Keeper)).
+                 Replace('@@WORLDNAME@@',      (ConvertTo-StartScriptLiteral $WorldName)).
                  Replace('@@EXPORTEDGES@@',    $ExportEdges).
                  Replace('@@EXCLUDESPECIES@@', $ExcludeSpecies).
                  Replace('@@SAVEMINUTES@@',    [string]$SaveMinutes).
@@ -2873,8 +3202,16 @@ $defaultProfile = [ordered]@{
     peerId         = $peerId
     relayUrl       = $RelayUrl
     createdUtc     = $profileCreated
+    # THE TWO PUBLIC NAMES GO LAST, AND THEY ARE ALWAYS WRITTEN. The launcher's
+    # own writer emits the same seventeen keys in this order (Profile in
+    # go/internal/launcher/profile.go) and a test parses this file to keep the
+    # two from drifting; an unset name is an empty string in both, never a
+    # missing key.
+    keeper         = $Keeper
+    worldName      = $WorldName
 }
-$defaultProfile | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $defaultProfilePath -Encoding ASCII
+ConvertTo-AsciiJson ($defaultProfile | ConvertTo-Json -Depth 4) |
+    Set-Content -LiteralPath $defaultProfilePath -Encoding ASCII
 $activeProfile = if ($previousInstall.Active) { $previousInstall.Active } else { 'default' }
 Set-Content -LiteralPath (Join-Path $profilesDir 'active.txt') -Value $activeProfile -Encoding ASCII
 Say "wrote $defaultProfilePath - the launcher reads it"
@@ -2916,6 +3253,8 @@ $record = [ordered]@{
         saveMinutes    = [double]$SaveMinutes
         saveKeep       = [int]$SaveKeep
         saveOnQuit     = $saveOnQuitValue
+        keeper         = $Keeper
+        worldName      = $WorldName
     }
     plugin        = [ordered]@{
         path            = $pluginDst
@@ -2949,7 +3288,7 @@ $record = [ordered]@{
     logDir        = $logDir
 }
 $recordPath = Join-Path $DataRoot $RecordName
-$record | ConvertTo-Json -Depth 6 | Set-Content -Path $recordPath -Encoding ASCII
+ConvertTo-AsciiJson ($record | ConvertTo-Json -Depth 6) | Set-Content -Path $recordPath -Encoding ASCII
 Say "wrote $recordPath - the uninstall reads it, and removes only what is named in it"
 # The pending record holds a SECOND COPY of a secret. Once the install is
 # complete it has no use, on any path that led here, so it does not survive this

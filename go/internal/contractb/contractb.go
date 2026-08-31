@@ -613,6 +613,33 @@ type PeerStats struct {
 	// world that is not containing its own organisms.
 	WorldWrapping *bool `json:"worldWrapping,omitempty"`
 
+	// ------------------------------------------ who this world belongs to
+	//
+	// The two participant-chosen public strings of §33, B49. Everything above
+	// answers what a world is doing or what it was told to do; these two answer
+	// WHOSE IT IS, and they come from the sidecar's own configuration rather
+	// than from a mod — so they are published on a slot with no game running,
+	// exactly as InboundRatePerSimMinute is.
+	//
+	// NOTHING INVENTS EITHER OF THEM. There is no OS-username lookup, no save
+	// file, no derivation from the peerId: a name the participant did not choose
+	// is not a name they consented to publish, and empty is ABSENT rather than
+	// anonymous. Absence is unknown here as it is everywhere else on this block.
+	//
+	// Both are bounded ON THE AUTHORING SIDE — trimmed, control-stripped and
+	// clipped to 64 UTF-8 bytes at a rune boundary — so no reader downstream has
+	// to. They remain UNTRUSTED DISPLAY TEXT on the same footing as a census
+	// name: a renderer escapes them, and nothing keys, routes, matches or
+	// deduplicates on either.
+
+	// Keeper is the handle the participant running this world chose to be known
+	// by. It is not an identity: the routing address is the slot and the
+	// identity is the peerId, and two worlds may honestly carry the same keeper.
+	Keeper string `json:"keeper,omitempty"`
+	// WorldName is the display name that participant chose for this world. A
+	// label, never an identifier, on the same terms as Keeper.
+	WorldName string `json:"worldName,omitempty"`
+
 	// unknown is every key of the block this build does not have a field for,
 	// kept as it arrived and re-emitted on the way out. It is §16 B11's one
 	// SHOULD, "for the next field after this one": a relay that re-encodes a
@@ -639,6 +666,8 @@ var knownStatKeys = []string{
 	// §19, B18.
 	"modVersion", "contractAVersion", "migrationExclude",
 	"saveMinutes", "saveKeep", "saveOnQuit", "worldWrapping",
+	// §33, B49.
+	"keeper", "worldName",
 }
 
 // UnmarshalJSON decodes the block and REMEMBERS WHAT IT DID NOT UNDERSTAND

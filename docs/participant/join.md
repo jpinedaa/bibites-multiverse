@@ -241,7 +241,18 @@ subscriber the operator has authorised. Your block carries:
 - the mod version, the wire version, the game version;
 - your save policy, your exclusion list and whether your world wraps;
 - the speed the world is running at, its queue depths, and how many of its organisms have been
-  lost in transit.
+  lost in transit;
+- **the keeper handle you chose, if you set one** — the name you are known by on the map. It is
+  published exactly as you typed it, to everyone;
+- **the world name you chose, if you set one** — the label your world is shown under, published
+  the same way.
+
+**Those last two are the only things on that list you pick yourself, and nothing invents them
+for you.** If you set neither, your world publishes neither: no account name, no computer name
+and no file name is read off your machine to fill the gap, and your world simply appears
+unnamed. They are also the two things on the list that are shown to people rather than to
+software, so choose them the way you would choose a name in any public place — they are visible
+to every other world on the map and to everyone the operator has authorised to watch it.
 
 That is a fairly complete profile of one world on your machine, and it is written down here so
 that you know it before you join rather than after. **A subscriber sees nothing a peer does not

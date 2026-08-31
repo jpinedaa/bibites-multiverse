@@ -738,6 +738,14 @@ const (
 
 	ProseNoWorldToCopyFrom = "This installation has no world to copy from, so the folder the game " +
 		"is installed in has to be filled in below."
+
+	// ProsePublishedNames is the CONSENT, and it is above the two boxes rather
+	// than in a tooltip nobody hovers: these two are the only things about this
+	// computer that go out to be read by people, and both are filled in with a
+	// suggestion that becomes real only because somebody left it there.
+	ProsePublishedNames = "These two are published with your world and everyone on the map sees " +
+		"them, exactly as you type them. They are filled in with a suggestion - change either " +
+		"one, or empty a box to publish nothing in its place. Your world works the same either way."
 )
 
 // The dialogs' field tooltips. They are here for the same reason as the prose
@@ -758,7 +766,11 @@ const (
 	TipDialogAdvanced = "Everything else about the new world. All of it is already filled in with values that work."
 	TipDialogRemove   = "Deletes this world's own folder: what it is holding for other worlds, its logs and its key. Anything else in that folder is left where it is."
 	TipDialogTypeName = "The launcher deletes nothing unless this matches the world's name."
-	CheckSaveOnQuit   = "Write the world out before it quits"
+	TipDialogKeeper   = "The name you are known by on the map. It is shown to everyone, it is not " +
+		"a login and nothing uses it to find your world. Empty this box to publish no name at all."
+	TipDialogWorldName = "The name your world is shown under on the map. It is a caption and not " +
+		"an address: two worlds may share one. Empty this box to publish no name at all."
+	CheckSaveOnQuit = "Write the world out before it quits"
 )
 
 // DialogProse is every sentence and tooltip the dialogs show, for the test that
@@ -767,9 +779,11 @@ func DialogProse() []string {
 	return []string{
 		ProseWhatIsAWorld, ProseAnotherIdentity, ProseDeletingIsNotLeaving, ProseCustody,
 		ProseCloneCopies, ProseOnlyWhatChanged, ProseSaveFileIsSafe, ProseNoWorldToCopyFrom,
+		ProsePublishedNames,
 		TipDialogName, TipDialogCopyName, TipDialogSave, TipDialogPort, TipDialogNewPort,
 		TipDialogDataRoot, TipDialogGameDir, TipDialogEdges, TipDialogSpecies, TipDialogMinutes,
 		TipDialogKeep, TipDialogOnQuit, TipDialogAdvanced, TipDialogRemove, TipDialogTypeName,
+		TipDialogKeeper, TipDialogWorldName,
 	}
 }
 
@@ -890,6 +904,12 @@ type WorldForm struct {
 	SaveKeep       string
 	SaveOnQuit     bool
 	GameDir        string
+	// Keeper and WorldName are the two names this world is published under. An
+	// EMPTY BOX IS THE DECLINE here: the console has to spell that as a
+	// character, because a blank line at a prompt means "keep what is offered",
+	// but a box a person can see and clear needs no such spelling.
+	Keeper    string
+	WorldName string
 }
 
 // FormFor fills a form from a world.
@@ -904,6 +924,8 @@ func FormFor(p launcher.Profile) WorldForm {
 		SaveKeep:       strconv.Itoa(p.SaveKeep),
 		SaveOnQuit:     p.SaveOnQuit,
 		GameDir:        p.GameDir,
+		Keeper:         p.Keeper,
+		WorldName:      p.WorldName,
 	}
 }
 
@@ -965,7 +987,28 @@ func EditFlags(before launcher.Profile, after WorldForm) []string {
 	if trim(after.GameDir) != was.GameDir {
 		add("--game-dir", trim(after.GameDir))
 	}
+	// A CLEARED BOX IS A CHANGE, not a field left alone: it takes a name off the
+	// map. The core spells "publish none" as '-', because a blank value at a
+	// prompt means "keep the one on offer" — so the window sends the character
+	// the core reads rather than an empty value the core would have to guess at.
+	if trim(after.Keeper) != was.Keeper {
+		add("--keeper", declineIfEmpty(trim(after.Keeper)))
+	}
+	if trim(after.WorldName) != was.WorldName {
+		add("--world-name", declineIfEmpty(trim(after.WorldName)))
+	}
 	return flags
+}
+
+// PublishNone is what the core reads as "leave this public name unset", at every
+// prompt and on every flag that takes one.
+const PublishNone = "-"
+
+func declineIfEmpty(value string) string {
+	if value == "" {
+		return PublishNone
+	}
+	return value
 }
 
 // HeadlessFlag is the one flag the window's own checkbox sends. It goes through

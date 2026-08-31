@@ -58,9 +58,13 @@
          journal, the log and the credential. A file the release before this one
          shipped and this one does not is removed, and one somebody edited is
          kept and said so. A setting NAMED on the command line still wins over
-         the kept one. The framework this package unpacked into a game folder
-         somebody else chose is still this install's after two upgrades, so the
-         uninstall at the end takes it back out instead of leaving it there.
+         the kept one. THE TWO NAMES THIS WORLD IS PUBLISHED UNDER survive it as
+         well, and so does a DECLINE - taken with '-', kept by a run that names
+         nothing, and kept when the launcher's profile is gone and the install
+         record is the only thing left that remembers the answer. The framework
+         this package unpacked into a game folder somebody else chose is still
+         this install's after every one of those, so the uninstall at the end
+         takes it back out instead of leaving it there.
 
 .PARAMETER KitDir
     The staged archive contents - the folder holding Install-BibitesMultiverse.ps1,
@@ -174,6 +178,197 @@ Check "the GUI opens the launcher when start-after-install was selected" `
     ($guiCode -match '(?s)if \(\$startAfter\.Checked\) \{.{0,1200}Start-Process -FilePath \$launcherPath -WorkingDirectory \$programRoot')
 Check "a launcher-window failure does not report the completed install as failed" `
     ($guiCode -match '(?s)catch \{\s*\$launcherFailure = \$_\.Exception\.Message.{0,800}The launcher could not open')
+
+# ------------------------------------ the two names, against the window's own code
+#
+# THE GRAPHICAL SETUP IS THE ONLY INSTALLER MOST PARTICIPANTS EVER RUN, and every
+# question this project asks about the two published names it answers from its own
+# two boxes. So what goes INTO those boxes, and what comes out of them on the way
+# to the child process, is worth testing against the real functions rather than a
+# copy of them - which is what -DefineOnly is for: it loads the readers, the
+# bounds and the quoting without opening a window or writing a byte.
+. $guiInstaller -DefineOnly
+
+# WHAT THE BOXES ARE FILLED IN WITH. An upgrade must offer what this installation
+# already publishes, because the window PASSES those boxes as -Keeper and
+# -WorldName and a named flag beats the stored answer: a box filled from the
+# Windows account name would rename a world that had one, and un-decline a
+# decline. A fresh install is the only case the account name is offered in.
+$nRoot    = Join-Path $sandbox 'names'
+$nData    = Join-Path $nRoot 'data'
+$nProgram = Join-Path $nRoot 'program'
+New-Item -ItemType Directory -Force -Path (Join-Path $nProgram 'profiles') | Out-Null
+New-Item -ItemType Directory -Force -Path $nData | Out-Null
+$nProfilePath = Join-Path $nProgram 'profiles\default.json'
+$nRecordPath  = Join-Path $nData 'install-record.json'
+
+$nNone = Get-PreviousPublicNames -DataRoot $nData -ProgramRoot $nProgram
+Check "a computer with no install here has answered neither name" `
+    ((-not $nNone.Present) -and (-not $nNone.KeeperAnswered) -and (-not $nNone.WorldNameAnswered))
+
+# The record alone, carrying a DECLINE. This is the case the installer's own
+# answered-check used to get wrong: it read the launcher profile only, so a data
+# root whose record said "publishes nothing" and whose profile was gone counted
+# as never asked - and the account name was offered over somebody's refusal.
+@{ record = 'bibites-multiverse/install-record/3'; dataRoot = $nData
+   settings = @{ keeper = ''; worldName = '' } } |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nRecordPath -Encoding ASCII
+$nRecordOnly = Get-PreviousPublicNames -DataRoot $nData -ProgramRoot $nProgram
+Check "the install record alone is enough to have been asked" `
+    ($nRecordOnly.Present -and $nRecordOnly.KeeperAnswered -and $nRecordOnly.WorldNameAnswered)
+Check "and a decline in it fills both boxes with nothing" `
+    ($nRecordOnly.Keeper -eq '' -and $nRecordOnly.WorldName -eq '') `
+    ("keeper='$($nRecordOnly.Keeper)' worldName='$($nRecordOnly.WorldName)'")
+
+# The launcher's profile is the LIVE file - what this installation is running now
+# and where `profile set` writes - so it wins over the record behind it.
+@{ format = 'bibites-multiverse/launcher-profile/1'; name = 'default'; dataRoot = $nData
+   keeper = 'Nightjar'; worldName = 'The Deep' } |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nProfilePath -Encoding ASCII
+$nBoth = Get-PreviousPublicNames -DataRoot $nData -ProgramRoot $nProgram
+Check "the launcher's profile wins over the install record" `
+    ($nBoth.Keeper -eq 'Nightjar' -and $nBoth.WorldName -eq 'The Deep') `
+    ("keeper='$($nBoth.Keeper)' worldName='$($nBoth.WorldName)'")
+
+# A profile that describes ANOTHER world's folder says nothing about this one,
+# which is the same rule the installer's Get-PreviousInstall applies.
+@{ format = 'bibites-multiverse/launcher-profile/1'; name = 'default'
+   dataRoot = (Join-Path $nRoot 'somewhere-else'); keeper = 'Mallory'; worldName = 'Not yours' } |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nProfilePath -Encoding ASCII
+$nElsewhere = Get-PreviousPublicNames -DataRoot $nData -ProgramRoot $nProgram
+Check "a profile for another data root is not read" `
+    ($nElsewhere.Keeper -eq '' -and $nElsewhere.WorldName -eq '') `
+    ("keeper='$($nElsewhere.Keeper)' worldName='$($nElsewhere.WorldName)'")
+Remove-Item -LiteralPath $nProfilePath -Force
+Remove-Item -LiteralPath $nRecordPath -Force
+
+# WHAT THE BOXES REFUSE, on the form, BEFORE the child process starts. The
+# installer refuses an over-long name at step 8 - after enrollment and after the
+# certificate - and in a hidden console that refusal is a line in a log nobody is
+# reading, over a half-changed machine. The window applies the same two bounds.
+Check "a name inside the bound is accepted" ((Get-PublicNameProblem ('a' * 64)) -eq '')
+Check "a name one byte over it is refused" ((Get-PublicNameProblem ('a' * 65)) -ne '')
+Check "the bound is in BYTES, not characters" `
+    ((Get-PublicNameProblem ([string]([char]0x00E9) * 33)) -ne '')
+Check "a control character is refused" ((Get-PublicNameProblem "a`tb") -ne '')
+Check "an empty box is the decline and is passed as '-'" `
+    ((Get-PublishedNameArgument '  ') -eq '-')
+Check "and a typed name is passed trimmed" `
+    ((Get-PublishedNameArgument '  Alice  ') -eq 'Alice')
+
+# HOW THE WINDOW HANDS ITS ANSWERS OVER. There is no argument array underneath a
+# Windows process: it is given one string and splits it itself. A value ending in
+# a backslash, wrapped in quotes the obvious way, escapes its own closing quote
+# and swallows the flag behind it.
+Check "an ordinary value is quoted" ((ConvertTo-NativeArgument 'Alice') -eq '"Alice"')
+Check "a value with a space stays one argument" `
+    ((ConvertTo-NativeArgument "Alice's world") -eq '"Alice''s world"')
+Check "a trailing backslash is doubled before the closing quote" `
+    ((ConvertTo-NativeArgument 'C:\Games\The Bibites\') -eq '"C:\Games\The Bibites\\"')
+Check "an embedded quote is escaped" `
+    ((ConvertTo-NativeArgument 'Bob "the Builder"') -eq '"Bob \"the Builder\""')
+Check "and a backslash run before one is doubled first" `
+    ((ConvertTo-NativeArgument 'a\\"b') -eq '"a\\\\\"b"')
+
+# AND THE SAME STRING, THROUGH WINDOWS' OWN SPLITTER. CommandLineToArgvW is what
+# every process on this machine takes its arguments apart with, so it is the only
+# authority worth checking the quoting against. If it cannot be called here - a
+# host with no compiler for Add-Type - the literal checks above still stand and
+# this says so rather than passing quietly.
+$nSplitter = $null
+try {
+    if (-not ('BibitesNativeCommandLine' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class BibitesNativeCommandLine {
+    [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CommandLineToArgvW(string lpCmdLine, out int pNumArgs);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+    public static string[] Split(string commandLine) {
+        int count;
+        IntPtr block = CommandLineToArgvW(commandLine, out count);
+        if (block == IntPtr.Zero) { throw new InvalidOperationException("CommandLineToArgvW failed"); }
+        try {
+            string[] args = new string[count];
+            for (int i = 0; i < count; i++) {
+                args[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(block, i * IntPtr.Size));
+            }
+            return args;
+        } finally { LocalFree(block); }
+    }
+}
+'@
+    }
+    $nSplitter = [BibitesNativeCommandLine]
+} catch {
+    Write-Host ("  SKIP  Windows' own argument splitter is not available here: {0}" -f $_.Exception.Message) `
+        -ForegroundColor Yellow
+}
+if ($nSplitter) {
+    # The values a person can actually put in those boxes, and the two paths the
+    # window passes beside them. argv[0] is parsed by different rules, so a
+    # stand-in program name goes first and is dropped.
+    $nValues = @('Alice', "Alice's world", 'C:\Games\The Bibites\', 'Bob "the Builder"',
+                 '-', 'a b  c', 'Tom & Jerry')
+    $nLine = (@('"prog"') + @($nValues | ForEach-Object { ConvertTo-NativeArgument $_ })) -join ' '
+    $nBack = @($nSplitter::Split($nLine))
+    Check "Windows splits the window's command line back into the same arguments" `
+        ($nBack.Count -eq ($nValues.Count + 1) -and
+         (0..($nValues.Count - 1) | ForEach-Object { $nBack[$_ + 1] -ceq $nValues[$_] }) -notcontains $false) `
+        ("count=$($nBack.Count) back=" + (($nBack | Select-Object -Skip 1) -join ' | '))
+}
+
+# ------------------------------- and the installer's own answer to "was this asked?"
+#
+# WHAT MAKES A QUESTION ANSWERED, in the installer's own words, lifted out of the
+# file that ships and run here. This is the pair that has to agree: the ADOPTION
+# takes a value from the launcher's profile or, failing that, the install record,
+# and the ANSWERED-CHECK has to consult exactly the same two in the same order.
+# It did not - it read the profile alone - so a data root whose record held a
+# decline and whose profile was gone counted as never asked, and an installer
+# with somebody at the keyboard offered the Windows account name over it.
+$installerAst = [System.Management.Automation.Language.Parser]::ParseFile($installer, [ref]$null, [ref]$null)
+$previousSettingSource = ''
+foreach ($fname in @('Find-PreviousSetting', 'Get-PreviousSetting', 'Test-PreviousSetting')) {
+    $fnAst = $installerAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq $fname }, $true)
+    Check "the installer defines $fname" ($null -ne $fnAst)
+    if ($fnAst) { $previousSettingSource += $fnAst.Extent.Text + "`n" }
+}
+. ([scriptblock]::Create($previousSettingSource))
+
+function New-PreviousInstall {
+    # $ProfileData, not $Profile: $profile is one of PowerShell's own automatic
+    # variables, and the installer this stands in for says the same thing where
+    # it reads the file.
+    param($ProfileData, $RecordData)
+    return [pscustomobject]@{
+        Present = $true; Record = $RecordData; Profile = $ProfileData; ProfilePath = ''; Active = '' }
+}
+$pFromProfile = New-PreviousInstall ([pscustomobject]@{ keeper = 'Nightjar' }) $null
+$pFromRecord  = New-PreviousInstall $null `
+    ([pscustomobject]@{ settings = [pscustomobject]@{ keeper = '' } })
+$pFromNeither = New-PreviousInstall $null ([pscustomobject]@{ world = 'Eden' })
+$pFresh = [pscustomobject]@{ Present = $false; Record = $null; Profile = $null; ProfilePath = ''; Active = '' }
+
+Check "a name in the launcher's profile counts as answered" `
+    (Test-PreviousSetting $pFromProfile 'keeper' 'settings.keeper')
+Check "a DECLINE in the install record alone counts as answered too" `
+    (Test-PreviousSetting $pFromRecord 'keeper' 'settings.keeper')
+Check "and it is adopted as the empty value it is, not as a default" `
+    ((Get-PreviousSetting $pFromRecord $false 'keeper' 'settings.keeper' 'fallback') -eq '')
+Check "a record that carries no such key has never been asked" `
+    (-not (Test-PreviousSetting $pFromNeither 'keeper' 'settings.keeper'))
+Check "and there the caller keeps its own default" `
+    ((Get-PreviousSetting $pFromNeither $false 'keeper' 'settings.keeper' 'fallback') -eq 'fallback')
+Check "a computer with no install here has been asked nothing" `
+    (-not (Test-PreviousSetting $pFresh 'keeper' 'settings.keeper'))
+Check "and a flag named on this run is never overridden by history" `
+    ((Get-PreviousSetting $pFromProfile $true 'keeper' 'settings.keeper' 'named') -eq 'named')
 
 # NOTHING OF THIS INSTALL MAY BE RUNNING WHILE IT IS BEING REPLACED. Windows
 # holds a program's own file open for as long as it runs, so a re-install started
@@ -456,6 +651,20 @@ function New-JoinFile {
 
 function Invoke-Script {
     param([string]$Path, [hashtable]$Arguments)
+    # THE INSTALLER ASKS FOR THE TWO NAMES A WORLD IS PUBLISHED UNDER when there
+    # is somebody at the keyboard, and this suite runs it from a console that has
+    # one - so every call says -Unattended, and a scenario cannot sit for ever at
+    # a question nobody is watching.
+    #
+    # -Unattended IS NOT AN ANSWER. It says "ask nothing", so a run that names no
+    # -Keeper publishes none and an upgrade still keeps what the installation had
+    # - which is exactly what scenario H measures. A scenario that means to set
+    # one passes it.
+    if ((Split-Path -Leaf $Path) -eq 'Install-BibitesMultiverse.ps1' -and
+        -not $Arguments.ContainsKey('Unattended')) {
+        $Arguments = $Arguments.Clone()
+        $Arguments['Unattended'] = $true
+    }
     $global:LASTEXITCODE = 0
     $output = & $Path @Arguments *>&1 | Out-String
     return [pscustomobject]@{ Output = $output; ExitCode = $LASTEXITCODE }
@@ -516,10 +725,18 @@ if (Test-Path $defaultProfilePath) {
     $profileKeys = @($profileObj.PSObject.Properties.Name)
     foreach ($key in @('format', 'name', 'gameDir', 'dataRoot', 'sidecarPort', 'world',
                        'headless', 'exportEdges', 'excludeSpecies', 'saveMinutes', 'saveKeep',
-                       'saveOnQuit', 'peerId', 'relayUrl', 'createdUtc')) {
+                       'saveOnQuit', 'peerId', 'relayUrl', 'createdUtc', 'keeper', 'worldName')) {
         Check ("the profile carries $key") ($profileKeys -contains $key) ($profileKeys -join ', ')
     }
-    Check "the profile carries nothing else" ($profileKeys.Count -eq 15) ($profileKeys -join ', ')
+    Check "the profile carries nothing else" ($profileKeys.Count -eq 17) ($profileKeys -join ', ')
+    # AN INSTALL NOBODY WAS ASKED ANYTHING BY PUBLISHES NO NAME. The two public
+    # strings are written as empty rather than left out - the launcher's own
+    # writer emits the same seventeen keys, and a test in go/internal/launcher
+    # parses this very file to keep the two writers together - and neither of
+    # them is the account name of whoever ran this.
+    Check "an unattended install published no keeper and no world name" `
+        ($profileObj.keeper -eq '' -and $profileObj.worldName -eq '') `
+        ("keeper='$($profileObj.keeper)' worldName='$($profileObj.worldName)'")
     Check "the profile is the world this install was given" `
         ($profileObj.name -eq 'default' -and $profileObj.world -eq 'TestWorld')
     Check "the profile carries this install's port, game and data root" `
@@ -1486,6 +1703,11 @@ $install = Invoke-Script $installer @{
     RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData
     InstallRoot = $hProgram; JoinStringFile = $hJoin
     World = 'FirstWorld'; SidecarPort = 8891; SaveMinutes = 4; SaveKeep = 3; ExportEdges = 'E,N'
+    # The two names this world is published under, answered on the command line
+    # the way the graphical setup answers them. The world name carries an
+    # apostrophe on purpose: it is what the installer itself offers, and it is
+    # the character that would end a quoted string in the script it generates.
+    Keeper = 'Alice'; WorldName = "Alice's world"
 }
 Check "the first install succeeded" ($install.ExitCode -eq 0) $install.Output
 $hProfilePath = Join-Path $hProgram 'profiles\default.json'
@@ -1556,6 +1778,12 @@ Check "and how many saves it was keeping" ($hAfter.saveKeep -eq 9)
 Check "and the edges the first install was given" ($hAfter.exportEdges -eq 'E,N')
 Check "an upgrade is not a creation, so the world is not made younger" `
     ($hAfter.createdUtc -eq $hCreatedUtc)
+# THE TWO PUBLISHED NAMES SURVIVE AN UPGRADE, and an upgrade that names neither
+# does not ask again either: a participant is asked once, and a run that says
+# -Unattended and nothing else keeps what this installation already published.
+Check "the upgrade kept the names this world is published under" `
+    ($hAfter.keeper -eq 'Alice' -and $hAfter.worldName -eq "Alice's world") `
+    ("keeper='$($hAfter.keeper)' worldName='$($hAfter.worldName)'")
 Check "the world's identity is untouched" ($hAfter.peerId -eq 'test-world')
 Check "the second world beside it is still there" (Test-Path -LiteralPath $hSecondProfile)
 Check "and the installation still opens on it" `
@@ -1568,6 +1796,48 @@ Check "the record carries the kept settings too" `
 $hStart = Get-Content -Raw -LiteralPath (Join-Path $hProgram 'Start-Multiverse.ps1')
 Check "and so does the start script, so the two describe one world" `
     ($hStart -match "'Eden'" -and $hStart -match '8899')
+# THE APOSTROPHE IS THE POINT. A world name is carried into that script inside a
+# single-quoted PowerShell string, where one apostrophe would end the string and
+# turn the rest of the line into code; it is doubled, and the script has to parse
+# and to hold the name that was typed.
+Check "the start script carries the two published names" `
+    ($hStart -match "\`$Keeper\s+= 'Alice'" -and $hStart -match "\`$WorldName\s+= 'Alice''s world'") $hStart
+$hStartErrors = $null
+$hStartAst = [System.Management.Automation.Language.Parser]::ParseInput($hStart, [ref]$null, [ref]$hStartErrors)
+Check "and the start script still parses with a name that holds an apostrophe" `
+    ($hStartErrors.Count -eq 0) (($hStartErrors | ForEach-Object { $_.Message }) -join '; ')
+
+# AND IT HANDS THE NAME TO THE SIDECAR WHOLE. Start-Process joins -ArgumentList
+# with spaces and quotes nothing, on 5.1 and on 7 alike, so an array reached the
+# sidecar as "--world-name" "Alice's" "world" and a world published as
+# "Alice's world" was on the map as "Alice's". The offered world name ALWAYS has
+# a space in it, so this was every default install that answered the question.
+Check "the start script builds one quoted command line for the sidecar" `
+    ($hStart -match '\$sidecarCommandLine\s*=' -and
+     $hStart -match '-ArgumentList \$sidecarCommandLine') $hStart
+Check "and it does not hand Start-Process the bare array any more" `
+    (-not ($hStart -match '-ArgumentList \$sidecarArgs')) $hStart
+# The generated script's OWN quoting function, lifted out of the file this
+# install just wrote and run here: what ships is what is tested.
+$hQuoter = $hStartAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'ConvertTo-NativeArgument' }, $true)
+Check "the start script defines the quoting it uses" ($null -ne $hQuoter) $hStart
+if ($hQuoter) {
+    # Into a scope of its own, so this cannot be confused with the window's copy
+    # of the same function that this suite dot-sourced at the top.
+    $hQuoted = & ([scriptblock]::Create($hQuoter.Extent.Text + @'
+
+@("Alice's world", 'C:\data\root\', 'Bob "the Builder"', 'Tom & Jerry') |
+    ForEach-Object { ConvertTo-NativeArgument $_ }
+'@))
+    Check "the generated script quotes a name with a space" ($hQuoted[0] -ceq '"Alice''s world"') $hQuoted[0]
+    Check "and doubles a trailing backslash" ($hQuoted[1] -ceq '"C:\data\root\\"') $hQuoted[1]
+    Check "and escapes an embedded quote" ($hQuoted[2] -ceq '"Bob \"the Builder\""') $hQuoted[2]
+    Check "and leaves an ampersand alone, because Windows argument parsing has no shell in it" `
+        ($hQuoted[3] -ceq '"Tom & Jerry"') $hQuoted[3]
+}
 
 Check "the journal is byte for byte what it was" `
     ((Compare-Snapshot $hDataBefore (Get-TreeSnapshot (Join-Path $hData 'data'))).Count -eq 0)
@@ -1599,10 +1869,76 @@ Check "and so does the named port" ($hNamed.sidecarPort -eq 8877)
 Check "everything it did not name is still kept" `
     ($hNamed.saveKeep -eq 9 -and $hNamed.exportEdges -eq 'E,N' -and $hNamed.headless -eq $true)
 
+# ---- A DECLINE IS AN ANSWER, AND AN UPGRADE KEEPS IT ----
+#
+# The two published names are the only settings here whose EMPTY value is a
+# choice somebody made. So the decline gets its own pass through the upgrade:
+# taken deliberately with '-', kept by a run that names nothing, and kept when
+# the launcher's profile is gone and the install record is all that is left -
+# which is the source the installer's answered-check used to ignore.
+$decline = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+    Keeper = '-'; WorldName = '-'
+}
+Check "a run that declines both names succeeded" ($decline.ExitCode -eq 0) $decline.Output
+Check "and said this world is shown as unknown" `
+    ($decline.Output -match 'your world is shown as unknown') $decline.Output
+$hDeclined = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "the decline is written as an empty value, not a missing one" `
+    (($hDeclined.PSObject.Properties.Name -contains 'keeper') -and
+     ($hDeclined.PSObject.Properties.Name -contains 'worldName') -and
+     $hDeclined.keeper -eq '' -and $hDeclined.worldName -eq '') `
+    ("keeper='$($hDeclined.keeper)' worldName='$($hDeclined.worldName)'")
+
+$keptDecline = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+}
+Check "an upgrade after a decline succeeded" ($keptDecline.ExitCode -eq 0) $keptDecline.Output
+$hStillDeclined = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "and the decline survived it" `
+    ($hStillDeclined.keeper -eq '' -and $hStillDeclined.worldName -eq '') `
+    ("keeper='$($hStillDeclined.keeper)' worldName='$($hStillDeclined.worldName)'")
+Check "nobody's account name was published in its place" `
+    ($hStillDeclined.keeper -ne $env:UserName)
+$hDeclinedStart = Get-Content -Raw -LiteralPath (Join-Path $hProgram 'Start-Multiverse.ps1')
+Check "and the start script sends the sidecar neither name" `
+    ($hDeclinedStart -match "\`$Keeper\s+= ''" -and $hDeclinedStart -match "\`$WorldName\s+= ''") $hDeclinedStart
+
+# THE INSTALL RECORD ON ITS OWN. A data root restored without its application
+# folder, or a launcher profile somebody deleted, leaves the record as the only
+# thing that remembers the answer - and it is an answer.
+Remove-Item -LiteralPath $hProfilePath -Force
+$hRecordDeclined = Get-Content -Raw -LiteralPath $hRecordPath | ConvertFrom-Json
+Check "the record carries the decline for the profile to be rebuilt from" `
+    (($hRecordDeclined.settings.PSObject.Properties.Name -contains 'keeper') -and
+     $hRecordDeclined.settings.keeper -eq '' -and $hRecordDeclined.settings.worldName -eq '')
+$fromRecord = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+}
+Check "an upgrade with no profile left succeeded" ($fromRecord.ExitCode -eq 0) $fromRecord.Output
+$hRebuilt = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "and the record's decline is what the rebuilt profile carries" `
+    ($hRebuilt.keeper -eq '' -and $hRebuilt.worldName -eq '') `
+    ("keeper='$($hRebuilt.keeper)' worldName='$($hRebuilt.worldName)'")
+
+# Put the names back, so what the uninstall at the end of this scenario takes
+# apart is the world the rest of it described.
+$restore = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+    Keeper = 'Alice'; WorldName = "Alice's world"
+}
+Check "naming them again restored both" ($restore.ExitCode -eq 0) $restore.Output
+$hRestored = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "a named flag still wins over what was stored" `
+    ($hRestored.keeper -eq 'Alice' -and $hRestored.worldName -eq "Alice's world") `
+    ("keeper='$($hRestored.keeper)' worldName='$($hRestored.worldName)'")
+
 # WHAT AN UPGRADE RECORDS IS WHAT THE UNINSTALL CAN PUT BACK. The framework this
 # package unpacked into this game folder on the FIRST install is still this
-# install's after two more, so the uninstall takes it back out rather than
-# leaving it in a game folder it promised to leave as it found it.
+# install's after every run above it, so the uninstall takes it back out rather
+# than leaving it in a game folder it promised to leave as it found it. The
+# record is read again here, because it is the newest one that matters.
+$hRecordAfter = Get-Content -Raw -LiteralPath $hRecordPath | ConvertFrom-Json
 Check "the upgrade still owns the framework it put in this game folder" `
     ($hRecordAfter.bepInEx.installedByThisInstaller -eq $true)
 Check "and still names its files, so the uninstall can take them" `
@@ -1610,7 +1946,7 @@ Check "and still names its files, so the uninstall can take them" `
 
 $hUninstaller = Join-Path $hProgram 'Uninstall-BibitesMultiverse.ps1'
 $uninstall = Invoke-Script $hUninstaller @{ DataRoot = $hData }
-Check "the uninstall after two upgrades succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "the uninstall after every upgrade above succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
 Check "the mod framework went out of the game folder" `
     (-not (Test-Path -LiteralPath (Join-Path $hGame 'BepInEx\core\BepInEx.dll'))) $uninstall.Output
 Check "the game itself is untouched" (Test-Path -LiteralPath (Join-Path $hGame 'The Bibites.exe'))

@@ -36,23 +36,28 @@ type Status struct {
 
 // ProfileStatus is one world's settings and what is running for it.
 type ProfileStatus struct {
-	Name           string        `json:"name"`
-	Active         bool          `json:"active"`
-	World          string        `json:"world"`
-	GameDir        string        `json:"gameDir"`
-	DataRoot       string        `json:"dataRoot"`
-	SidecarPort    int           `json:"sidecarPort"`
-	Headless       bool          `json:"headless"`
-	ExportEdges    string        `json:"exportEdges"`
-	ExcludeSpecies string        `json:"excludeSpecies"`
-	SaveMinutes    float64       `json:"saveMinutes"`
-	SaveKeep       int           `json:"saveKeep"`
-	SaveOnQuit     bool          `json:"saveOnQuit"`
-	PeerID         string        `json:"peerId"`
-	RelayURL       string        `json:"relayUrl"`
-	CreatedUTC     string        `json:"createdUtc"`
-	Sidecar        ProcessStatus `json:"sidecar"`
-	Game           ProcessStatus `json:"game"`
+	Name           string  `json:"name"`
+	Active         bool    `json:"active"`
+	World          string  `json:"world"`
+	GameDir        string  `json:"gameDir"`
+	DataRoot       string  `json:"dataRoot"`
+	SidecarPort    int     `json:"sidecarPort"`
+	Headless       bool    `json:"headless"`
+	ExportEdges    string  `json:"exportEdges"`
+	ExcludeSpecies string  `json:"excludeSpecies"`
+	SaveMinutes    float64 `json:"saveMinutes"`
+	SaveKeep       int     `json:"saveKeep"`
+	SaveOnQuit     bool    `json:"saveOnQuit"`
+	PeerID         string  `json:"peerId"`
+	RelayURL       string  `json:"relayUrl"`
+	CreatedUTC     string  `json:"createdUtc"`
+	// Keeper and WorldName are what this world publishes about the person
+	// running it. They are omitted when unset, because absent here means what
+	// absent means on the wire: nobody chose one, and nothing invented one.
+	Keeper    string        `json:"keeper,omitempty"`
+	WorldName string        `json:"worldName,omitempty"`
+	Sidecar   ProcessStatus `json:"sidecar"`
+	Game      ProcessStatus `json:"game"`
 }
 
 // ProcessStatus is the PID ledger's answer for one process.
@@ -93,6 +98,8 @@ func (a *app) collectStatus(profiles []Profile, active string, problems []error)
 			PeerID:         p.PeerID,
 			RelayURL:       p.RelayURL,
 			CreatedUTC:     p.CreatedUTC,
+			Keeper:         p.Keeper,
+			WorldName:      p.WorldName,
 			Sidecar:        ProcessStatus{PID: sidecarPid, Running: sidecarRunning},
 			Game:           ProcessStatus{PID: gamePid, Running: gameRunning},
 		})
@@ -178,6 +185,7 @@ func (a *app) printStatus(status Status) {
 		a.print("    edges %s   never leaves %s   saves every %s min keeping %d   on quit %s",
 			p.ExportEdges, excludeWords(p.ExcludeSpecies), formatMinutes(p.SaveMinutes),
 			p.SaveKeep, onOff(p.SaveOnQuit))
+		a.print("    published keeper %s   world name %s", orNone(p.Keeper), orNone(p.WorldName))
 	}
 }
 
@@ -191,6 +199,16 @@ func processWords(p ProcessStatus) string {
 func excludeWords(value string) string {
 	if value == "" {
 		return "nothing - the exclusion policy is OFF"
+	}
+	return "'" + value + "'"
+}
+
+// orNone reads an OPTIONAL public string back. Unset is said out loud rather
+// than left as an empty column, because "none" is a choice this program is not
+// allowed to fill in and a blank space reads like a missing value.
+func orNone(value string) string {
+	if value == "" {
+		return "none"
 	}
 	return "'" + value + "'"
 }

@@ -593,6 +593,27 @@ func TestEditFlagsSendOnlyWhatChanged(t *testing.T) {
 		t.Fatalf("clearing save-on-quit produced %v", EditFlags(before, form))
 	}
 
+	// EMPTYING A PUBLISHED NAME IS TAKING IT OFF THE MAP, and the core spells
+	// that as '-' because a blank answer at its own prompts means "keep the one
+	// on offer". A window that sent an empty value would be asking the core to
+	// guess which of the two a cleared box meant.
+	named := before
+	named.Keeper = "Alice"
+	named.WorldName = "Alice's world"
+	form = FormFor(named)
+	form.Keeper = "  "
+	if got := strings.Join(EditFlags(named, form), " "); got != "--keeper "+PublishNone {
+		t.Fatalf("clearing the keeper produced %q", got)
+	}
+	form = FormFor(named)
+	form.WorldName = "The Deep"
+	if got := strings.Join(EditFlags(named, form), " "); got != "--world-name The Deep" {
+		t.Fatalf("renaming the world produced %q", got)
+	}
+	if flags := EditFlags(named, FormFor(named)); len(flags) != 0 {
+		t.Fatalf("an unchanged named world produced %v", flags)
+	}
+
 	// A SETTING IS RENDERED EXACTLY. Three significant figures would show the
 	// longest save interval the core accepts as 1.44e+03 in a field somebody is
 	// about to edit, and a measurement's rounding has no business there.

@@ -180,6 +180,8 @@ func (a *app) menuEditWorld(p Profile) {
 		a.print("   7) saves kept                %d", current.SaveKeep)
 		a.print("   8) save on quit              %s", onOff(current.SaveOnQuit))
 		a.print("   9) game folder               %s", current.GameDir)
+		a.print("  10) keeper handle (public)    %s", orNone(current.Keeper))
+		a.print("  11) world name (public)       %s", orNone(current.WorldName))
 		a.print("   0) back")
 		choice, ok := a.askLine("select: ")
 		if !ok || choice == "0" || choice == "" {
@@ -211,6 +213,12 @@ func (a *app) menuEditWorld(p Profile) {
 			flagName, prompt = "--save-on-quit", "on or off: "
 		case "9":
 			flagName, prompt = "--game-dir", "the folder the game is installed in: "
+		case "10":
+			flagName, prompt = "--keeper",
+				"the handle this world is published under, in public (- to publish none): "
+		case "11":
+			flagName, prompt = "--world-name",
+				"the name this world is published under, in public (- to publish none): "
 		default:
 			a.warn("'%s' is not one of the choices.", choice)
 			continue
@@ -284,11 +292,18 @@ func (a *app) menuCreateWorld() {
 	if headless, ok := a.askLine("run it headless? [n]: "); ok {
 		p.Headless = strings.HasPrefix(strings.ToLower(headless), "y")
 	}
+	// The same two questions, in the same words and with the same '-', as the
+	// command line asks (profilecmd.go), opening with the same offer: the handle
+	// this installation already publishes under, and never the machine's account
+	// name once somebody here has answered. There is always a base world by this
+	// point — the menu returned above if there was not.
+	a.askPublicNames(&p, inheritedKeeper(base, true, a.getenv), false, false)
 
 	a.print("")
 	a.print("   world '%s'   port %d   headless %s", p.World, p.SidecarPort, onOff(p.Headless))
 	a.print("   data  %s", p.DataRoot)
 	a.print("   game  %s", p.GameDir)
+	a.print("   %s", publicNamesLine(p))
 	a.print("%s", publicMapNote)
 	a.print("%s", leavingNote)
 	if !a.confirm("create it and enroll a new identity on the map? [y/N]: ") {

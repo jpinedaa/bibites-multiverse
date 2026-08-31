@@ -365,6 +365,89 @@ func TestSessionCreateEnrollsOnceAndWritesTheProfile(t *testing.T) {
 	}
 }
 
+// TestSessionCreateReadsTheDeclineTheWayEveryOtherPromptDoes.
+//
+// The window's create dialog is a prompt with a box instead of a line, and the
+// two public-name boxes open with a suggestion already in them. Clearing a box
+// is the decline the dialog documents — but '-' is the decline this project
+// spells at every other surface, on both installers, at both console prompts and
+// on both flags, so somebody who has read any of that types it into the box.
+//
+// It used to fail the create: the create path wrote the character down verbatim
+// and the writer's own rule then refused the profile with a message about SPACES
+// AROUND A VALUE that has none. The edit path resolved it correctly through the
+// same function all along, which is what made the failure a seam rather than a
+// feature: two ways into one core, disagreeing about one character.
+func TestSessionCreateReadsTheDeclineTheWayEveryOtherPromptDoes(t *testing.T) {
+	h := newHarness(t)
+	base := h.profile("default", "Multiverse", 8787)
+	base.Keeper, base.WorldName = "ada", "Tidepool"
+	if err := h.install().SaveProfile(base); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+
+	var requests int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body enrollmentRequest
+		json.NewDecoder(r.Body).Decode(&body)
+		peer := "public-" + strings.ReplaceAll(strings.ToLower(body.InstallID), "-", "")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"format":"%s","relayUrl":"%s","peerId":"%s","created":true}`,
+			enrollResponseFormat, testRelayURL, peer)
+	}))
+	defer server.Close()
+	writeFile(t, h.install().PublicMapPath(),
+		`{"format":"`+publicMapFormat+`","enrollmentUrl":"`+server.URL+
+			`","relayUrl":"`+testRelayURL+`"}`, 0o644)
+
+	s := h.session()
+	s.a.client = server.Client()
+	spec, err := s.NewWorldDefaults("second")
+	if err != nil {
+		t.Fatalf("NewWorldDefaults: %v", err)
+	}
+	// The dialog opened with the installation's own handle in both boxes...
+	if spec.Keeper != "ada" || spec.WorldName != "ada's world" {
+		t.Fatalf("the dialog opened with keeper %q and world name %q", spec.Keeper, spec.WorldName)
+	}
+	// ...and the person typed the decline into both of them.
+	spec.Keeper, spec.WorldName = declineToken, declineToken
+	if code := s.Create(spec); code != exitOK {
+		t.Fatalf("a create that declined both names exited %d\n%s\n%s", code, h.out(), h.err())
+	}
+	created, err := s.World("second")
+	if err != nil {
+		t.Fatalf("the new world does not load: %v", err)
+	}
+	if created.Keeper != "" || created.WorldName != "" {
+		t.Fatalf("'%s' was written down as a name: keeper %q, world name %q",
+			declineToken, created.Keeper, created.WorldName)
+	}
+	// And the world is REALLY on the map: publishing no name is an answer, not a
+	// failed create.
+	if !strings.HasPrefix(created.PeerID, "public-") || requests != 1 {
+		t.Fatalf("the declined world's identity is %q after %d enrollments", created.PeerID, requests)
+	}
+	mustContain(t, "the create output", h.out(), "this world publishes no keeper and no name")
+
+	// A name the map could not carry is still refused, with the reason — and
+	// BEFORE the map is asked for an identity, so a bad name never costs one.
+	s = h.session()
+	s.a.client = server.Client()
+	spec.Name, spec.World = "third", "third"
+	spec.Port = 8790
+	spec.DataRoot = filepath.Join(filepath.Dir(base.DataRoot), "BibitesMultiverse-third")
+	spec.Keeper = strings.Repeat("x", MaxPublicNameBytes+1)
+	if code := s.Create(spec); code != exitRefused {
+		t.Fatalf("an over-long keeper exited %d, want %d", code, exitRefused)
+	}
+	mustContain(t, "the refusal", h.err(), "the keeper handle cannot be published")
+	if requests != 1 {
+		t.Fatalf("a refused create still enrolled an identity (%d requests)", requests)
+	}
+}
+
 // A session refuses what the command line refuses, and says the same thing: it
 // is the same code, reached without a terminal.
 func TestSessionStartRefusesTheSameWayTheCommandDoes(t *testing.T) {

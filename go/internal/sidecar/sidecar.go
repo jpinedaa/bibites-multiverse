@@ -181,6 +181,11 @@ func New(cfg Config) (*Sidecar, error) {
 	if err := validateAdmissionConfig(cfg); err != nil {
 		return nil, err
 	}
+	// §33 B49's bounds, applied where the participant's two strings enter this
+	// process and nowhere else. A bad one is clipped or dropped and never
+	// refuses a start: a typo in a display name must not keep a world off the
+	// map, and a dropped value simply publishes nothing.
+	sanitizePublicNames(&cfg)
 	if cfg.Fault == "" {
 		cfg.Fault = os.Getenv("MULTIVERSE_FAULT")
 	}
@@ -1469,8 +1474,15 @@ func (s *Sidecar) statsLocked() contractb.PeerStats {
 		// reading of anything else — and it is what makes pacedDepth readable:
 		// a queue is only deep against the cap it is queued behind. The default
 		// has moved three times, so a reader that assumes one is wrong.
-		InboundRatePerSimMinute:  contractb.Float64Ptr(s.cfg.InboundRatePerSimMinute),
-		InboundRateBurst:         contractb.Float64Ptr(s.cfg.InboundRateBurst),
+		InboundRatePerSimMinute: contractb.Float64Ptr(s.cfg.InboundRatePerSimMinute),
+		InboundRateBurst:        contractb.Float64Ptr(s.cfg.InboundRateBurst),
+		// The participant's own two public strings (§33, B49). Config-sourced
+		// like the two above, so they are published WHETHER OR NOT A MOD IS
+		// CONNECTED: a world whose game is shut down still says whose it is,
+		// and a slot that goes dark keeps a name an operator can read it by.
+		// Empty is ABSENT — there is nothing here to invent one from.
+		Keeper:                   s.cfg.Keeper,
+		WorldName:                s.cfg.WorldName,
 		AdmissionMode:            a.Mode,
 		AdmissionTargetTimeScale: contractb.Float64Ptr(a.TargetTimeScale),
 		AdmissionClosed:          contractb.BoolPtr(a.Closed),

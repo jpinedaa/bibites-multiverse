@@ -207,6 +207,16 @@ type Config struct {
 	// It changes no placement, no routing and no record; it is display only.
 	BroadcastPeerID string
 
+	// OperatorPeerIDs are the peer ids the deployment declares as ITS OWN worlds.
+	// NOTHING ON THE WIRE CARRIES THIS EITHER, and it is the same trust model the
+	// broadcast peer has: a world cannot claim to be run by the operator, because
+	// a claim anybody can make on an unauthenticated block is worth nothing (§33,
+	// B49's "a label, never a key"). The deployment that runs those worlds is the
+	// only party that knows, and it says so here. Empty — the default — means no
+	// world is marked, which is the correct reading for every archive that never
+	// configured one. It changes no placement, no routing and no record.
+	OperatorPeerIDs []string
+
 	// HomepageRepo is the GitHub organization and repository for links from the
 	// landing page. The landing page's download links carry no release number:
 	// they address GitHub's /releases/latest, so the newest published release is
@@ -267,6 +277,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.HomepageGameVersion == "" {
 		c.HomepageGameVersion = defaultHomepageGameVersion()
+	}
+	// An operator peer list is an operator's typing: trim it and drop the blanks
+	// a trailing comma leaves, so a list nobody meant to be empty is not silently
+	// one entry longer than it looks.
+	if len(c.OperatorPeerIDs) > 0 {
+		ids := make([]string, 0, len(c.OperatorPeerIDs))
+		for _, id := range c.OperatorPeerIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		c.OperatorPeerIDs = ids
 	}
 }
 
@@ -506,6 +528,16 @@ type Archive struct {
 	// metricsRollup is the persisted history rollup: the buckets HistoryAllView
 	// survives retirement on (metricshist.go). Non-nil from New.
 	metricsRollup *metricsRollup
+	// recognition is the durable per-peer identity store: when this archive first
+	// saw each peer, the highest simulated time it ever reported, and the keeper
+	// handle and world name it last published (recognition.go). It carries its
+	// own lock and is written on the tick loop's timer, so no disk write is ever
+	// performed under the lock the migration path takes. Non-nil from New.
+	recognition        *recognitionStore
+	recognitionSavedAt time.Time
+	// operatorPeers is cfg.OperatorPeerIDs as a set, built once at New. It is a
+	// DEPLOYMENT claim about the peers, exactly as BroadcastPeerID is.
+	operatorPeers map[string]bool
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -597,6 +629,10 @@ func New(cfg Config) (*Archive, error) {
 		rollupIndex:  map[int64]LedgerPos{},
 		rollupDirty:  newRollupDirty(),
 		cold:         newColdIndex(),
+	}
+	a.operatorPeers = map[string]bool{}
+	for _, id := range cfg.OperatorPeerIDs {
+		a.operatorPeers[id] = true
 	}
 	a.restore = newColdRestore(a)
 	// THE ROLL-UP STATE IS LOADED BEFORE ONE RECORD IS FOLDED (rollup.go). It is
@@ -873,6 +909,17 @@ func New(cfg Config) (*Archive, error) {
 	// Any metrics segments a previous run closed but did not fold — a crash between
 	// the rotation and the fold — are folded now, so the rollup never misses a day.
 	a.foldPendingMetricsSegments()
+	// The durable per-peer identity store (recognition.go). It is loaded whether
+	// or not anything is configured, for the same reason the cold index is: it is
+	// the only memory of when each participant joined, and an archive that does
+	// not read it starts every restart claiming everybody arrived just now.
+	rec, err := openRecognitionStore(cfg.DataDir)
+	if err != nil {
+		a.log.Error("archive: the participant recognition store could not be read; the map "+
+			"keeps working and its memory of who is on it starts from the next PEER_STATUS",
+			"err", err)
+	}
+	a.recognition = rec
 	return a, nil
 }
 
@@ -1118,6 +1165,10 @@ func (a *Archive) Close() error {
 	if err := a.rollup.Close(a); err != nil {
 		a.log.Warn("archive: roll-up state close failed", "err", err)
 	}
+	// And who was on the map, so an orderly shutdown loses nobody's arrival time.
+	if err := a.recognition.save(); err != nil {
+		a.log.Warn("archive: participant recognition close failed", "err", err)
+	}
 	return a.ledger.Close()
 }
 
@@ -1301,6 +1352,13 @@ func (a *Archive) handle(conn *wsutil.Conn, frame []byte) bool {
 				a.status = status
 				a.statusAt = time.Now()
 				a.observeSimRatesLocked(status)
+				// Who is on the map, remembered (recognition.go). It has its own
+				// lock and touches no file here, so it costs this path a handful
+				// of map lookups — the same bargain observeSimRatesLocked makes,
+				// and for the same §10.1 rule 1 reason: a first sighting that
+				// only happened when somebody loaded the page would be a
+				// measurement of the reader.
+				a.recognition.observe(status, time.Now().UnixMilli())
 			}
 			a.mu.Unlock()
 		}
@@ -1679,6 +1737,17 @@ func (a *Archive) tickLoop() {
 				a.rollupSavedAt = now
 				if err := a.rollup.Save(a); err != nil {
 					a.log.Warn("archive: roll-up state save failed", "err", err)
+				}
+			}
+			// And the participant recognition store's, on the same timer and
+			// behind its own interval for the third time. It writes NOTHING when
+			// nothing has moved, which on a settled map is every tick: the file
+			// changes when a peer arrives, is renamed, or advances its clock past
+			// its own high-water mark. See recognition.go.
+			if now.Sub(a.recognitionSavedAt) >= recognitionSaveInterval {
+				a.recognitionSavedAt = now
+				if err := a.recognition.save(); err != nil {
+					a.log.Warn("archive: participant recognition save failed", "err", err)
 				}
 			}
 		}

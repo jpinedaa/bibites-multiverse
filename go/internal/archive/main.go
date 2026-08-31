@@ -149,6 +149,15 @@ func runMain(args []string, stderr io.Writer) int {
 			"its place in the grid. EMPTY IS THE DEFAULT and means no world is named: both pages "+
 			"then say the world is unknown rather than guess at one. It changes no placement, no "+
 			"routing and no record")
+	// Display only and told rather than observed, exactly as the broadcast peer
+	// is: nothing on either wire says whose world a world is, and a claim anybody
+	// could make on an unauthenticated block would be worth nothing (§33, B49).
+	operatorPeers := fs.String("operator-peers", env("MULTIVERSE_OPERATOR_PEERS", ""),
+		"comma-separated peer ids this DEPLOYMENT declares as its own worlds. The public page "+
+			"marks them so a visitor can tell the worlds that came with the map from the ones "+
+			"participants brought. EMPTY IS THE DEFAULT and marks nothing. It is the same trust "+
+			"model --broadcast-peer has — the deployment says it, the world never claims it — "+
+			"and it changes no placement, no routing and no record")
 	homepageRepo := fs.String("homepage-repo", env("MULTIVERSE_HOMEPAGE_REPO", ""),
 		"GitHub org/repo for the homepage's release download and checksum links")
 	homepageGameVersion := fs.String("homepage-game-version", env("MULTIVERSE_HOMEPAGE_GAME_VERSION", ""),
@@ -198,6 +207,7 @@ func runMain(args []string, stderr io.Writer) int {
 		LedgerWindow:        *ledgerWindow,
 		DedupWindow:         *dedupWindow,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),
+		OperatorPeerIDs:     strings.Split(*operatorPeers, ","),
 		HomepageRepo:        strings.TrimSpace(*homepageRepo),
 		HomepageGameVersion: strings.TrimSpace(*homepageGameVersion),
 	})

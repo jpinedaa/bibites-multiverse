@@ -426,14 +426,27 @@ func probeModConnected(client *http.Client, port int) (string, bool) {
 // sidecarArgs is the exact command line the generated Start-Multiverse.ps1
 // uses. --credential-file carries the SECRET HALF only, and there is
 // deliberately no flag anywhere that takes a secret literally.
+//
+// THE TWO PUBLIC NAMES ARE PASSED ONLY WHEN THIS WORLD HAS THEM. An empty
+// --keeper is not the same as no --keeper anywhere else in this project, and it
+// must not become one here: unset is what a participant who declined chose, and
+// the sidecar publishes nothing for a flag it was never given (contract-b-m4.md
+// §33 B49).
 func sidecarArgs(p Profile) []string {
-	return []string{
+	args := []string{
 		"--listen", fmt.Sprintf("127.0.0.1:%d", p.SidecarPort),
 		"--relay", p.RelayURL,
 		"--peer-id", p.PeerID,
 		"--data-dir", p.DataDir(),
 		"--credential-file", p.CredentialFile(),
 	}
+	if p.Keeper != "" {
+		args = append(args, "--keeper", p.Keeper)
+	}
+	if p.WorldName != "" {
+		args = append(args, "--world-name", p.WorldName)
+	}
+	return args
 }
 
 // diagnoseArgs is the command line the sidecar's read-only diagnostic is run

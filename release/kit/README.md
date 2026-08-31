@@ -128,6 +128,35 @@ signs its own certificate, and only then.
 the whole perimeter, not silence. Every edge is a door that works both ways. The installer says
 so on your screen while it runs, and `docs/participant/install.md` says so on the page.
 
+## The two names your world is published under
+
+**Setup asks two questions nothing else here asks: what you want to be called, and what you want
+your world to be called.** They are the only two things about your world that you choose *and*
+that other people read — the published `join` page lists everything joining publishes, and these
+two are on that list.
+
+The GUI has both boxes on the screen you press **Install** on, filled in and editable: **clear a
+box to publish nothing in its place.** On a computer that has never answered they arrive holding
+your Windows account name and *"<that name>'s world"*; **on an upgrade they arrive holding the
+names this installation already publishes** — an emptied box is a decline it kept, not a box
+waiting to be filled. `Install-BibitesMultiverse.ps1` asks the same two at the keyboard in step 8,
+with the value shown in brackets — Enter takes it, your own text replaces it, and `-` publishes
+none.
+
+**Nothing is ever filled in behind you.** A run with nobody at the keyboard — a silent install,
+`-Unattended`, output redirected to a log — publishes neither name rather than reaching for your
+account name, and a world that published none is shown as unknown, which is a choice and not a gap.
+`-Keeper` and `-WorldName` set them without being asked; `-` as the value means *publish none*
+explicitly. An upgrade keeps what this installation already published, a decline included, and does
+not ask again: setup reads the launcher's `profiles\default.json` first and its own
+`install-record.json` behind it, so a name you changed in the launcher is the one it keeps.
+
+Change either afterwards in the launcher — **Edit settings...**, or
+`multiverse-launcher.exe profile set NAME --keeper "Alice" --world-name "The Deep"`, with
+`--keeper -` to take one back off the map. The change reaches the map at that world's next start.
+A name is at most 64 bytes, holds no control characters, and is a caption rather than an address:
+two worlds may honestly carry the same one.
+
 ## Start and stop
 
 The setup creates **Bibites Multiverse** icons on the desktop and Start Menu. Both open
@@ -227,7 +256,9 @@ one plugin.
 
 `profile create` also takes `--data-root`, `--game-dir`, `--world`, `--sidecar-port`,
 `--headless` / `--no-headless`, `--export-edges`, `--exclude-species`, `--no-migration-exclusion`,
-`--save-minutes`, `--save-keep` and `--save-on-quit`; for a private map, `--join-string-file`, and
+`--save-minutes`, `--save-keep`, `--save-on-quit`, and the two published names `--keeper` and
+`--world-name`, which it otherwise asks for the way setup does; for a private map,
+`--join-string-file`, and
 `--relay-url` **only** when that file holds the identity half on its own. `profile set NAME`
 changes every one of those **except `--data-root`, `--join-string-file` and `--relay-url`**: a
 world's data folder, its identity and its relay address are fixed once it exists, because changing
@@ -274,6 +305,10 @@ checked on every write, so any other edit, and any start, is refused until that 
 
 The population learner follows the speed you select in the game. A world at x5 learns an x5
 population limit; it does not have to return to x10.
+
+**The two published names are not in this table** because they are not settings the game reads:
+they live in the same profile, as `keeper` and `worldName`, and go to the map through the sidecar.
+See *The two names your world is published under* above.
 
 ## Uninstall
 
@@ -341,7 +376,7 @@ system prints one, and no diagnostic asks for one.
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
 | `BibitesMultiverseLauncher.exe` | The installed application's window: it lists your worlds and what each of them is doing, starts and stops them, and manages more than one of them. The icons open this |
 | `multiverse-launcher.exe` | The same launcher's commands and console menu. This is the one a script calls |
-| `profiles\` | Created by the installer beside these files: one JSON file per world, plus `active.txt`. **Never contains a secret** |
+| `profiles\` | Created by the installer beside these files: one JSON file per world, plus `active.txt`. It carries each world's settings and the two names it is published under. **Never contains a secret** |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with. The setup installs a copy beside `multiverse-sidecar.exe`, which reads it whenever you run the diagnostic |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |

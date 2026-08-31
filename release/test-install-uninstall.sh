@@ -13,7 +13,7 @@
 # after. It reads the source game but never changes it. It never touches a trust
 # store, a running process, or the network.
 #
-# Nine scenarios:
+# Thirteen scenarios:
 #
 #   A  a machine with no BepInEx. The installer adds it; the game then writes
 #      BepInEx's config, log and cache; the uninstall must leave the tree
@@ -57,6 +57,13 @@
 #      whose secret is gone, a join string backed only by a hand-written claim,
 #      the one handover that does replace a secret, a private world adopted whole
 #      after an uninstall, --relay-url pointed elsewhere, and a loose mode.
+#   M  the two names a world is published under. A name with an ampersand and an
+#      apostrophe in it must reach the generated script as itself; an upgrade
+#      must keep what this installation already publishes - from the start
+#      script, and from the install record when that is gone - INCLUDING A
+#      DECLINE; an option must still win over both; and an install whose output
+#      is redirected must ask nothing and publish nothing, even with a keyboard
+#      on its standard input.
 #   I  public-map enrollment on Linux. A failed response must keep one private
 #      pending identity. A retry must reuse it. A repair must not enroll again.
 #      An uninstall must KEEP the world's credential, so installing again over
@@ -217,8 +224,14 @@ new_join_file() { # $1 path -> prints the secret
 }
 
 run_script() { # $1.. the command -> sets OUT and RC
+  # STDIN COMES FROM NOWHERE, deliberately. The installer asks for the two names
+  # a world is published under when there is somebody at the keyboard, and this
+  # suite run from a terminal has one - so every scenario would sit waiting for a
+  # name nobody is there to type. With no terminal on stdin the installer asks
+  # nothing and publishes nothing it was not given, which is the scripted case
+  # these scenarios are.
   set +e
-  OUT="$("$@" 2>&1)"
+  OUT="$("$@" 2>&1 </dev/null)"
   RC=$?
   set -e
   set +u
@@ -265,6 +278,17 @@ check "both are executable" \
   "$(b bash -c 'test -x "$1" && test -x "$2"' _ "$KIT_DIR/start-multiverse.sh" "$KIT_DIR/stop-multiverse.sh")"
 check "the uninstaller was made executable, by name, after its checksum passed" \
   "$(b test -x "$UNINSTALLER")"
+
+# AN INSTALL NOBODY WAS ASKED ANYTHING BY PUBLISHES NO NAME. $USER is offered at
+# a keyboard and taken nowhere else: a scripted run writes both empty, and the
+# start script therefore hands the sidecar neither flag.
+A_START="$(cat "$KIT_DIR/start-multiverse.sh")"
+check "a scripted install published no keeper" "$(b contains "KEEPER=''" "$A_START")"
+check "and no world name" "$(b contains "WORLD_NAME=''" "$A_START")"
+check "the sidecar's fixed arguments name no keeper" \
+  "$(b bash -c '! printf "%s\n" "$1" | sed -n "/^SIDECAR_ARGS=(/,/^)/p" | grep -q -- --keeper' _ "$A_START")"
+check "and a name is added only when this world has one" \
+  "$(b contains 'if [ -n "$KEEPER" ]' "$A_START")"
 
 RECORD="$A_DATA/install-record.json"
 check "the install record exists" "$(b test -f "$RECORD")"
@@ -652,10 +676,24 @@ while IFS= read -r H_PAYLOAD_FILE; do
 done < <(grep -o '"path": "[^"]*"' "$H_DATA/install-record.json" | cut -d'"' -f4 | grep -F "$H_RUNTIME/")
 check "the husk has no game left in it" "$(b test ! -e "$H_RUNTIME/The Bibites.x86_64")"
 check "and still holds the mod framework" "$(b test -d "$H_RUNTIME/BepInEx")"
+# AND THE TWO PUBLISHED NAMES ARE ANSWERED ON THE COMMAND LINE HERE, the way a
+# scripted install answers them. The world name carries an apostrophe on purpose:
+# it is the name the installer itself offers, and it is the character that would
+# end the quoted string in the script it writes.
 run_script bash "$H_KIT/install-bibites-multiverse.sh" --data-root "$H_DATA" \
-  --join-string-file "$H_JOIN"
+  --join-string-file "$H_JOIN" --keeper Alice --world-name "Alice's world"
 check "an install over that husk succeeded" "$(b test "$RC" -eq 0)" "$OUT"
 check "it said what it found there" "$(b contains 'is not the game any more' "$OUT")"
+H_START="$H_KIT/start-multiverse.sh"
+check "the start script carries the keeper that was named" \
+  "$(b grep -qxF "KEEPER='Alice'" "$H_START")"
+check "and the world name, with its apostrophe escaped for the shell" \
+  "$(b grep -qxF "WORLD_NAME='Alice'\\''s world'" "$H_START")"
+check "and it still parses" "$(b bash -n "$H_START")"
+check "and it means the name that was typed" \
+  "$(b bash -c 'eval "$(grep -E "^(KEEPER|WORLD_NAME)=" "$1")"; [ "$KEEPER" = Alice ] && [ "$WORLD_NAME" = "Alice'"'"'s world" ]' _ "$H_START")"
+check "the installer said what this world publishes" \
+  "$(b contains "keeper handle      'Alice'" "$OUT")"
 check "it removed the incomplete copy whole" \
   "$(b contains 'removed the incomplete managed runtime whole' "$OUT")"
 check "and put the game back" "$(b test -x "$H_RUNTIME/The Bibites.x86_64")"
@@ -1280,6 +1318,196 @@ check "the join string's secret is in place" \
   "$(b bash -c 'test "$(cat "$1/peer-secret.txt")" = "$2"' _ "$L5" "$L5_NEW_SECRET")"
 check "the orphan is kept beside it" "$(b test "$(l_orphans "$L5")" = 1)"
 check "and no enrollment request was sent" "$(b test "$(l_requests)" = "$L5_COUNT")"
+
+# ---------------------------------------------------------------- M
+
+# THE TWO NAMES A WORLD PUBLISHES, which are the only two settings here that go
+# out to other people and the only two a participant chooses for themselves.
+# What this scenario measures is the whole of the rule around them:
+#
+#   * a name is carried into the generated script EXACTLY as it was typed,
+#     ampersand and apostrophe included;
+#   * an upgrade keeps what this installation already publishes, from the start
+#     script first and from the install record when that is gone;
+#   * A DECLINE IS AN ANSWER and an upgrade keeps that too, so a world that
+#     publishes nothing is not re-asked and never quietly renamed to $USER;
+#   * an option named on the command line still wins over both;
+#   * and an install whose OUTPUT is redirected asks nothing at all, because a
+#     question written into a log file is not a question.
+scenario "M - the two names a world publishes: offered, asked once, and kept"
+
+M_ROOT="$SANDBOX/M"; M_KIT="$M_ROOT/kit"; M_GAME="$M_ROOT/game"; M_DATA="$M_ROOT/data"
+mkdir -p "$M_KIT"
+cp -a "$KIT_DIR/." "$M_KIT/"
+# A start script another scenario left in the staged kit describes another data
+# root, and this scenario is about the one that describes THIS one.
+rm -f "$M_KIT/start-multiverse.sh" "$M_KIT/stop-multiverse.sh"
+new_sandbox_game "$M_GAME"
+M_JOIN="$M_ROOT/join.txt"; new_join_file "$M_JOIN" >/dev/null
+M_START="$M_KIT/start-multiverse.sh"
+M_RECORD="$M_DATA/install-record.json"
+m_install() { # $@ -> extra installer options
+  run_script bash "$M_KIT/install-bibites-multiverse.sh" --game-dir "$M_GAME" \
+    --data-root "$M_DATA" --join-string-file "$M_JOIN" "$@"
+}
+
+# AN AMPERSAND IS THE POINT OF THE FIRST NAME. bash 5.2 turns on
+# patsub_replacement, which makes an unquoted & in a ${var//pattern/replacement}
+# replacement expand to the text the pattern matched - so this name used to be
+# written into the start script as KEEPER='Tom @@KEEPER@@ Jerry', on 5.2 and not
+# on 5.1. The apostrophe beside it is the other half: it is what the offered
+# world name always has, and one apostrophe ends a single-quoted shell string.
+m_install --keeper 'Tom & Jerry' --world-name "Tom & Jerry's world"
+check "an install that names both succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "the ampersand reached the start script as an ampersand" \
+  "$(b grep -qxF "KEEPER='Tom & Jerry'" "$M_START")" "$(grep -n '^KEEPER=' "$M_START" || true)"
+check "and the apostrophe beside it is escaped for the shell" \
+  "$(b grep -qxF "WORLD_NAME='Tom & Jerry'\\''s world'" "$M_START")" \
+  "$(grep -n '^WORLD_NAME=' "$M_START" || true)"
+check "the start script parses" "$(b bash -n "$M_START")"
+check "and it means the two names that were typed" \
+  "$(b bash -c 'eval "$(grep -E "^(KEEPER|WORLD_NAME)=" "$1")"
+                [ "$KEEPER" = "Tom & Jerry" ] && [ "$WORLD_NAME" = "Tom & Jerry'"'"'s world" ]' _ "$M_START")"
+check "no template token survived the expansion" \
+  "$(b bash -c '! grep -q "@@[A-Z]*@@" "$1"' _ "$M_START")"
+check "the install record carries both, for a run that finds no start script" \
+  "$(b bash -c 'grep -q "\"keeper\": \"Tom & Jerry\"" "$1" && grep -q "\"worldName\": \"Tom & Jerry'"'"'s world\"" "$1"' _ "$M_RECORD")" \
+  "$(grep -n 'keeper\|worldName' "$M_RECORD" || true)"
+
+# AN UPGRADE KEEPS THEM. This is the run the packagers and the scripted
+# installs do - no options at all - and before this it published nothing at all,
+# which took a world that had been on the map under its keeper's name off it.
+m_install
+check "an upgrade that names neither succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it said it was keeping them" \
+  "$(b contains 'keeping the names this installation is already published under' "$OUT")" "$OUT"
+check "the keeper this installation already published is still there" \
+  "$(b grep -qxF "KEEPER='Tom & Jerry'" "$M_START")"
+check "and so is the world name" \
+  "$(b grep -qxF "WORLD_NAME='Tom & Jerry'\\''s world'" "$M_START")"
+
+# AND FROM THE INSTALL RECORD ALONE, which is what is left when the kit that
+# wrote the start script is gone - a newer archive unpacked somewhere else.
+rm -f "$M_START"
+m_install
+check "an upgrade with no start script beside it succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "the install record alone kept the keeper" \
+  "$(b grep -qxF "KEEPER='Tom & Jerry'" "$M_START")"
+check "and the world name" \
+  "$(b grep -qxF "WORLD_NAME='Tom & Jerry'\\''s world'" "$M_START")"
+
+# A DECLINE, TAKEN DELIBERATELY, AND THEN KEPT. '-' is the answer that publishes
+# nothing, and an installation that gave it is not asked again and not filled in
+# behind its keeper's back.
+m_install --keeper - --world-name -
+check "declining both succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it said this world is shown as unknown" \
+  "$(b contains 'your world is shown as unknown' "$OUT")" "$OUT"
+check "the start script publishes no keeper" "$(b grep -qxF "KEEPER=''" "$M_START")"
+check "and no world name" "$(b grep -qxF "WORLD_NAME=''" "$M_START")"
+check "the record spells the decline as an answer, not a missing key" \
+  "$(b bash -c 'grep -q "\"keeper\": \"\"" "$1" && grep -q "\"worldName\": \"\"" "$1"' _ "$M_RECORD")" \
+  "$(grep -n 'keeper\|worldName' "$M_RECORD" || true)"
+
+m_install
+check "an upgrade after a decline succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "the decline survived it" "$(b grep -qxF "KEEPER=''" "$M_START")"
+check "and \$USER was not published in its place" \
+  "$(b bash -c '! grep -qxF "KEEPER='"'"'$USER'"'"'" "$1"' _ "$M_START")"
+check "the sidecar is therefore handed neither flag" \
+  "$(b bash -c 'eval "$(grep -E "^(KEEPER|WORLD_NAME)=" "$1")"; [ -z "$KEEPER" ] && [ -z "$WORLD_NAME" ]' _ "$M_START")"
+
+# AN OPTION IS AN INSTRUCTION, and history never wins over one - including over
+# a decline, which is how somebody takes a name back onto the map.
+m_install --keeper 'Nightjar'
+check "a named keeper wins over the stored answer" \
+  "$(b grep -qxF "KEEPER='Nightjar'" "$M_START")"
+check "and the world name nobody named stayed declined" \
+  "$(b grep -qxF "WORLD_NAME=''" "$M_START")"
+
+# ---- WITH A KEYBOARD, AND WITH THE SAME KEYBOARD AND A REDIRECTED LOG ----
+#
+# The two runs below need a TERMINAL, which no test harness has: a pipe on stdin
+# is exactly the case the installer refuses to ask in. python3 opens a pseudo
+# terminal in ten lines, so these run where it is present and say so where it is
+# not - the rest of this scenario does not depend on them.
+if command -v python3 >/dev/null 2>&1; then
+  cat > "$M_ROOT/pty-run.py" <<'PTY_RUN'
+# usage: pty-run.py <input file or -> <command ...>
+# Runs the command with a pseudo terminal on all three of its streams and prints
+# everything the terminal saw. The command may redirect its own output, which is
+# what makes the second run below the case a person hits with `> install.log`.
+import os, pty, select, subprocess, sys
+data = b'' if sys.argv[1] == '-' else open(sys.argv[1], 'rb').read()
+master, slave = pty.openpty()
+child = subprocess.Popen(sys.argv[2:], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+if data:
+    os.write(master, data)
+chunks = []
+while True:
+    ready, _, _ = select.select([master], [], [], 0.2)
+    if ready:
+        try:
+            piece = os.read(master, 65536)
+        except OSError:
+            break
+        if not piece:
+            break
+        chunks.append(piece)
+        continue
+    if child.poll() is not None:
+        break
+sys.stdout.buffer.write(b''.join(chunks))
+sys.exit(child.wait())
+PTY_RUN
+
+  # SOMEBODY IS THERE: the question is asked, the offered value is on the screen
+  # before it is taken, and a blank line takes it.
+  M_ASKED="$M_ROOT/data-asked"
+  printf 'Nightjar\n\n' > "$M_ROOT/typed.txt"
+  set +e
+  OUT="$(timeout 600 python3 "$M_ROOT/pty-run.py" "$M_ROOT/typed.txt" \
+    bash "$M_KIT/install-bibites-multiverse.sh" --game-dir "$M_GAME" \
+    --data-root "$M_ASKED" --join-string-file "$M_JOIN" 2>&1)"
+  RC=$?
+  set -e
+  check "an install with somebody at the keyboard succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+  check "it asked for the keeper handle, offering this account's name" \
+    "$(b contains "your keeper handle, published publicly [${USER:-}]" "$OUT")" "$OUT"
+  check "it took the name that was typed" "$(b grep -qxF "KEEPER='Nightjar'" "$M_START")"
+  check "and a blank answer took the world name it had offered" \
+    "$(b grep -qxF "WORLD_NAME='Nightjar'\\''s world'" "$M_START")" \
+    "$(grep -n '^WORLD_NAME=' "$M_START" || true)"
+
+  # THE SAME KEYBOARD, WITH THE OUTPUT IN A LOG FILE. `./install.sh > log 2>&1`
+  # from a terminal used to ask into the log: the person saw nothing, the install
+  # hung on a question, and an Enter typed blindly published $USER. The question
+  # goes to stderr and the four lines that explain it go to stdout, so a run that
+  # cannot show either asks nothing and publishes nothing it was not given.
+  M_REDIRECTED="$M_ROOT/data-redirected"
+  M_REDIRECT_LOG="$M_ROOT/redirected.log"
+  set +e
+  timeout 600 python3 "$M_ROOT/pty-run.py" "$M_ROOT/typed.txt" \
+    bash -c "bash '$M_KIT/install-bibites-multiverse.sh' --game-dir '$M_GAME' \
+             --data-root '$M_REDIRECTED' --join-string-file '$M_JOIN' > '$M_REDIRECT_LOG' 2>&1" \
+    > "$M_ROOT/redirected-terminal.txt" 2>&1
+  RC=$?
+  set -e
+  OUT="$(cat "$M_REDIRECT_LOG" 2>/dev/null)"
+  check "an install with its output redirected finished rather than waiting" \
+    "$(b test "$RC" -eq 0)" "$(printf '%s\n%s' "$OUT" "$(cat "$M_ROOT/redirected-terminal.txt" 2>/dev/null)")"
+  check "it never asked the question" \
+    "$(b bash -c '! grep -q "published publicly" "$1"' _ "$M_REDIRECT_LOG")" "$OUT"
+  check "and nothing was typed at the terminal either" \
+    "$(b bash -c '! grep -q "published publicly" "$1"' _ "$M_ROOT/redirected-terminal.txt")"
+  check "it published no keeper" "$(b grep -qxF "KEEPER=''" "$M_START")"
+  check "and no world name" "$(b grep -qxF "WORLD_NAME=''" "$M_START")"
+  check "the name waiting on the keyboard was not taken" \
+    "$(b bash -c '! grep -q Nightjar "$1"' _ "$M_START")"
+else
+  printf '  SKIP  no python3, so the two terminal runs did not happen\n'
+fi
 
 # ---------------------------------------------------------------- the verdict
 

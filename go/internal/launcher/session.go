@@ -370,6 +370,19 @@ type CreateSpec struct {
 	// GameDir is inherited from the world this installation already has. It is
 	// here so an installation with no world at all can still be given one.
 	GameDir string
+	// Keeper and WorldName are the two PUBLIC names this world is published
+	// under. NewWorldDefaults fills them with a SUGGESTION the dialog shows in
+	// an editable field, and an empty field is the decline: the window has no
+	// blank-versus-'-' distinction to make, because a person can see the box and
+	// clear it. Whatever comes back is what is written down, and an empty one is
+	// never filled in on the way through.
+	//
+	// Create still reads them with resolvePublicName, so a '-' typed into a box
+	// by somebody who learned the console's decline means what it means
+	// everywhere else, and a value the map could not carry is refused with the
+	// same sentence the console gives.
+	Keeper    string
+	WorldName string
 }
 
 // NewWorldDefaults is what a create dialog opens with: the game folder of the
@@ -382,6 +395,16 @@ func (s *Session) NewWorldDefaults(name string) (CreateSpec, error) {
 	}
 	spec := CreateSpec{Name: name, World: name, Port: nextFreePort(profiles)}
 	base, hasBase := s.a.baseProfile(profiles)
+	// The two public names are SUGGESTED before the game folder is, because they
+	// are offered even to an installation with nothing in it: the dialog below
+	// still opens, and a person filling in where their game lives should be
+	// offered the same handle as everybody else.
+	//
+	// inheritedKeeper is the rule, and it is the same one the console's create
+	// prompt uses: what this installation already answered, and the account name
+	// only when there is no world to have answered it.
+	spec.Keeper = inheritedKeeper(base, hasBase, s.a.getenv)
+	spec.WorldName = suggestedWorldName(spec.Keeper)
 	if !hasBase {
 		return spec, fmt.Errorf("this installation has no world to copy the game folder from. Use " +
 			"'profile create NAME --game-dir PATH --data-root PATH'")
@@ -403,6 +426,22 @@ func (s *Session) Create(spec CreateSpec) int {
 		return s.a.fail("%v", err)
 	}
 	base, hasBase := s.a.baseProfile(profiles)
+	// THE TWO PUBLIC NAMES GO THROUGH THE ONE READER OF THEM, exactly as the
+	// edit path does (applyProfileFlags). A dialog is a prompt with a box instead
+	// of a line, and the decline is the same character at every prompt this
+	// project has: a person who typed '-' into the box meant "publish none", and
+	// a create that trimmed it and wrote it down would then be refused by the
+	// writer's own rule — with a message about spaces, over a value that has
+	// none. resolvePublicName also refuses what it refuses everywhere else, so a
+	// name too long or holding a control character is one answer from one place.
+	keeper, err := resolvePublicName(spec.Keeper)
+	if err != nil {
+		return s.a.fail("the keeper handle cannot be published: %v", err)
+	}
+	worldName, err := resolvePublicName(spec.WorldName)
+	if err != nil {
+		return s.a.fail("this world's published name cannot be published: %v", err)
+	}
 	p := Profile{
 		Format:         ProfileFormat,
 		Name:           spec.Name,
@@ -417,6 +456,8 @@ func (s *Session) Create(spec CreateSpec) int {
 		SaveKeep:       DefaultSaveKeep,
 		SaveOnQuit:     true,
 		CreatedUTC:     createdNow(s.a.now),
+		Keeper:         keeper,
+		WorldName:      worldName,
 	}
 	if p.GameDir == "" && hasBase {
 		p.GameDir = base.GameDir

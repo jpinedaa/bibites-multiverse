@@ -43,6 +43,10 @@ import (
 // ERASURE: a page that silently dropped the row would be lying about how many
 // species a world holds, and an operator looking at their own deny list has to
 // be able to see it working.
+//
+// THE TWO PARTICIPANT-CHOSEN NAMES ARE THE ONE EXCEPTION, and suppressKeeper
+// below says why: a marker is a SHARED STRING, and the two fields §33 B49 added
+// are the only ones a reader GROUPS BY.
 const Suppressed = "[suppressed]"
 
 // PeerPrefix marks a deny entry that names a PEER rather than a species. A peer
@@ -55,6 +59,23 @@ const PeerPrefix = "peer:"
 // SpeciesPrefix is optional and exists only so an operator can be explicit. A
 // bare line is a species name, which is the case DQ7 was written for.
 const SpeciesPrefix = "species:"
+
+// KeeperPrefix and WorldPrefix name the two strings a PARTICIPANT chose about
+// themselves (contract-b-m4.md §33, B49). They exist because the two tools
+// either side of them are both wrong for the case: ignoring a handle is not
+// moderation, and denying the whole PEER over its handle suppresses its census,
+// its versions and its refusal text as well — which hides a working world to
+// take down a name.
+//
+// A keeper entry suppresses that handle wherever it renders, on EVERY world
+// carrying it, and a world entry does the same for a world name. Neither touches
+// anything else about the slot: the population, the species and the liveness are
+// the archive's and the relay's own numbers, and Risk 5's rule that suppression
+// must never hide a dark world holds here exactly as it does for a peer entry.
+const (
+	KeeperPrefix = "keeper:"
+	WorldPrefix  = "world:"
+)
 
 // denyReloadInterval bounds how often the file is re-stat'ed. The deny list is
 // a MODERATION control and an archive restart costs minutes of dark status page
@@ -72,6 +93,8 @@ type DenyList struct {
 	path     string
 	species  map[string]bool
 	peers    map[string]bool
+	keepers  map[string]bool
+	worlds   map[string]bool
 	loadedAt time.Time
 	modTime  time.Time
 	size     int64
@@ -79,7 +102,8 @@ type DenyList struct {
 
 // NewDenyList reads path, or returns an empty list when path is "".
 func NewDenyList(path string) (*DenyList, error) {
-	d := &DenyList{path: path, species: map[string]bool{}, peers: map[string]bool{}}
+	d := &DenyList{path: path, species: map[string]bool{}, peers: map[string]bool{},
+		keepers: map[string]bool{}, worlds: map[string]bool{}}
 	if path == "" {
 		return d, nil
 	}
@@ -104,7 +128,7 @@ func (d *DenyList) Len() int {
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return len(d.species) + len(d.peers)
+	return len(d.species) + len(d.peers) + len(d.keepers) + len(d.worlds)
 }
 
 func (d *DenyList) reload() error {
@@ -117,6 +141,7 @@ func (d *DenyList) reload() error {
 			// moderation file would be the worst possible trade.
 			d.mu.Lock()
 			d.species, d.peers = map[string]bool{}, map[string]bool{}
+			d.keepers, d.worlds = map[string]bool{}, map[string]bool{}
 			d.loadedAt = time.Now()
 			d.modTime, d.size = time.Time{}, 0
 			d.mu.Unlock()
@@ -128,6 +153,8 @@ func (d *DenyList) reload() error {
 	info, statErr := f.Stat()
 	species := map[string]bool{}
 	peers := map[string]bool{}
+	keepers := map[string]bool{}
+	worlds := map[string]bool{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -138,6 +165,17 @@ func (d *DenyList) reload() error {
 		case strings.HasPrefix(line, PeerPrefix):
 			if id := strings.TrimSpace(strings.TrimPrefix(line, PeerPrefix)); id != "" {
 				peers[id] = true
+			}
+		case strings.HasPrefix(line, KeeperPrefix):
+			// Normalized on both sides, exactly as a species entry is: an
+			// operator typing the handle the page shows must match the handle
+			// the world publishes, whatever whitespace either holds.
+			if h := wire.NormalizeSpeciesName(strings.TrimPrefix(line, KeeperPrefix)); h != "" {
+				keepers[h] = true
+			}
+		case strings.HasPrefix(line, WorldPrefix):
+			if w := wire.NormalizeSpeciesName(strings.TrimPrefix(line, WorldPrefix)); w != "" {
+				worlds[w] = true
 			}
 		case strings.HasPrefix(line, SpeciesPrefix):
 			if name := wire.NormalizeSpeciesName(strings.TrimPrefix(line, SpeciesPrefix)); name != "" {
@@ -154,6 +192,7 @@ func (d *DenyList) reload() error {
 	}
 	d.mu.Lock()
 	d.species, d.peers = species, peers
+	d.keepers, d.worlds = keepers, worlds
 	d.loadedAt = time.Now()
 	if statErr == nil && info != nil {
 		d.modTime, d.size = info.ModTime(), info.Size()
@@ -194,7 +233,8 @@ func (d *DenyList) Empty() bool {
 	d.refresh()
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return len(d.species) == 0 && len(d.peers) == 0
+	return len(d.species) == 0 && len(d.peers) == 0 &&
+		len(d.keepers) == 0 && len(d.worlds) == 0
 }
 
 // DeniesPeer reports whether every string this peer publishes is suppressed.
@@ -230,11 +270,47 @@ func (d *DenyList) DeniesSpecies(generic, specific string) bool {
 	return d.species[wire.NormalizeSpeciesName(generic)]
 }
 
+// DeniesKeeper and DeniesWorld match a participant's chosen handle and world
+// name on the NORMALIZED string, the same way DeniesSpecies matches: an entry an
+// operator typed matches the string the page shows even when the world spells it
+// with two spaces.
+//
+// THERE IS NO ONE-WORD RULE HERE, and its absence is the point. A species name
+// has two halves and a genus is a real grouping a mutating population moves
+// inside; a keeper handle and a world name are ONE STRING each, so a partial
+// match would be an operator suppressing every name that begins with a word —
+// which is a filter, not a moderation decision, and would take down worlds
+// nobody looked at.
+func (d *DenyList) DeniesKeeper(keeper string) bool {
+	if d == nil {
+		return false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.keepers) == 0 {
+		return false
+	}
+	return d.keepers[wire.NormalizeSpeciesName(keeper)]
+}
+
+func (d *DenyList) DeniesWorld(name string) bool {
+	if d == nil {
+		return false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.worlds) == 0 {
+		return false
+	}
+	return d.worlds[wire.NormalizeSpeciesName(name)]
+}
+
 // ---------------------------------------------------------------- application
 
-// ApplyStatus returns s with every denied string replaced by Suppressed. The
-// input is not modified: StatusView's own value goes on to metrics.jsonl
-// verbatim, and only the served copy is suppressed.
+// ApplyStatus returns s with every denied string replaced by Suppressed — or,
+// for the two names a participant chose about themselves, by suppressedName's
+// blank. The input is not modified: StatusView's own value goes on to
+// metrics.jsonl verbatim, and only the served copy is suppressed.
 func (d *DenyList) ApplyStatus(s Status) Status {
 	if d.Empty() {
 		return s
@@ -254,10 +330,28 @@ func (d *DenyList) ApplyStatus(s Status) Status {
 			v.ContractAVersion = suppressIfSet(v.ContractAVersion)
 			v.GameVersion = suppressIfSet(v.GameVersion)
 			v.LastRefusal = suppressIfSet(v.LastRefusal)
+			// The two strings the PARTICIPANT chose about themselves (§33, B49)
+			// are the newest members of that list and the most obviously theirs.
+			// A peer that has to be suppressed is not one whose display name can
+			// be left standing on the map. They are BLANKED rather than marked:
+			// see suppressedName.
+			v.Keeper, v.WorldName = suppressedName, suppressedName
 			if v.LastSave != nil {
 				save := *v.LastSave
 				save.Name = suppressIfSet(save.Name)
 				v.LastSave = &save
+			}
+		}
+		// A keeper or world entry is the NARROW tool beside the peer entry: it
+		// takes down one name and leaves the world it belongs to whole — still
+		// live, still counted, still reporting its census — because suppressing
+		// a handle is not a reason to hide a working world (Risk 5).
+		if !peerDenied {
+			if d.DeniesKeeper(v.Keeper) {
+				v.Keeper = suppressedName
+			}
+			if d.DeniesWorld(v.WorldName) {
+				v.WorldName = suppressedName
 			}
 		}
 		if len(v.Species) > 0 {
@@ -492,3 +586,23 @@ func suppressIfSet(v string) string {
 	}
 	return Suppressed
 }
+
+// suppressedName is what a denied KEEPER HANDLE or WORLD NAME (§33, B49) renders
+// as, and it is the one string in this file that is BLANK rather than marked.
+//
+// A MARKER IS A SHARED STRING, AND THESE TWO ARE THE ONLY FIELDS ANYTHING GROUPS
+// BY. The landing page's leaders module groups worlds on the exact keeper handle
+// (landing.go), so a marker would collapse every moderated keeper on the map into
+// ONE row — a pseudo-identity nobody chose, summing strangers' simulated time
+// together and capable of ranking first — and every world under it would read
+// "kept by [suppressed]". The marker's own justification does not reach here
+// either: it exists so a page cannot lie about how many species a world holds,
+// and blanking a name drops no row and changes no count. The slot, the position,
+// the liveness, the population and the census all still render (Risk 5).
+//
+// BLANK IS ALREADY THE ANSWER THIS FIELD HAS. §33 and §10.1 make absence UNKNOWN
+// on both of these — "a world that named nobody has not said who runs it" — and
+// every reader already draws that case: the page falls back to "slot N", the
+// leaders module skips a world with no keeper. So suppression reuses the one
+// state the whole system already agrees about instead of inventing a name.
+const suppressedName = ""

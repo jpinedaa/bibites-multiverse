@@ -12,9 +12,10 @@ import (
 //
 // The Windows record is bibites-multiverse/install-record/3, which added
 // world, sidecarPort, settings and the profiles block. The Linux record stays
-// at /2 and carries none of them, so every field below is optional and the
-// version string is not enforced: a record the launcher cannot fully read is
-// still a record it can take gameDir from.
+// at /2 and carries only the settings block's two public names (§33) out of
+// those, so every field below is optional and the version string is not
+// enforced: a record the launcher cannot fully read is still a record it can
+// take gameDir from.
 
 type installRecord struct {
 	Record      string          `json:"record"`

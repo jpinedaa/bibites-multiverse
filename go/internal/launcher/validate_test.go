@@ -356,3 +356,59 @@ func TestExcludeSpeciesRequiresExplicitOptOut(t *testing.T) {
 		t.Fatalf("a normal list did not survive: %q %v", value, err)
 	}
 }
+
+// TestAWrittenDownPublicNameIsJudgedByWhatItActuallyIs. validatePublicNames is
+// the LAST reader of the two public strings, and by the time a value reaches it
+// every path that ASKS has already resolved the decline: the flags do it
+// (applyProfileFlags), the prompts do it (askPublicName), and the window's create
+// does it (Session.Create). So what is left here is a value nobody was asked
+// about — a hand-edited profile — and the message has to name what is actually
+// wrong with it.
+//
+// It used to answer '-' with "has spaces around it", over a value one character
+// long with no spaces in it, which sent a reader looking for whitespace that was
+// never there.
+func TestAWrittenDownPublicNameIsJudgedByWhatItActuallyIs(t *testing.T) {
+	// The decline token, written into the file as if it were a name.
+	err := validatePublicNames(Profile{Keeper: declineToken})
+	if err == nil {
+		t.Fatal("the decline token was accepted as a published handle")
+	}
+	if strings.Contains(err.Error(), "spaces") {
+		t.Fatalf("the refusal blames whitespace on a value that has none: %v", err)
+	}
+	for _, want := range []string{"keeper", "'" + declineToken + "'", "empty"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not say %q: %v", want, err)
+		}
+	}
+
+	// Whitespace around a real name is the other way this fails, and it keeps
+	// its own sentence.
+	err = validatePublicNames(Profile{WorldName: " Tidepool "})
+	if err == nil {
+		t.Fatal("a name with spaces around it was written down as-is")
+	}
+	if !strings.Contains(err.Error(), "spaces around it") {
+		t.Fatalf("the refusal does not name the whitespace: %v", err)
+	}
+	// Neither message offers '-' as the fix any more: it is what a person TYPES
+	// at a prompt, and this reader is not a prompt.
+	if strings.Contains(err.Error(), "or "+declineToken+" to publish none") {
+		t.Fatalf("the refusal tells a file to hold '%s', which is what it just refused: %v",
+			declineToken, err)
+	}
+
+	// And the values that are actually fine stay fine, including both empties:
+	// unset is a decision, not a defect.
+	for _, p := range []Profile{
+		{},
+		{Keeper: "ada", WorldName: "Tidepool"},
+		{Keeper: "ada"},
+		{WorldName: "Alice's world"},
+	} {
+		if err := validatePublicNames(p); err != nil {
+			t.Fatalf("a publishable pair %+v was refused: %v", p, err)
+		}
+	}
+}

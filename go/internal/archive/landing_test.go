@@ -2,6 +2,7 @@ package archive
 
 import (
 	"bytes"
+	"encoding/json"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -9,6 +10,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"multiverse/internal/contractb"
 )
 
 func TestPublicFrontDoorAndLiveConsoleHaveSeparateJobs(t *testing.T) {
@@ -738,5 +742,213 @@ func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 	if cfg.Width != 1280 || cfg.Height != 720 {
 		t.Errorf("GET /game-screenshot.jpg is %dx%d, want 1280x720 — the size the markup reserves",
 			cfg.Width, cfg.Height)
+	}
+}
+
+// recognitionRegion is the landing page's fenced participant-recognition code,
+// the same shape the console's species census is fenced in (history_test.go).
+// The property below is asserted over the fence rather than over the behaviour,
+// because a Go test cannot run the page's JavaScript.
+func recognitionRegion(t *testing.T) string {
+	t.Helper()
+	const open = "PARTICIPANT RECOGNITION — BEGIN"
+	const closing = "PARTICIPANT RECOGNITION — END"
+	i, j := strings.Index(landingPageHTML, open), strings.Index(landingPageHTML, closing)
+	if i < 0 || j < 0 || j <= i {
+		t.Fatal("the landing page's participant-recognition code is not fenced; the escaping " +
+			"rule of contract-b-m4.md §33 B49 is enforced by a property over that fence")
+	}
+	return landingPageHTML[i:j]
+}
+
+// TestTheLandingPageNamesTheParticipantsOnTheMap. B49's gap was that the page
+// showed six cells, six numbers and no way to say which one is yours. These two
+// modules are the answer a first visitor sees: who just arrived, and whose
+// worlds have run the longest.
+func TestTheLandingPageNamesTheParticipantsOnTheMap(t *testing.T) {
+	for _, want := range []string{
+		`id="participants"`, `id="participantstitle"`,
+		"Who is on the map", "Worlds have keepers.",
+		"<h3>New on the map</h3>", "<h3>Simulation leaders</h3>",
+		`id="newworlds"`, `id="leaders"`,
+		// The two server-rendered lists are filled by the page's own poll of the
+		// one endpoint the snapshot strip already reads. No second fetch — and
+		// the archive's own clock rides along with the rows it timestamps.
+		`renderRecognition(d.slots||[], d.generatedAtMs)`,
+		// The fields stage A2 added to /api/status, read by the names they are
+		// served under.
+		"v.keeper", "v.worldName", "v.firstSeenMs", "s.simulatedTimeMax", "s.operator",
+		// The unit convention: simulatedTime is simulated SECONDS.
+		`(seconds/86400).toFixed(1)+" sim-days"`,
+		// A world that named nobody is called by its seat and never by an
+		// invented identity (§10.1, §33: unknown is not anonymous).
+		`"slot "+v.slot`,
+		// An arrival time the archive does not hold renders as a dash rather
+		// than as a date.
+		`"joined —"`,
+		// The friendly empty state, for a map on which nobody has named
+		// themselves yet.
+		"Nobody has put a name to a world yet.",
+		"No world has reserved a place on the map yet.",
+		// The section is styled in the page's own vocabulary rather than a new
+		// palette, and it collapses to one column with everything else.
+		".recog{display:grid;grid-template-columns:1fr 1fr;gap:16px}",
+		".recog{grid-template-columns:1fr}",
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("the landing page's participant recognition is missing %q", want)
+		}
+	}
+	// It sits between the live snapshot strip and the game section, so a reader
+	// meets the map, then the people on it, then the game underneath.
+	snap := strings.Index(landingPageHTML, `aria-label="Live map snapshot"`)
+	recog := strings.Index(landingPageHTML, `id="participants"`)
+	game := strings.Index(landingPageHTML, `id="game"`)
+	if !(snap < recog && recog < game) {
+		t.Fatalf("the recognition section is out of the page's reading order "+
+			"(snapshot %d, participants %d, game %d)", snap, recog, game)
+	}
+}
+
+// TestTheLeadersListCountsOnlyWhatTheArchiveKnows. The house rule is that an
+// honest gap beats a confident zero, and this list broke it twice over: a keeper
+// whose worlds had never published a simulatedTime was summed to 0 and drawn as
+// "0.0 sim-days" — a claim that their worlds have run and produced nothing —
+// and the sum then RANKED them against keepers with real totals, below a world
+// that had genuinely simulated a second.
+//
+// A Go test cannot run this page's JavaScript, so the rules are asserted over
+// the same fence the escaping rule is (recognitionRegion): the absent/known
+// distinction exists, the sum only takes numbers, the unknown case draws a dash
+// and takes no position in the ranking.
+func TestTheLeadersListCountsOnlyWhatTheArchiveKnows(t *testing.T) {
+	region := recognitionRegion(t)
+	for _, want := range []string{
+		// The distinction itself: a total this archive has never been given a
+		// number for is a different thing from a total of zero.
+		`haveSim: false`,
+		`if (typeof s.simulatedTimeMax === "number"){`,
+		`g.sim += s.simulatedTimeMax;`,
+		`g.haveSim = true;`,
+		// Ranked below every keeper with a known total, rather than beside a
+		// real 0.0.
+		`if (a.haveSim !== b.haveSim) return a.haveSim ? -1 : 1;`,
+		// Listed, dashed, and unranked — the rank counter only moves for a row
+		// that has a figure to be ranked by.
+		`var rank = "", figure = "—";`,
+		`if (e.haveSim){ position++; rank = String(position); figure = simDays(e.sim); }`,
+	} {
+		if !strings.Contains(region, want) {
+			t.Errorf("the leaders module is missing %q", want)
+		}
+	}
+	// The regression itself, in the shape it shipped in: an unconditional sum
+	// and an unconditional figure.
+	for _, forbidden := range []string{
+		`if (typeof s.simulatedTimeMax === "number") g.sim += s.simulatedTimeMax;`,
+		`simDays(e.sim), e.operator`,
+	} {
+		if strings.Contains(region, forbidden) {
+			t.Errorf("the leaders module still renders an unknown total as a number: %q", forbidden)
+		}
+	}
+}
+
+// TestArrivalTimesAreMeasuredOnTheArchivesClock. joined() subtracts firstSeenMs
+// — a stamp the ARCHIVE wrote — from "now", so "now" has to come off the same
+// clock. Read from the browser, a viewer whose machine is an hour behind sees
+// negative ages clamped to "joined just now" and one whose machine is a day fast
+// sees "joined 24 hours ago" for a world that arrived a minute ago. Neither is
+// visible to the operator, because their own clock is right.
+func TestArrivalTimesAreMeasuredOnTheArchivesClock(t *testing.T) {
+	region := recognitionRegion(t)
+	for _, want := range []string{
+		`function joined(ms, nowMs){`,
+		// Missing either end is UNKNOWN and never a guess.
+		`if (!ms || !nowMs) return "joined —";`,
+		`var s = Math.max(0, Math.round((nowMs - ms)/1000));`,
+		`function renderRecognition(slots, nowMs){`,
+		`bits.push(joined(v.firstSeenMs, nowMs));`,
+	} {
+		if !strings.Contains(region, want) {
+			t.Errorf("the recognition region is missing %q", want)
+		}
+	}
+	// NOT ONE BROWSER CLOCK IN THE WHOLE REGION, asserted over the fence rather
+	// than over the one call site, which is what makes it a rule the next
+	// module in here inherits.
+	for _, forbidden := range []string{"Date.now", "new Date"} {
+		if strings.Contains(region, forbidden) {
+			t.Errorf("the recognition region reads the viewer's clock (%s); every age it "+
+				"draws is measured against a stamp the archive wrote", forbidden)
+		}
+	}
+	// And the payload's clock is what is handed in, from the same poll the rows
+	// come from.
+	if !strings.Contains(landingPageHTML, `renderRecognition(d.slots||[], d.generatedAtMs)`) {
+		t.Error("the poll no longer hands the recognition modules the archive's own clock")
+	}
+}
+
+// TestAParticipantsChosenNameIsNeverRenderedAsMarkup is §33 B49's renderer
+// obligation, which the contract is explicit it cannot fix for the page: keeper
+// and worldName are chosen by a stranger, bounded at the AUTHOR and carried
+// verbatim by everything downstream, so the page that draws them is the party
+// that must escape them.
+//
+// It is asserted the two ways that are actually decisive, exactly as the census
+// name's rule is: the served document never contains a participant's text at
+// all, and the fenced region that draws it assigns no markup.
+func TestAParticipantsChosenNameIsNeverRenderedAsMarkup(t *testing.T) {
+	region := recognitionRegion(t)
+	for _, forbidden := range []string{
+		"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "createContextualFragment",
+	} {
+		if strings.Contains(region, forbidden) {
+			t.Fatalf("the recognition region uses %s; a keeper handle and a world name are "+
+				"attacker-chosen text and may only reach the DOM as text nodes", forbidden)
+		}
+	}
+	if !strings.Contains(region, "el.textContent = text") {
+		t.Fatal("the recognition region no longer fills its nodes with textContent")
+	}
+	// The landing page is a STATIC document that fetches JSON: no participant's
+	// text is interpolated into the bytes a browser parses, so there is no
+	// server-side injection surface to escape in the first place.
+	a := rigShapedArchive(t)
+	a.mu.Lock()
+	a.status = contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{{Slot: 1, PeerID: "peer-rude", Live: true,
+			Stats: &contractb.PeerStats{Keeper: markupName, WorldName: scriptClose}}},
+	}
+	a.statusAt = time.Now()
+	a.ready = true
+	a.mu.Unlock()
+	a.recognition.observe(a.status, time.Now().UnixMilli())
+
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+	page := get(t, ts.URL+"/")
+	for _, name := range []string{markupName, scriptClose} {
+		if strings.Contains(page, name) {
+			t.Fatalf("the served landing document interpolates a participant's chosen text "+
+				"(%q); the page is static and every name must arrive as JSON a script sets "+
+				"as TEXT", name)
+		}
+	}
+	// And the JSON carries it VERBATIM and ESCAPED: a reader that parses gets the
+	// participant's own spelling, and a reader that splices the body into a
+	// document gets no tag. Nothing downstream repairs either string (§33).
+	body := get(t, ts.URL+"/api/status")
+	if strings.Contains(body, "<script>") {
+		t.Fatalf("the status JSON carries a raw <script> tag:\n%s", body)
+	}
+	var view Status
+	if err := json.Unmarshal([]byte(body), &view); err != nil {
+		t.Fatalf("decode /api/status: %v", err)
+	}
+	if view.Slots[0].Keeper != markupName || view.Slots[0].WorldName != scriptClose {
+		t.Fatalf("a participant's chosen name was REPAIRED on the way out: %+v", view.Slots[0])
 	}
 }

@@ -581,6 +581,8 @@ Creation flags:
   --data-root PATH  --sidecar-port N  --world NAME  --game-dir PATH  --headless
   --export-edges LIST  --exclude-species LIST  --no-migration-exclusion
   --save-minutes F  --save-keep N  --save-on-quit on|off
+  --keeper HANDLE                PUBLIC: what this world is published under. - publishes none
+  --world-name NAME              PUBLIC: the name this world is shown by. - publishes none
   --join-string-file PATH        private map: the operator's one-line join string
   --relay-url wss://HOST/PATH    only with a join file that holds the identity half alone
 
@@ -635,6 +637,11 @@ sidecar port and its own save name.
 
 create enrolls a NEW identity on the map this installation is already on. Every world you add
 takes another identity, and the map applies a per-address enrollment limit.
+
+create asks, on a terminal, for the two names this world is PUBLISHED under - the keeper handle
+and the world's own name - with a suggested value on screen. Enter takes what is shown, '-'
+publishes none, and --keeper / --world-name answer either without being asked. Nothing derives
+one: off a terminal, and for any field nothing answered, this world publishes none.
 
 delete removes the profile and, with --remove-world-data, its data folder. Deleting a world here
 is not leaving the map - see docs/participant/leave.md.

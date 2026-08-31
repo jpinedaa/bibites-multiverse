@@ -6,11 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/modtoken"
+	"multiverse/internal/wire"
 )
 
 // Version is reported to the relay in HANDSHAKE.
@@ -86,6 +90,24 @@ type Config struct {
 	// "place me immediately after this slot on this axis".
 	InsertAfterSlot int
 	InsertAxis      string
+	// Keeper and WorldName are the two participant-chosen public strings of
+	// contract-b-m4.md §33, B49: the handle whoever runs this world chose to be
+	// known by, and the name they gave the world. They are published on the peer
+	// stats block whether or not a game is running.
+	//
+	// THEY COME FROM THIS CONFIG AND FROM NOWHERE ELSE. The sidecar does not
+	// read an OS username, does not derive a world name from a save file or from
+	// PeerID, and falls back to nothing: a value the participant did not choose
+	// is not one they consented to publish, and empty means the field is ABSENT
+	// from the wire. A default is something a person is offered and answers, and
+	// the join prompts are where that happens.
+	//
+	// New sanitizes both (sanitizePublicName): trimmed, control runes stripped,
+	// clipped to MaxPublicNameBytes at a rune boundary, and dropped outright
+	// when the bytes are not valid UTF-8. Author-side enforcement is the whole
+	// of the rule — nothing downstream bounds either one.
+	Keeper    string
+	WorldName string
 
 	Logger *slog.Logger
 	// Clock is the time source. It exists so the bounded hold of §9.3 — a
@@ -348,4 +370,92 @@ func (c *Config) applyDefaults() {
 	if c.JournalCompactInterval <= 0 {
 		c.JournalCompactInterval = d.JournalCompactInterval
 	}
+}
+
+// MaxPublicNameBytes bounds each of the two participant-chosen display strings
+// (contract-b-m4.md §33, B49). It is the SAME NUMBER as a census name half
+// (wire.MaxCensusNameBytes) and deliberately NOT the same rule: a census name
+// that breaks the bound is REFUSED, because a mod authored it and a mod can be
+// held to a shape check; these two are CLIPPED, because a person typed them into
+// a config file and a typo there must not stop a world joining the map.
+const MaxPublicNameBytes = wire.MaxCensusNameBytes
+
+// sanitizePublicNames bounds Keeper and WorldName before anything can publish
+// one, and says out loud when it changed one. It runs at startup because
+// author-side enforcement is the whole of §33 B49's bound: no reader downstream
+// trims, strips or clips either field, so the value that leaves here is the
+// value the map shows.
+//
+// It NEVER SUBSTITUTES. A value that sanitizes to nothing is dropped, and a
+// dropped value is an absent field rather than a manufactured one.
+func sanitizePublicNames(cfg *Config) {
+	for _, field := range []struct {
+		flag  string
+		value *string
+	}{
+		{"--keeper", &cfg.Keeper},
+		{"--world-name", &cfg.WorldName},
+	} {
+		clean, why := sanitizePublicName(*field.value)
+		if why != "" {
+			if clean == "" {
+				cfg.Logger.Warn("sidecar: "+field.flag+" was DROPPED and this world publishes none",
+					"configured", *field.value, "reason", why)
+			} else {
+				cfg.Logger.Warn("sidecar: "+field.flag+" was adjusted before publication",
+					"configured", *field.value, "published", clean, "reason", why)
+			}
+		}
+		*field.value = clean
+	}
+}
+
+// sanitizePublicName returns the value this sidecar may publish and, when the
+// two differ, one line saying why. An empty result means the field is absent.
+func sanitizePublicName(v string) (string, string) {
+	if v == "" {
+		return "", ""
+	}
+	if !utf8.ValidString(v) {
+		// Dropped whole rather than repaired: a replacement rune is a character
+		// nobody chose, and it would be published under a person's name.
+		return "", "it is not valid UTF-8"
+	}
+	trimmed := strings.TrimSpace(v)
+	var b strings.Builder
+	b.Grow(len(trimmed))
+	control := false
+	for _, r := range trimmed {
+		// A control rune reaches a terminal, a log line and a web page, and a
+		// participant who typed one did not mean any of the three.
+		if unicode.IsControl(r) {
+			control = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := strings.TrimSpace(b.String())
+	clipped := false
+	if len(out) > MaxPublicNameBytes {
+		// AT A RUNE BOUNDARY: half a rune is not a shorter name, it is a broken
+		// one, and it would not survive the UTF-8 check the next reader makes.
+		cut := MaxPublicNameBytes
+		for cut > 0 && !utf8.RuneStart(out[cut]) {
+			cut--
+		}
+		out = strings.TrimSpace(out[:cut])
+		clipped = true
+	}
+	switch {
+	case out == "":
+		return "", "nothing publishable was left of it"
+	case clipped:
+		return out, fmt.Sprintf("it was over the %d UTF-8 byte bound and was clipped",
+			MaxPublicNameBytes)
+	case control:
+		return out, "it carried control characters, which were removed"
+	case out != v:
+		return out, "surrounding whitespace was removed"
+	}
+	return out, ""
 }
