@@ -109,9 +109,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"inboundRateBurst), the largest clump ever released at once. 0 keeps "+
 			"the default (50.0)")
 	inboundAdmission := fs.String("inbound-admission",
-		env("MULTIVERSE_INBOUND_ADMISSION", AdmissionAdaptiveShadow),
+		env("MULTIVERSE_INBOUND_ADMISSION", AdmissionAdaptive),
 		"pre-custody population admission: off, fixed, adaptive-shadow, or adaptive. "+
-			"adaptive-shadow is the safe default: it learns and reports a limit but refuses nothing")
+			"adaptive is the default: it fails open while learning, then enforces the learned "+
+			"limit. adaptive-shadow publishes the same decision but refuses nothing")
 	inboundPopulationLimit := fs.Int("inbound-population-limit",
 		envInt("MULTIVERSE_INBOUND_POPULATION_LIMIT", 0),
 		"hard living-population limit used by --inbound-admission=fixed; must be positive")
@@ -286,6 +287,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"adaptiveMin", cfg.InboundPopulationMin, "adaptiveMax", cfg.InboundPopulationMax,
 		"hysteresis", cfg.InboundPopulationHysteresis,
 		"note", "the target is a reference divisor, not a speed the world must reach; "+
+			"adaptive fails open while learning and enforces once ready; "+
 			"adaptive-shadow learns and reports but never refuses")
 	if *insecureContractA {
 		logger.Warn("sidecar: --insecure-no-contract-a-token is set; ANY local process can drive " +

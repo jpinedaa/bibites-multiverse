@@ -222,7 +222,7 @@ func DefaultConfig() Config {
 		InboundRateBurst:            contracta.InboundRateBurst,
 		PacingIdleGrace:             contracta.PacingIdleGrace,
 		HeartbeatDeliveryGrace:      defaultHeartbeatDeliveryGrace,
-		InboundAdmissionMode:        AdmissionAdaptiveShadow,
+		InboundAdmissionMode:        AdmissionAdaptive,
 		InboundTargetTimeScale:      defaultAdmissionTarget,
 		InboundPopulationMin:        defaultAdmissionMin,
 		InboundPopulationMax:        defaultAdmissionMax,
