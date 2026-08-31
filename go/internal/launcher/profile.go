@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,6 +31,23 @@ const (
 	DefaultSaveKeep       = 6
 )
 
+// MaxPublicNameBytes bounds the two participant-chosen public strings, keeper
+// and worldName. It is the sidecar's own bound (sidecar.MaxPublicNameBytes,
+// contract-b-m4.md §33 B49) written out here rather than imported, because the
+// launcher does not link the sidecar in — and a test pins the two together.
+//
+// The launcher REFUSES a value over it instead of clipping one. The sidecar
+// clips, because a configuration file it was handed at start-up must not stop a
+// world joining the map; a person typing a name at a prompt can be told.
+const MaxPublicNameBytes = 64
+
+// declineToken is what a participant types at any of this project's prompts to
+// leave a public name unset. Blank accepts the value on offer, so there has to
+// be something to type that is not a name and is not a blank line, and it is the
+// SAME character on every prompt surface: the console launcher, the console
+// menu, and both installers.
+const declineToken = "-"
+
 // MaxLocalWorlds is the number of worlds that can run at once out of ONE game
 // directory. The mod framework hands out five log files and an instance that
 // gets none does not merely lose its log — the mod never loads in it
@@ -41,10 +59,21 @@ const MaxLocalWorlds = 5
 //
 // The field order below is the JSON key order, and it is frozen: the Windows
 // installer writes the same object with ConvertTo-Json for the first world, and
-// a test parses that file to keep the two writers from drifting.
+// a test parses that file to keep the two writers from drifting. A NEW FIELD
+// GOES ON THE END, after createdUtc, so that every key that was already here
+// keeps the position both writers put it in.
 //
 // THERE IS NO SECRET IN THIS STRUCT. The secret half of the map credential
 // lives in <dataRoot>/peer-secret.txt and nowhere else.
+//
+// Keeper and WorldName are the only two fields here that are PUBLISHED ON
+// PURPOSE and chosen by the person rather than derived from the machine
+// (contract-b-m4.md §33 B49). Empty means unset, unset means the sidecar is
+// never given the flag, and nothing anywhere fills one in: no account name and
+// no file name off this machine becomes a name somebody did not agree to
+// publish. They carry no omitempty for the same reason the installer writes
+// them unconditionally — the two writers emit the same keys or the drift test
+// says so.
 type Profile struct {
 	Format         string  `json:"format"`
 	Name           string  `json:"name"`
@@ -61,6 +90,8 @@ type Profile struct {
 	PeerID         string  `json:"peerId"`
 	RelayURL       string  `json:"relayUrl"`
 	CreatedUTC     string  `json:"createdUtc"`
+	Keeper         string  `json:"keeper"`
+	WorldName      string  `json:"worldName"`
 }
 
 // errNoProfiles is returned when the install holds no profile at all, which is
@@ -293,6 +324,82 @@ func defaultDataRoot(active Profile, name string) string {
 		parent = active.DataRoot
 	}
 	return filepath.Join(parent, "BibitesMultiverse-"+name)
+}
+
+// suggestedKeeper is the handle a prompt OFFERS, and it is offered and nothing
+// else: it is shown, it is editable, and it becomes a value only when somebody
+// answers with it. Nothing downstream of a prompt ever calls this — a world with
+// no keeper is a world whose participant did not choose one (contract-b-m4.md
+// §33 B49), and the account name on this machine is exactly the kind of name a
+// person would not have picked for a public map.
+//
+// The account name is read from the OS first and from the environment second,
+// and a DOMAIN\ prefix is dropped: 'CORP\alice' is a Windows logon name, not a
+// handle anybody would type.
+func suggestedKeeper(getenv func(string) string) string {
+	name := ""
+	if current, err := user.Current(); err == nil {
+		name = current.Username
+	}
+	if name == "" && getenv != nil {
+		name = getenv("USERNAME")
+		if name == "" {
+			name = getenv("USER")
+		}
+	}
+	return handleFromAccountName(name)
+}
+
+// handleFromAccountName is the account name reduced to the part a person would
+// recognise as their own: 'CORP\alice' and '/home/alice' are how a machine
+// spells an account, and neither is a handle. A name that could not be
+// published at all yields nothing, so that a suggestion is never a value the
+// next prompt would have to refuse.
+func handleFromAccountName(name string) string {
+	if cut := strings.LastIndexAny(name, `\/`); cut >= 0 {
+		name = name[cut+1:]
+	}
+	if clean, err := resolvePublicName(name); err == nil {
+		return clean
+	}
+	return ""
+}
+
+// inheritedKeeper is the handle a NEW world on this installation is OFFERED, and
+// it is the one rule every create surface shares: the console command, the
+// console menu and the window's dialog all open with the answer this
+// installation already gave.
+//
+// A HANDLE THIS INSTALLATION IS ALREADY PUBLISHED UNDER WINS OVER THE ACCOUNT
+// NAME. The second world on a machine belongs to whoever the first one belongs
+// to, and re-offering the machine's account name to somebody who has already
+// chosen a handle is offering them a name they turned down once.
+//
+// AND A DECLINE IS AN ANSWER TOO. A base profile with no keeper is not a gap to
+// fill in — it is somebody who was asked and said "publish none" — so the new
+// world's prompt offers nothing rather than falling back to the account name and
+// asking them to decline it again. That is the whole difference between a
+// suggestion and a default: only an installation with NO world to inherit from
+// has nobody to have answered, and only that case reaches the machine.
+func inheritedKeeper(base Profile, hasBase bool, getenv func(string) string) string {
+	if hasBase {
+		return base.Keeper
+	}
+	return suggestedKeeper(getenv)
+}
+
+// suggestedWorldName is the world name a prompt offers once a keeper has been
+// settled, so the two answers read as one sentence. With no keeper there is
+// nothing to build it out of and nothing is offered.
+func suggestedWorldName(keeper string) string {
+	if keeper == "" {
+		return ""
+	}
+	name := keeper + "'s world"
+	if clean, err := resolvePublicName(name); err == nil {
+		return clean
+	}
+	return ""
 }
 
 // createdNow is the createdUtc stamp, in the same shape the installer writes.

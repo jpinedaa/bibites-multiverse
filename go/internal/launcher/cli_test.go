@@ -334,6 +334,18 @@ func TestOwnSlotPathMatchesTheSidecar(t *testing.T) {
 	}
 }
 
+// The same seam for the bound on the two public names: the launcher refuses a
+// keeper handle or a world name it knows the sidecar would have to clip, and it
+// spells that bound itself rather than linking the sidecar into this binary.
+// A launcher with the larger number would write a name down and then watch the
+// map publish a shorter one.
+func TestPublicNameBoundMatchesTheSidecar(t *testing.T) {
+	if MaxPublicNameBytes != sidecar.MaxPublicNameBytes {
+		t.Fatalf("the launcher allows %d bytes and the sidecar publishes at most %d",
+			MaxPublicNameBytes, sidecar.MaxPublicNameBytes)
+	}
+}
+
 // TestDiagnoseArgsNameThisWorldsMap is the golden form of the diagnostic's
 // command line, and it exists because of what the short form did on a real
 // machine: `--diagnose --data-dir … --game-dir …` left the sidecar on its

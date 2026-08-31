@@ -286,12 +286,23 @@ place on the map are all still there, as the next paragraph describes.
 existing installation reads what is already here — the launcher's own profile first, because that
 is what you have been editing, and the install record behind it — and keeps every value you did not
 name on this run: **the world's save name, its port, its export edges, how often it saves and how
-many it keeps, whether it runs without a window, and which world this installation opens on.** It
-says *"updating the Bibites Multiverse … already installed here"* when it finds one, and *"keeping
-the settings this installation already had"* when it keeps them. **A flag you do name still wins**:
-`-World`, `-SidecarPort` and the rest are instructions, and history never overrides one. Extra
-worlds you created in the launcher are untouched either way, and so is the folder each of them
-keeps its journal in.
+many it keeps, whether it runs without a window, which world this installation opens on, and the
+two names your world is published under — a decline included, so a world that publishes none is
+not asked again.** It says *"updating the Bibites Multiverse … already installed here"* when it
+finds one, and *"keeping the settings this installation already had"* when it keeps them. **A flag
+you do name still wins**: `-World`, `-SidecarPort` and the rest are instructions, and history never
+overrides one. Extra worlds you created in the launcher are untouched either way, and so is the
+folder each of them keeps its journal in.
+
+**On Linux a re-run keeps the two published names, and only those.** There is no launcher profile
+on that platform, so the installer reads the `KEEPER` and `WORLD_NAME` lines of the
+`start-multiverse.sh` that names this data root — the file you are invited to edit — and its own
+`install-record.json` behind that, says *"keeping the names this installation is already published
+under"*, and leaves them as they are unless you pass `--keeper` or `--world-name`. **Every other
+setting on Linux comes from that run's own options**, because the start script it writes is the
+only place they live and rewriting it is what a re-run is for: pass `--world`, `--sidecar-port`,
+`--export-edges`, `--save-minutes`, `--save-keep` and `--save-on-quit` again if you had changed
+them, or edit the start script afterwards.
 
 Two more things an upgrade does that a first install has no reason to. **A program file the release
 before this one shipped and this one does not is removed** — by its recorded hash, so one you
@@ -399,8 +410,9 @@ runtime; check the build against the
 matrix; install BepInEx if it is not already there; copy the plugin; enroll a unique public-map
 identity or split a private-map join string, then store the secret in a file only you can read;
 arrange trust for a certificate authority
-**only** if you gave it one for a private map; state the settings this install ships with; and
-write the start script, the stop script, the application files, and the uninstall record. The
+**only** if you gave it one for a private map; state the settings this install ships with, and ask
+for the two names your world is published under when there is somebody at the keyboard to answer;
+and write the start script, the stop script, the application files, and the uninstall record. The
 Windows installer writes one more thing in that last step: `profiles\default.json`, the world
 profile the launcher reads. **Ahead of the nine, each installer names a step 0**, and it is a
 different question on each platform: on Windows it checks that nothing of this installation is
@@ -526,7 +538,9 @@ its own settings from its own environment.
 
 `profile create` also takes `--data-root`, `--game-dir`, `--world`, `--sidecar-port`,
 `--headless` / `--no-headless`, `--export-edges`, `--exclude-species`, `--no-migration-exclusion`,
-`--save-minutes`, `--save-keep` and `--save-on-quit`. For a private map it takes
+`--save-minutes`, `--save-keep`, `--save-on-quit`, and the two published names `--keeper` and
+`--world-name` — which it otherwise asks you for, on a terminal, the way the installer does. For a
+private map it takes
 `--join-string-file`, and `--relay-url` **only** when that file holds the identity half on its own
 — a whole `multiverse-join/1` line already carries the relay address, and the launcher never takes
 a relay address from the flag over one the join file carries. On the public map `--relay-url` is
@@ -630,6 +644,71 @@ install time. Afterwards, use the launcher's **Edit settings...**, or
 `multiverse-launcher.exe profile set NAME --export-edges E,N`,
 on Windows, or the same value in the start script on Linux. If you want your world off the map, do
 not start it.
+
+## The two names you are asked for
+
+**Every installer asks two questions nothing else on this page asks: what you want to be called,
+and what you want your world to be called.** They are the only two things about your world that
+you choose *and* that other people read — everything else here is a setting about this computer.
+[join.md](join.md) lists everything joining publishes about your world, and these two are the last
+two entries on that list; it is worth reading before you answer.
+
+**They are offered, never assumed.** The value is on your screen before it is taken: on a computer
+that has never answered, your account name for the keeper handle and *"<that name>'s world"* for
+the world name; on one that has, **the names it already publishes** — see *You are asked once*
+below. Three answers, and they are the same three at every prompt this project has:
+
+| You type | What happens |
+|---|---|
+| **Enter** | the value shown is what gets published |
+| a name of your own | that is what gets published, exactly as typed |
+| `-` | nothing is published for that field |
+
+**`-` is a real answer and it costs you nothing.** A world with no keeper is shown as unknown,
+which is a choice rather than a gap: nothing substitutes your account name, your computer's name,
+your save file's name or your world's identity for a name you did not give. Your world joins,
+crosses and behaves exactly the same either way.
+
+**Where each installer asks.** The Windows setup window has the two boxes on the screen you press
+**Install** on, filled in and editable; clearing a box is that window's `-`, and on an upgrade the
+boxes arrive holding the names this installation already publishes rather than your account name.
+The advanced `Install-BibitesMultiverse.ps1` and the Linux `install-bibites-multiverse.sh` ask at
+the keyboard, in step 8, with the value shown in brackets. The launcher asks the same two questions
+when you create another world — in the create window's own two boxes, or at the console prompt.
+
+**An installer that cannot show you the value does not take one.** A silent or scripted run — the
+setup's own hidden install, a package build, `-Unattended`, input coming from a file, or **your own
+`> install.log 2>&1` from a terminal** — never fills in an account name on your behalf: a question
+nobody can be shown is a question nobody has answered, so on a computer that has never answered
+both fields stay unset. On a computer that has, that run keeps what it already publishes rather
+than asking. Pass `-Keeper` / `--keeper` and `-WorldName` / `--world-name` to set them without
+being asked, and `-` as the value to mean *publish none* explicitly.
+
+**You are asked once.** An upgrade keeps what this installation already published, **including a
+decline**, and does not ask again. Each installer reads the live file first and its own install
+record behind it: on Windows the launcher's `profiles\default.json`, on Linux the `KEEPER` and
+`WORLD_NAME` lines in `start-multiverse.sh`. A name you edit in either of those is what the next
+upgrade keeps.
+
+To change either one afterwards on Windows, use the launcher — **Edit settings...** in its window,
+or
+
+```powershell
+multiverse-launcher.exe profile set NAME --keeper "Alice" --world-name "The Deep"
+multiverse-launcher.exe profile set NAME --keeper -          # publish no keeper from now on
+```
+
+On Linux there is no launcher: edit `KEEPER` and `WORLD_NAME` in `start-multiverse.sh`, or run the
+installer again with `--keeper` / `--world-name` — **an option is an instruction and still wins
+over what is stored**, `-` included, which is also how you take a name back off the map.
+
+The change reaches the map the next time that world starts.
+
+**A name is at most 64 bytes and holds no control characters** — an accented or non-Latin letter
+costs more than one byte. Anything longer is refused with the reason and asked for again, rather
+than shortened into a name you did not choose; the setup window refuses it on the form, before it
+starts installing anything. Two worlds may honestly carry the same name: these are captions, and
+the map routes on your world's place and identifies it by its identity, never by either of these.
 
 ## The settings a fresh install ships with
 

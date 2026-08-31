@@ -123,6 +123,32 @@ is never run, and no part of this needs root.
 the whole perimeter, not silence. Every edge is a door that works both ways. The installer says
 so on your screen while it runs, and `docs/participant/install.md` says so on the page.
 
+**Step 8 asks two questions nothing else here asks: what you want to be called, and what you want
+your world to be called.** They are the only two things about your world that you choose *and*
+that other people read — the published `join` page lists everything joining publishes, and these
+two are on that list. The prompt shows the value before it takes it, `$USER` for the first and
+*"$USER's world"* for the second: Enter takes what is shown, your own text replaces it, and `-`
+publishes none. `--keeper` and `--world-name` answer both without being asked, with `-` as the
+value meaning *publish none*.
+
+**Nothing is ever filled in behind you.** The question is asked only when there is somebody to
+show it to — **your terminal on all three streams**. A scripted install, a package build, input
+coming from a file, or your own `./install-bibites-multiverse.sh > install.log 2>&1` publishes
+neither name rather than reaching for `$USER`, because a question written into a log file is not a
+question. A world that published none is shown as unknown, which is a choice and not a gap.
+
+**You are asked once.** Both go into `start-multiverse.sh` as `KEEPER` and `WORLD_NAME`, and a
+later run of the installer reads them back from there — and from `install-record.json` when that
+file is gone — says *"keeping the names this installation is already published under"*, and leaves
+them alone, **a decline included**. So change them by editing those two lines, or by running the
+installer again with `--keeper` / `--world-name`: an option is an instruction and still wins,
+`-` included, which is how you take a name back off the map. **Every other setting is rewritten
+from that run's own options**, so pass `--world`, `--sidecar-port`, `--export-edges` and the save
+options again if you had changed them.
+
+A name is at most 64 bytes, holds no control characters, and is a caption rather than an address —
+two worlds may honestly carry the same one.
+
 ## Start and stop
 
 ```sh

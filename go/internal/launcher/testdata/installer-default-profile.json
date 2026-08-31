@@ -13,5 +13,7 @@
     "saveOnQuit":  true,
     "peerId":  "public-9af42a17616742e7a6e8c62cb8b95f4f",
     "relayUrl":  "wss://bibitesmultiverse.com/contract-b/v4",
-    "createdUtc":  "2026-08-16T09:41:07Z"
+    "createdUtc":  "2026-08-16T09:41:07Z",
+    "keeper":  "",
+    "worldName":  ""
 }

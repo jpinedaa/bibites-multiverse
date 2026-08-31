@@ -27,6 +27,8 @@ type profileFlagSet struct {
 	saveMinutes          *float64
 	saveKeep             *int
 	saveOnQuit           *string
+	keeper               *string
+	worldName            *string
 	joinStringFile       *string
 	relayURL             *string
 
@@ -54,6 +56,10 @@ func registerProfileFlags(fs *flag.FlagSet, creation bool) *profileFlagSet {
 		saveMinutes:          fs.Float64("save-minutes", 0, "how often this world saves itself, in minutes. 0 turns the timer off"),
 		saveKeep:             fs.Int("save-keep", 0, "how many saves of this world to keep"),
 		saveOnQuit:           fs.String("save-on-quit", "", "on or off: write this world out when the game closes"),
+		keeper: fs.String("keeper", "", "PUBLIC: the handle this world is published under on the map. "+
+			declineToken+" publishes none"),
+		worldName: fs.String("world-name", "", "PUBLIC: the name this world is shown under on the map. "+
+			declineToken+" publishes none"),
 	}
 	if creation {
 		f.dataRoot = fs.String("data-root", "", "the folder this world's journal, credential and logs live in")
@@ -242,6 +248,12 @@ func (a *app) finishCreate(p Profile, base Profile, hasBase bool, profiles []Pro
 	if err := a.applyProfileFlags(&p, flags); err != nil {
 		return a.fail("%v", err)
 	}
+	// The offer, not a value: what this installation already publishes under, or
+	// the account name only when there is no world to have answered (profile.go).
+	// It is passed in rather than read here because a clone starts from the
+	// profile it copies and a create starts from the base one.
+	a.askPublicNames(&p, inheritedKeeper(base, hasBase, a.getenv),
+		flags.was("keeper"), flags.was("world-name"))
 	joinFile, relayFlag := "", ""
 	if flags.joinStringFile != nil {
 		joinFile = *flags.joinStringFile
@@ -250,6 +262,105 @@ func (a *app) finishCreate(p Profile, base Profile, hasBase bool, profiles []Pro
 		relayFlag = *flags.relayURL
 	}
 	return a.createProfile(p, base, hasBase, profiles, joinFile, relayFlag)
+}
+
+// askPublicNames is the JOIN-TIME CONSENT for the two strings this world
+// publishes about the person running it (contract-b-m4.md §33 B49).
+//
+// IT ONLY EVER ASKS. Nothing here fills a value in on its own: with no terminal
+// to ask at — a scripted create, a silent install, the window's own create,
+// which answers every question with nothing — both fields stay unset and this
+// world publishes neither. The account name on this machine is a SUGGESTION on
+// screen and becomes a value only when somebody presses Enter over it, which is
+// the whole difference between a default that was offered and a name that was
+// taken.
+//
+// offeredKeeper is what the keeper prompt OPENS WITH when the world being
+// created has no handle of its own yet — inheritedKeeper's answer, computed by
+// the caller from the profile this world descends from. It may be empty, and an
+// empty offer is a real one: an installation whose participant declined a handle
+// is offered no name here rather than being sent back to the account name they
+// already turned down.
+//
+// given says the flag was on the command line, decline included: an answer
+// already given is not asked for again.
+func (a *app) askPublicNames(p *Profile, offeredKeeper string, keeperGiven, worldNameGiven bool) {
+	if !a.interactive || (keeperGiven && worldNameGiven) {
+		return
+	}
+	a.print("")
+	a.print("%s", publicNamesNote)
+	if !keeperGiven {
+		// A CLONE ALREADY CARRIES THE SOURCE WORLD'S HANDLE, and that is the
+		// same answer the offer holds; a create carries nothing and takes the
+		// offer as it stands.
+		suggestion := p.Keeper
+		if suggestion == "" {
+			suggestion = offeredKeeper
+		}
+		p.Keeper = a.askPublicName("your keeper handle", suggestion)
+	}
+	if !worldNameGiven {
+		suggestion := p.WorldName
+		if suggestion == "" {
+			suggestion = suggestedWorldName(p.Keeper)
+		}
+		p.WorldName = a.askPublicName("this world's name", suggestion)
+	}
+}
+
+// askPublicName asks for one of them. Blank takes what is offered, '-' publishes
+// none, and a value the map could not carry is refused with the reason and asked
+// for again — a name is not worth failing a create over, and it is not worth
+// silently changing either.
+//
+// A reader at its end answers nothing, which leaves the field UNSET rather than
+// accepting the suggestion: input that ran out is not consent.
+func (a *app) askPublicName(what, suggestion string) string {
+	for {
+		question := fmt.Sprintf("%s, published publicly [%s]: ", what, suggestion)
+		if suggestion == "" {
+			question = fmt.Sprintf("%s, published publicly [none]: ", what)
+		}
+		answer, ok := a.askLine(question)
+		if !ok {
+			return ""
+		}
+		if strings.TrimSpace(answer) == "" {
+			return suggestion
+		}
+		value, err := resolvePublicName(answer)
+		if err != nil {
+			a.warn("%v", err)
+			continue
+		}
+		return value
+	}
+}
+
+// publicNamesNote is what a participant reads BEFORE the two questions, and it
+// is the same fact docs/participant/join.md states in its disclosure list: these
+// two are the only things on that list they choose, and they are seen by
+// everybody.
+const publicNamesNote = `  Two names go out with this world, and they are the only two on the map you
+  choose yourself: the handle you are known by, and this world's own name. Both
+  are PUBLIC - every other world on the map, and everyone its operator has
+  authorised to watch it, sees them exactly as you type them here.
+  Press Enter to take what is offered, type your own, or type - to publish none.`
+
+// publicNamesLine is how a written-down pair is read back, in one line, on every
+// surface that reports a world.
+func publicNamesLine(p Profile) string {
+	switch {
+	case p.Keeper != "" && p.WorldName != "":
+		return fmt.Sprintf("published publicly: keeper '%s', world name '%s'", p.Keeper, p.WorldName)
+	case p.Keeper != "":
+		return fmt.Sprintf("published publicly: keeper '%s'. This world publishes no name of its own", p.Keeper)
+	case p.WorldName != "":
+		return fmt.Sprintf("published publicly: world name '%s'. This world publishes no keeper", p.WorldName)
+	}
+	return "this world publishes no keeper and no name: the map shows it as unknown, which is a " +
+		"choice and not a gap. 'profile set NAME --keeper HANDLE' sets one later."
 }
 
 // createProfile is the shared tail of every way a world is created: the command
@@ -290,6 +401,7 @@ func (a *app) createProfile(p Profile, base Profile, hasBase bool, profiles []Pr
 	a.print("your world's identity on this map: %s", p.PeerID)
 	a.print("the relay it dials: %s", p.RelayURL)
 	a.print("world '%s'   port %d   data %s", p.World, p.SidecarPort, p.DataRoot)
+	a.print("%s", publicNamesLine(p))
 	if p.ExcludeSpecies == "" {
 		a.print("%s", noExclusionWarning)
 	}
@@ -580,6 +692,23 @@ func (a *app) applyProfileFlags(p *Profile, flags *profileFlagSet) error {
 			return err
 		}
 		p.SaveOnQuit = value
+	}
+	// The two public names. '-' is the decline here as well as at every prompt,
+	// so 'profile set NAME --keeper -' takes a handle back off the map at the
+	// next start without anybody having to learn a second spelling for "none".
+	if flags.was("keeper") {
+		value, err := resolvePublicName(*flags.keeper)
+		if err != nil {
+			return fmt.Errorf("--keeper: %w", err)
+		}
+		p.Keeper = value
+	}
+	if flags.was("world-name") {
+		value, err := resolvePublicName(*flags.worldName)
+		if err != nil {
+			return fmt.Errorf("--world-name: %w", err)
+		}
+		p.WorldName = value
 	}
 	// The edge list is normalised even when it came from a default, so what is
 	// written down is what the mod will be told.

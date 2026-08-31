@@ -42,6 +42,7 @@ facts shape every verdict:
 | `--inbound-admission` | The sidecar | `adaptive-shadow`: learns and reports a population decision at the game's requested speed, but refuses nothing on population | **PASS FOR SHADOW ROLLOUT** — a session speed change moves the learner's target with it; no participant behavior changes until a later reviewed promotion to enforcing `adaptive`, and queue backpressure remains active |
 | `--forward-timeout` | The sidecar | Records an unanswered forwarded organism lost after five wall-clock minutes | **PASS WITH A STATED LOSS** — the deadline bounds a full outbound journal. It does not send or return the organism again |
 | The launcher's update check | The launcher | One anonymous background `GET` per launcher run to the project's own homepage, which can only add a line of text and a button | **PASS** — nothing waits on it, it carries no identity and no version, a failure is silent, and `MULTIVERSE_NO_UPDATE_CHECK` makes no request at all |
+| `--keeper`, `--world-name` | The sidecar, set by the installers and the launcher | Publishes **neither**: an install nobody answered names nobody | **PASS** — the only default here is *unset*, the prompt shows the value before it is taken, and no account name is read off the machine when there is nobody to show it to |
 
 A fifth flag belongs beside the first, and this audit adds it rather than leaving it implied:
 **the sidecar's `--insecure-no-contract-a-token`**. It *is* shipped, inside the package.
@@ -416,6 +417,75 @@ consequence is a line of text and a button — and an off switch that means off.
 
 ---
 
+## 7. `--keeper` and `--world-name` — the two names a world publishes about a person
+
+**Today.** Unset, and new in this release. They are the first two fields this system publishes that
+name a *person* rather than a machine — the handle whoever runs a world chose, and the name they
+gave the world (`contract-b-m4.md` §33, B49) — so the question this audit asks about them is not
+what they cost but **who chose them**.
+
+**A bare install.** Nothing. A world that was not given a name publishes none, and every reader
+renders that as unknown. There is no fallback anywhere in the chain: not the Windows or Linux
+account name, not the computer's name, not the save file's name, not the data directory, and not
+the world's own identity on the map. A sidecar started without the flags does not send the fields
+at all.
+
+**What a person is shown before anything is published.** Both installers and the launcher offer a
+value — the account name for the handle, *"<that name>'s world"* for the world — **on screen, in an
+editable field or a prompt with the value in brackets**, above a sentence saying it is published
+publicly. Enter accepts what is shown, typing replaces it, `-` publishes none, and the same three
+answers work at every prompt this project has. That is the whole of the difference between a
+default and an offer: a default is what happens when nobody chooses, and here nobody choosing means
+nothing is published.
+
+**What happens when nobody is there.** A silent install, a scripted run, output redirected to a log,
+`-Unattended`, stdin that is not a terminal, the graphical setup's own hidden install: **not one of
+them invents a name.** On a computer that has never answered they publish neither, and no account
+name is read off the machine to fill the gap. On one that has, they keep exactly what it already
+publishes — a decline included — because that is a person's answer and a run with nobody there is
+not the moment to revisit it. The graphical setup answers both from its own boxes instead, because
+it is the screen the person is looking at, and on an upgrade those boxes arrive holding what this
+installation already publishes rather than the account name.
+
+**Redirected output counts as nobody being there**, on both platforms and deliberately. A keyboard
+on standard input is not the question; being able to SHOW somebody the value before taking it is.
+So each installer requires a terminal on every stream its question uses: on Windows, standard input
+and standard output, which is where PowerShell writes its own prompt; on Linux, standard error,
+where the prompt goes, and standard output, where the four lines that say what these names *are* go
+— and standard input beside them. `install.ps1 > install.log` and
+`./install-bibites-multiverse.sh > install.log 2>&1`, run from a terminal, are therefore silent
+runs. Asking anyway would put the question in a file nobody is reading, hang the install on it, and
+take a blindly typed Enter as consent to publish the account name.
+
+**What it discloses when it is set.** Exactly what was typed, to every peer on the map and every
+subscriber the operator has authorised — the same audience as every other field in the stats block,
+listed in `participant/join.md` before a participant joins. It is a caption and never an address:
+nothing keys, routes, matches or deduplicates on either, and two worlds may honestly carry the same
+name.
+
+**Bounds, and who applies them.** At most 64 UTF-8 bytes and no control characters. The **authoring
+sidecar** clips and strips, so no reader downstream has to; the installers and the launcher refuse
+rather than clip, because a person who typed a name too long can be told and asked again, and a
+name shortened on somebody's behalf is not the name they chose. **The graphical setup checks its
+two boxes on the form**, before it starts the install at all: the install it starts has no keyboard
+and its output goes to a log, so a refusal raised in there would arrive as *"Installation stopped"*
+over a machine that had already taken its place on the map. The command-line installers check as
+they settle the value: a name typed at their prompt is said out loud and asked for again, and a
+name given as an option stops the run.
+
+**Changing it, and taking it back.** `profile set NAME --keeper -` publishes none from that world's
+next start, and the launcher's edit window clears the box for the same effect; on Linux, where
+there is no launcher, the `KEEPER` and `WORLD_NAME` lines of `start-multiverse.sh` are the same
+switch, and `--keeper -` on another install run is the other. An upgrade keeps what an installation
+already published, a decline included, and does not ask again: each installer reads the live file
+first — the launcher's profile on Windows, the start script on Linux — and its own install record
+behind it, and an option named on the run still wins over both.
+
+**Verdict: PASS.** The only shipped default is *unset*, the value is shown before it is taken, and
+declining costs a participant nothing.
+
+---
+
 ## What this audit does not cover
 
 - **The relay's eight capacity limits.** They are knobs with published values and their own table
@@ -442,3 +512,11 @@ This audit is a release artifact and goes stale with the release. For the next o
 7. Re-read what the launcher sends to `/api/release` — the headers as well as the URL — and check
    that section 6's claim of an anonymous request with no version in it still holds:
    `nice -n 19 go test ./internal/launcher -run 'Lookup|CheckAddress'`.
+8. Re-check that an install nobody answered publishes no name:
+   `nice -n 19 go test ./internal/launcher -run 'PublicNames'`, and the profile and start script an
+   unattended install writes in both installer suites — `keeper` and `worldName` empty, and no
+   `--keeper` in the sidecar's fixed arguments. Re-check the other half with them: that an upgrade
+   keeps a name AND a decline, from the live file and from the install record alone — scenario H in
+   `release/test-install-uninstall.ps1`, scenario M in `release/test-install-uninstall.sh`, which
+   also runs an install with its output redirected under a real terminal and proves it asked
+   nothing.

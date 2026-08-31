@@ -90,6 +90,17 @@ CA_FILE=''
 GAME_DIR=''
 DATA_ROOT=''
 WORLD='Multiverse'
+# The two names this world is PUBLISHED under (contract-b-m4.md §33, B49). Empty
+# is the default and nothing here ever fills one in: with nobody at the keyboard
+# this install publishes neither, and no account name off this machine becomes a
+# name somebody did not agree to publish. KEEPER_ANSWERED/WORLD_NAME_ANSWERED say
+# an option was given, decline included, so an answer is never asked for twice.
+KEEPER=''
+WORLD_NAME=''
+KEEPER_ANSWERED=0
+WORLD_NAME_ANSWERED=0
+DECLINE_TOKEN='-'
+MAX_PUBLIC_NAME_BYTES=64
 EXPORT_EDGES='E,N,W,S'
 EXCLUDE_SPECIES='Basic bibite'
 NO_MIGRATION_EXCLUSION=0
@@ -180,6 +191,16 @@ usage: ./$(basename "$0") [options]
                              versioned game runtime here. Default:
                              \${XDG_DATA_HOME:-\$HOME/.local/share}/bibites-multiverse
   --world <name>             The world this install runs. Default: Multiverse.
+  --keeper <handle>          PUBLIC: the handle this world is published under on
+                             the map. Everyone on the map, and everyone its
+                             operator has authorised to watch it, sees it. It is
+                             a caption and never an address. Left out, a run with
+                             somebody at the keyboard OFFERS \$USER and waits for
+                             you to accept, change or decline it; a run with
+                             nobody there publishes nothing. Pass '-' to publish
+                             nothing without being asked.
+  --world-name <name>        PUBLIC: the name this world is shown under, on the
+                             same terms. The value offered is "<keeper>'s world".
   --export-edges <list>      The edges your world exports through. THE DEFAULT IS
                              ALL FOUR and it is written out explicitly.
   --exclude-species <name>   Species that never leave your world.
@@ -219,6 +240,8 @@ while [ $# -gt 0 ]; do
     --game-dir)         need_value "$1" $#; GAME_DIR="$2";         shift 2 ;;
     --data-root)        need_value "$1" $#; DATA_ROOT="$2";        shift 2 ;;
     --world)            need_value "$1" $#; WORLD="$2";            shift 2 ;;
+    --keeper)           need_value "$1" $#; KEEPER="$2";     KEEPER_ANSWERED=1;     shift 2 ;;
+    --world-name)       need_value "$1" $#; WORLD_NAME="$2"; WORLD_NAME_ANSWERED=1; shift 2 ;;
     --export-edges)     need_value "$1" $#; EXPORT_EDGES="$2";     shift 2 ;;
     --exclude-species)  need_value "$1" $#; EXCLUDE_SPECIES="$2";  shift 2 ;;
     --sidecar-port)     need_value "$1" $#; SIDECAR_PORT="$2";     shift 2 ;;
@@ -1638,6 +1661,269 @@ fi
 
 case "$SAVE_ON_QUIT" in on|off) ;; *) stop_setup "--save-on-quit takes on or off, not '$SAVE_ON_QUIT'." ;; esac
 
+# THE TWO NAMES THIS WORLD PUBLISHES, asked for once and only where there is
+# somebody to ask. '-' and empty both mean publish nothing; a blank answer at the
+# prompt takes the value that was on screen, which is the same three rules the
+# launcher, the console menu and the Windows installer follow.
+trim_spaces() { printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+public_name_problem() {
+  # In BYTES, which is what the map bounds: LC_ALL=C counts bytes rather than
+  # characters, so an accented name is measured the way it travels. An empty
+  # answer is not a problem here - it is the decline, and the callers handle it.
+  local value bytes
+  value="$1"
+  bytes="$(LC_ALL=C printf '%s' "$value" | wc -c | tr -d ' ')"
+  if [ "$bytes" -gt "$MAX_PUBLIC_NAME_BYTES" ]; then
+    printf 'that is %s bytes long and the map carries at most %s (an accented or non-Latin letter is more than one byte)' \
+      "$bytes" "$MAX_PUBLIC_NAME_BYTES"
+    return 0
+  fi
+  case "$value" in
+    *[[:cntrl:]]*)
+      printf 'that holds a control character, which no map, log or web page can show'
+      return 0 ;;
+  esac
+  printf ''
+}
+
+clean_public_name() {
+  # One reader for a value that came from an OPTION, and it only ever CLEANS:
+  # '-' and empty both mean publish nothing. IT DOES NOT REFUSE, because it is
+  # called through a command substitution and a stop_setup inside one exits the
+  # subshell it runs in - the refusal would be captured as the value and the
+  # install would go on with a STOP message for a name. The caller refuses.
+  local value
+  value="$(trim_spaces "$1")"
+  [ "$value" = "$DECLINE_TOKEN" ] && value=''
+  printf '%s' "$value"
+}
+
+offered_public_name() {
+  # A SUGGESTION, and a suggestion never refuses anything: a value this could not
+  # publish simply is not offered, so nothing here can stop an install. The
+  # account name is reduced to the part a person would recognise - '/home/alice'
+  # and 'CORP\alice' are how a machine spells an account, not a handle.
+  local value
+  value="$(trim_spaces "$1")"
+  value="${value##*[\\/]}"
+  [ -n "$value" ] || { printf ''; return 0; }
+  [ -z "$(public_name_problem "$value")" ] || { printf ''; return 0; }
+  printf '%s' "$value"
+}
+
+can_ask_at_keyboard() {
+  # WHETHER THERE IS SOMEBODY THERE, and the answer is NO unless this can be
+  # proven. It is the same question, with the same three answers, as the Windows
+  # installer's Test-CanAskAtKeyboard.
+  #
+  # STDIN IS NOT THE WHOLE QUESTION, and believing it was is what made this
+  # wrong. The prompt goes to STDERR and everything around it to STDOUT, so
+  # `./install-bibites-multiverse.sh > log 2>&1` run FROM A TERMINAL still has a
+  # keyboard on stdin: the question was asked into the log, the install sat
+  # waiting for an answer nobody could see it wanted, and an Enter typed blindly
+  # published $USER. A question nobody can read is not a question.
+  #
+  # So every stream this question uses has to be a terminal: stdin, because the
+  # answer is typed there; stderr, because the question is written there; and
+  # stdout, because the four lines that say what these names ARE - public, seen
+  # by everyone on the map - are written there, and taking a name without them
+  # would be taking it in silence. docs/defaults-audit.md §7 says redirected
+  # output publishes neither name, and this is where that is true.
+  [ -t 0 ] && [ -t 1 ] && [ -t 2 ]
+}
+
+read_public_name() {
+  # $1 what it is, $2 the value on offer. IT IS SHOWN BEFORE IT IS TAKEN: blank
+  # accepts what is on screen, '-' publishes none, and a value the map could not
+  # carry is said out loud and asked for again.
+  local shown answer problem
+  shown="$2"
+  [ -n "$shown" ] || shown='none'
+  while :; do
+    # THE QUESTION GOES TO THE TERMINAL, NOT INTO THE ANSWER. This function
+    # returns the name on its standard output, and its caller reads that through
+    # a command substitution - so a prompt written there would be captured as
+    # part of the value and never seen by the person it was asked of.
+    printf '     %s, published publicly [%s]: ' "$1" "$shown" >&2
+    # INPUT THAT RAN OUT IS NOT CONSENT. A blank line is somebody accepting what
+    # is on screen; a reader at its end is nobody, and nobody publishes nothing.
+    if ! IFS= read -r answer; then printf ''; return 0; fi
+    answer="$(trim_spaces "$answer")"
+    if [ -z "$answer" ]; then printf '%s' "$2"; return 0; fi
+    if [ "$answer" = "$DECLINE_TOKEN" ]; then printf ''; return 0; fi
+    problem="$(public_name_problem "$answer")"
+    if [ -z "$problem" ]; then printf '%s' "$answer"; return 0; fi
+    printf '     %s.\n' "$problem" >&2
+    printf '     Type it again, or %s to publish none.\n' "$DECLINE_TOKEN" >&2
+  done
+}
+
+# ------------------------------------------- what this installation already publishes
+#
+# A RUN OVER AN EXISTING INSTALLATION IS AN UPGRADE, and the two names that
+# installation goes out under are answers somebody already gave. Without this,
+# an upgrade with nobody at the keyboard - a scripted one, a package build, the
+# ordinary case on this platform - rewrote both with the defaults, which are
+# empty: a world that had been on the map as somebody for months went dark
+# under its own name, and nothing on screen said so. An upgrade AT a keyboard
+# was no better: it asked again, offering $USER, over a name already chosen.
+#
+# AN EMPTY VALUE IS ONE OF THOSE ANSWERS. Somebody who declined declined, and is
+# not asked again every time a newer build arrives.
+#
+# TWO SOURCES, AND THE LIVE ONE WINS. It is the order the Windows installer
+# reads in (Install-BibitesMultiverse.ps1, Get-PreviousSetting):
+#
+#   1. what THIS RUN named. --keeper and --world-name are instructions, and an
+#      instruction is never overridden by history;
+#   2. $START_NAME, which is the file that actually starts this world and the
+#      one README-linux.md invites you to edit. It is this platform's answer to
+#      the launcher's profile: what this installation is running RIGHT NOW;
+#   3. the install record, which is what this installer last wrote;
+#   4. nothing - and only then has the question never been answered.
+#
+# IT READS AND IT NEVER REFUSES A MISSING FILE. An installation without either
+# file is a fresh install, which is exactly what it was before this existed.
+previous_start_script() {
+  # The start script that belongs to THIS data root, in the three places one can
+  # be: this kit, the data root, and the data root's parent. It is the same net
+  # find_world_identity casts, bounded for the same reason - a start script that
+  # names a different data root describes a different world.
+  local kit_root file script_root
+  for kit_root in "$HERE" "$DATA_ROOT" "$(dirname "$DATA_ROOT")"; do
+    [ -n "$kit_root" ] || continue
+    file="$kit_root/$START_NAME"
+    [ -f "$file" ] || continue
+    script_root="$(sed -n "s/^DATA_ROOT='\(.*\)'\$/\1/p" "$file" | head -n1)"
+    if same_path "$script_root" "$DATA_ROOT"; then
+      printf '%s' "$file"
+      return 0
+    fi
+  done
+  return 1
+}
+
+flat_has() {
+  # $1 the flattened text, $2 the path. WHETHER THE KEY IS THERE, which is not
+  # what flat_get answers: a key that is present and empty is a decline, and a
+  # key that is absent is a question nobody has been asked yet. The two read
+  # identically through flat_get and mean opposite things here.
+  printf '%s\n' "$1" | awk -v k="$2" '
+    index($0, k "\t") == 1 { found = 1 }
+    END { exit(found ? 0 : 1) }'
+}
+
+adopted_public_name() {
+  # $1 the variable $START_NAME spells it as, $2 the install record's field.
+  # Prints the value and succeeds when this installation has an answer; prints
+  # nothing and fails when it has never had one.
+  local raw esc
+  # '\'' is how a shell spells an apostrophe inside single quotes, and
+  # shell_single_quoted below is what put it there. This is that one step
+  # backwards, and nothing here evaluates a line of a file as code to do it -
+  # which is also why it reads only the form this installer writes: a line
+  # somebody re-quoted another way is not matched at all, and the install record
+  # answers instead.
+  esc="'\\''"
+  if [ -n "$PREVIOUS_START" ] && grep -q "^$1='" "$PREVIOUS_START"; then
+    raw="$(sed -n "s/^$1='\(.*\)'\$/\1/p" "$PREVIOUS_START" | head -n1)"
+    printf '%s' "${raw//"$esc"/"'"}"
+    return 0
+  fi
+  if [ -n "$PREVIOUS_RECORD_FLAT" ] && flat_has "$PREVIOUS_RECORD_FLAT" "$2"; then
+    flat_get "$PREVIOUS_RECORD_FLAT" "$2"
+    return 0
+  fi
+  return 1
+}
+
+PREVIOUS_START="$(previous_start_script || true)"
+PREVIOUS_RECORD_FLAT=''
+if [ -f "$DATA_ROOT/$RECORD_NAME" ]; then
+  PREVIOUS_RECORD_FLAT="$(json_flatten "$DATA_ROOT/$RECORD_NAME")"
+  # The same check the start script gets: a record that describes another
+  # folder says nothing about this one.
+  PREVIOUS_RECORD_ROOT="$(flat_get "$PREVIOUS_RECORD_FLAT" dataRoot)"
+  if [ -n "$PREVIOUS_RECORD_ROOT" ] && ! same_path "$PREVIOUS_RECORD_ROOT" "$DATA_ROOT"; then
+    PREVIOUS_RECORD_FLAT=''
+  fi
+fi
+# Where each value came from, so a refusal names the file somebody would have to
+# edit rather than an option this run did not use.
+KEEPER_SOURCE='--keeper'
+WORLD_NAME_SOURCE='--world-name'
+ADOPTED_ANY=0
+if [ "$KEEPER_ANSWERED" -eq 0 ]; then
+  if ADOPTED="$(adopted_public_name KEEPER settings.keeper)"; then
+    KEEPER="$ADOPTED"
+    KEEPER_ANSWERED=1
+    KEEPER_SOURCE="the keeper handle this installation already publishes"
+    ADOPTED_ANY=1
+  fi
+fi
+if [ "$WORLD_NAME_ANSWERED" -eq 0 ]; then
+  if ADOPTED="$(adopted_public_name WORLD_NAME settings.worldName)"; then
+    WORLD_NAME="$ADOPTED"
+    WORLD_NAME_ANSWERED=1
+    WORLD_NAME_SOURCE="the world name this installation already publishes"
+    ADOPTED_ANY=1
+  fi
+fi
+if [ "$ADOPTED_ANY" -eq 1 ]; then
+  say "keeping the names this installation is already published under, a decline included;"
+  say "pass --keeper or --world-name to change one."
+fi
+
+KEEPER="$(clean_public_name "$KEEPER")"
+WORLD_NAME="$(clean_public_name "$WORLD_NAME")"
+# A NAME GIVEN ON THE COMMAND LINE IS REFUSED HERE, in this shell, where the
+# refusal is printed and the install stops - and so is one adopted from an
+# installation whose files were edited by hand, because an adopted value is
+# checked by the same rules a named one is. A name typed at the prompt below is
+# asked for again instead: at a keyboard there is somebody to ask.
+if [ -n "$KEEPER" ]; then
+  PROBLEM="$(public_name_problem "$KEEPER")"
+  [ -z "$PROBLEM" ] || stop_setup "$KEEPER_SOURCE: $PROBLEM."
+fi
+if [ -n "$WORLD_NAME" ]; then
+  PROBLEM="$(public_name_problem "$WORLD_NAME")"
+  [ -z "$PROBLEM" ] || stop_setup "$WORLD_NAME_SOURCE: $PROBLEM."
+fi
+if [ "$KEEPER_ANSWERED" -eq 0 ] || [ "$WORLD_NAME_ANSWERED" -eq 0 ]; then
+  if can_ask_at_keyboard; then
+    printf '\n'
+    say "Two names go out with this world, and they are the only two on the map you"
+    say "choose yourself: the handle you are known by, and this world's own name. Both"
+    say "are PUBLIC - every other world on the map, and everyone its operator has"
+    say "authorised to watch it, sees them exactly as you type them here."
+    say "Press Enter to take what is offered, type your own, or type $DECLINE_TOKEN to publish none."
+    printf '\n'
+    if [ "$KEEPER_ANSWERED" -eq 0 ]; then
+      SUGGESTED="$KEEPER"
+      [ -n "$SUGGESTED" ] || SUGGESTED="$(offered_public_name "${USER:-}")"
+      KEEPER="$(read_public_name 'your keeper handle' "$SUGGESTED")"
+    fi
+    if [ "$WORLD_NAME_ANSWERED" -eq 0 ]; then
+      SUGGESTED="$WORLD_NAME"
+      if [ -z "$SUGGESTED" ] && [ -n "$KEEPER" ]; then
+        # Built from the answer just given, so the two read as one sentence. A
+        # keeper long enough that this would not fit is offered nothing rather
+        # than something clipped.
+        SUGGESTED="$KEEPER's world"
+        [ -z "$(public_name_problem "$SUGGESTED")" ] || SUGGESTED=''
+      fi
+      WORLD_NAME="$(read_public_name "this world's name" "$SUGGESTED")"
+    fi
+  fi
+  # WITH NO KEYBOARD, A QUESTION NOBODY HAS ANSWERED STAYS UNANSWERED. A run
+  # with any of its three streams redirected - a scripted install, a package
+  # build, a CI job, or somebody's own `> install.log 2>&1` - publishes nothing
+  # it was not given, and \$USER is not a name anybody agreed to publish. What
+  # this installation ALREADY publishes was adopted above and is untouched
+  # here: an unattended upgrade keeps a name, and keeps a decline.
+fi
+
 printf '\n'
 printf '  WHAT A BARE INSTALL DOES, STATED ONCE:\n'
 printf '  YOUR WORLD EXPORTS ON ALL FOUR EDGES. Nothing configured means the whole\n'
@@ -1675,6 +1961,19 @@ say "                     $SAVE_KEEP copies of your world on your disk. The inte
 say "                     often your world pauses to write itself out"
 say "  save on quit       $SAVE_ON_QUIT"
 say "                     your world is written out when the game closes, so stopping is not losing"
+if [ -n "$KEEPER" ]; then
+  say "  keeper handle      '$KEEPER'"
+  say "                     PUBLIC: shown beside your world to everyone on the map"
+else
+  say "  keeper handle      none - your world is shown as unknown, and nothing invents a name"
+  say "                     for you. Set one later with --keeper on another run"
+fi
+if [ -n "$WORLD_NAME" ]; then
+  say "  world name         '$WORLD_NAME'"
+  say "                     PUBLIC, on the same terms. It is a caption, never an address"
+else
+  say "  world name         none - your world is shown by its place on the map alone"
+fi
 say "  speed              starts at x$STARTUP_TIME_SCALE"
 say "                     the game's own speed is x1, and the map around you does not run that slow."
 say "                     Your machine is not asked for more than it can draw: the game holds the"
@@ -1714,6 +2013,13 @@ SIDECAR='@@SIDECAREXE@@'
 PEER_ID='@@PEERID@@'
 WORLD='@@WORLD@@'
 SIDECAR_PORT='@@SIDECARPORT@@'
+# The two names this world is PUBLISHED under, which you chose when you installed
+# it. Empty means this world publishes none, and that is carried out exactly:
+# nothing below sends a flag for an empty one, and nothing downstream invents a
+# name for a world that published none. Edit them here to change what the map
+# shows, or use the launcher's 'profile set'.
+KEEPER='@@KEEPER@@'
+WORLD_NAME='@@WORLDNAME@@'
 CA_FILE='@@CAFILE@@'
 GAME_EXE='@@GAMEEXE@@'
 
@@ -1843,12 +2149,19 @@ rm -f "$LOG" "$LOG.out"
 # --credential-file carries the SECRET HALF only. The identity half is
 # --peer-id, and the relay refuses any connection whose credential does not
 # authenticate the identity it claims.
-nohup "$SIDECAR" \
-  --listen "127.0.0.1:$SIDECAR_PORT" \
-  --relay "$RELAY_URL" \
-  --peer-id "$PEER_ID" \
-  --data-dir "$DATA_DIR" \
-  --credential-file "$CREDENTIAL_FILE" \
+SIDECAR_ARGS=(
+  --listen "127.0.0.1:$SIDECAR_PORT"
+  --relay "$RELAY_URL"
+  --peer-id "$PEER_ID"
+  --data-dir "$DATA_DIR"
+  --credential-file "$CREDENTIAL_FILE"
+)
+# AN UNSET NAME SENDS NO FLAG. --keeper '' is not the same thing as no --keeper:
+# unset is what somebody who declined chose, and a world that publishes none
+# publishes none.
+if [ -n "$KEEPER" ];     then SIDECAR_ARGS+=(--keeper "$KEEPER"); fi
+if [ -n "$WORLD_NAME" ]; then SIDECAR_ARGS+=(--world-name "$WORLD_NAME"); fi
+nohup "$SIDECAR" "${SIDECAR_ARGS[@]}" \
   >"$LOG.out" 2>"$LOG" &
 SIDECAR_PID=$!
 printf '%s\n' "$SIDECAR_PID" > "$SIDECAR_PID_FILE"
@@ -2047,28 +2360,87 @@ else
   SSL_CERT_LINE="# (no --ca-file was given: this map's relay uses an authority this machine already trusts)"
 fi
 
+# A PUBLISHED NAME CAN HOLD AN APOSTROPHE, and the world name this installer
+# offers - "<keeper>'s world" - always does. Both names are carried into the
+# generated start script inside a single-quoted string, where one apostrophe ends
+# the string and the rest of the line becomes code. '\'' is how a shell spells
+# one inside single quotes.
+#
+# The paths above cannot hold one at all: step 5 and step 2 refuse a data root or
+# a game folder with a quote in it, because those are also read back out of the
+# generated script. A name is only ever written, so it is escaped instead.
+shell_single_quoted() { printf '%s' "$1" | sed -e "s/'/'\\\\''/g"; }
+
+template_value() {
+  # One token, one value. It is a case rather than a variable name built from
+  # the token, because a template must not be able to name any variable this
+  # script happens to hold.
+  case "$1" in
+    GAMEDIR)          printf '%s' "$GAME_DIR" ;;
+    DATAROOT)         printf '%s' "$DATA_ROOT" ;;
+    RELAYURL)         printf '%s' "$RELAY_URL" ;;
+    SIDECAREXE)       printf '%s' "$SIDECAR_EXE" ;;
+    PEERID)           printf '%s' "$PEER_ID" ;;
+    WORLD)            printf '%s' "$WORLD" ;;
+    KEEPER)           shell_single_quoted "$KEEPER" ;;
+    WORLDNAME)        shell_single_quoted "$WORLD_NAME" ;;
+    EXPORTEDGES)      printf '%s' "$EXPORT_EDGES" ;;
+    EXCLUDESPECIES)   printf '%s' "$EXCLUDE_SPECIES" ;;
+    SAVEMINUTES)      printf '%s' "$SAVE_MINUTES" ;;
+    SAVEKEEP)         printf '%s' "$SAVE_KEEP" ;;
+    SAVEONQUIT)       printf '%s' "$SAVE_ON_QUIT_VALUE" ;;
+    STARTUPTIMESCALE) printf '%s' "$STARTUP_TIME_SCALE" ;;
+    MODWAITSECONDS)   printf '%s' "$MOD_WAIT_SECONDS" ;;
+    SIDECARPORT)      printf '%s' "$SIDECAR_PORT" ;;
+    CAFILE)           printf '%s' "$CA_STORED" ;;
+    GAMEEXE)          printf '%s' "$GAME_EXE" ;;
+    SSLCERTLINE)      printf '%s' "$SSL_CERT_LINE" ;;
+    STARTNAME)        printf '%s' "$START_NAME" ;;
+    STOPNAME)         printf '%s' "$STOP_NAME" ;;
+    *)                return 1 ;;
+  esac
+  return 0
+}
+
 expand_template() {
-  local body="$1"
-  body="${body//@@GAMEDIR@@/$GAME_DIR}"
-  body="${body//@@DATAROOT@@/$DATA_ROOT}"
-  body="${body//@@RELAYURL@@/$RELAY_URL}"
-  body="${body//@@SIDECAREXE@@/$SIDECAR_EXE}"
-  body="${body//@@PEERID@@/$PEER_ID}"
-  body="${body//@@WORLD@@/$WORLD}"
-  body="${body//@@EXPORTEDGES@@/$EXPORT_EDGES}"
-  body="${body//@@EXCLUDESPECIES@@/$EXCLUDE_SPECIES}"
-  body="${body//@@SAVEMINUTES@@/$SAVE_MINUTES}"
-  body="${body//@@SAVEKEEP@@/$SAVE_KEEP}"
-  body="${body//@@SAVEONQUIT@@/$SAVE_ON_QUIT_VALUE}"
-  body="${body//@@STARTUPTIMESCALE@@/$STARTUP_TIME_SCALE}"
-  body="${body//@@MODWAITSECONDS@@/$MOD_WAIT_SECONDS}"
-  body="${body//@@SIDECARPORT@@/$SIDECAR_PORT}"
-  body="${body//@@CAFILE@@/$CA_STORED}"
-  body="${body//@@GAMEEXE@@/$GAME_EXE}"
-  body="${body//@@SSLCERTLINE@@/$SSL_CERT_LINE}"
-  body="${body//@@STARTNAME@@/$START_NAME}"
-  body="${body//@@STOPNAME@@/$STOP_NAME}"
-  printf '%s\n' "$body"
+  # ONE SCAN, LEFT TO RIGHT, AND A VALUE IS NEVER READ AGAIN once it has been
+  # written out. This was twenty-two ${body//@@TOKEN@@/$VALUE} substitutions,
+  # and that spelling had two ways of corrupting a value somebody typed:
+  #
+  #   * bash 5.2 added the patsub_replacement option and turns it ON by
+  #     default, which makes an UNQUOTED & in the replacement expand to the
+  #     text the pattern matched. A keeper called "Tom & Jerry" was written
+  #     into the start script as KEEPER='Tom @@KEEPER@@ Jerry' - and so was
+  #     every path with an & in it. The bug was invisible on bash 5.1 and
+  #     arrived, unannounced, with the distribution's next release;
+  #   * a value substituted early was still in the body when the later
+  #     substitutions ran, so a name that happened to hold another token -
+  #     @@STARTNAME@@ is thirteen characters and a person may type it - was
+  #     rewritten by a pass that had nothing to do with it.
+  #
+  # Reading each token once, and appending its value to the OUTPUT rather than
+  # back into the body, ends both. There is no pattern matching on a
+  # replacement here at all, so no shell option can change what this writes.
+  #
+  # A @@...@@ that names no token is emitted exactly as it stands: this script's
+  # templates hold none, and a template that grows one should read as itself
+  # rather than silently vanish.
+  local body="$1" out='' head token rest value
+  while :; do
+    case "$body" in *'@@'*) ;; *) out="$out$body"; break ;; esac
+    head="${body%%@@*}"
+    rest="${body#*@@}"
+    case "$rest" in *'@@'*) ;; *) out="$out$body"; break ;; esac
+    token="${rest%%@@*}"
+    if value="$(template_value "$token")"; then
+      out="$out$head$value"
+      body="${rest#*@@}"
+    else
+      out="$out$head@@"
+      body="$rest"
+    fi
+  done
+  printf '%s\n' "$out"
 }
 
 START_PATH="$HERE/$START_NAME"
@@ -2113,6 +2485,17 @@ RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
   printf '  },\n'
   printf '  "peerId": "%s",\n'   "$(json_escape "$PEER_ID")"
   printf '  "relayUrl": "%s",\n' "$(json_escape "$RELAY_URL")"
+  # THE TWO PUBLISHED NAMES ARE WRITTEN EVEN WHEN THEY ARE EMPTY, and that is
+  # the whole point of writing them: an empty value here is a DECLINE somebody
+  # chose, a missing key is a question this installation has never been asked,
+  # and the next run over this data root has to be able to tell those apart.
+  # Step 8 reads them back through settings.keeper and settings.worldName - the
+  # same two field names the Windows record uses - when the start script beside
+  # this world is gone.
+  printf '  "settings": {\n'
+  printf '    "keeper": "%s",\n'   "$(json_escape "$KEEPER")"
+  printf '    "worldName": "%s"\n' "$(json_escape "$WORLD_NAME")"
+  printf '  },\n'
   printf '  "plugin": {\n'
   printf '    "path": "%s",\n'   "$(json_escape "$PLUGIN_DST")"
   printf '    "sha256": "%s",\n' "$PLUGIN_SHA"
