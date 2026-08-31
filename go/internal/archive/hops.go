@@ -67,10 +67,10 @@ const (
 	hopCorrelationWindow = 24 * time.Hour
 	hopPendingMax        = 8192
 	hopEarlyAckMax       = 1024
-	// The protocol default permits four reroutes, but an operator can raise it
-	// and a hostile copied stream must still not grow one pending map value
-	// without bound. This is a visualization sample, so retain a generous chain
-	// and say when it was cut.
+	// The protocol default permits twenty-four reroutes (§34 B50), but an
+	// operator can raise it and a hostile copied stream must still not grow one
+	// pending map value without bound. This is a visualization sample, so
+	// retain a generous chain and say when it was cut.
 	hopRefusedMax = 64
 )
 

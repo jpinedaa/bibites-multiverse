@@ -5093,10 +5093,52 @@ function hopSteps(d, fromSlot, toSlot, edge){
   return steps;
 }
 
+/* A cross-axis attempt (contract-b-m4.md §34, B50: a refused chain leaves its
+   axis before it gives up) cannot follow any drawn lane, so it gets its own
+   dashed route: out of the source cell through its exit-edge side, along the
+   corridor to the destination's rail on the other axis, and in at the
+   destination's near side. Three straight segments — event evidence drawn on
+   the flat map, never new topology, so the torus is deliberately not wrapped
+   here. */
+function hopCrossGeom(d, fromSlot, toSlot, edge){
+  var from = hopSlot(d, fromSlot), to = hopSlot(d, toSlot);
+  if (!from || !to || !d.map) return null;
+  var h = d.map.height;
+  var c = from.position.col, r = from.position.row;
+  var tc = to.position.col, tr = to.position.row;
+  var vert = (edge === "N" || edge === "S");
+  var out = 20, segs = [];
+  if (!vert){
+    var sy = laneY(r,h) + laneOff(edge);
+    var sx = (edge === "E") ? cellX(c) + CW : cellX(c);
+    var turnX = (edge === "E") ? sx + out : sx - out;
+    var ty = laneY(tr,h) + laneOff(edge);
+    var ex = turnX > cellX(tc) + CW ? cellX(tc) + CW
+           : turnX < cellX(tc) ? cellX(tc) : turnX;
+    segs.push({d:"M "+sx+" "+sy+" L "+turnX+" "+sy, head:false});
+    segs.push({d:"M "+turnX+" "+sy+" L "+turnX+" "+ty, head:false});
+    segs.push({d:"M "+turnX+" "+ty+" L "+ex+" "+ty, head:true});
+  } else {
+    var vx = laneX(c) + laneOff(edge);
+    var vsy = (edge === "N") ? cellY(r,h) : cellY(r,h) + CH;
+    var turnY = (edge === "N") ? vsy - out : vsy + out;
+    var tx = laneX(tc) + laneOff(edge);
+    var ey = turnY > cellY(tr,h) + CH ? cellY(tr,h) + CH
+           : turnY < cellY(tr,h) ? cellY(tr,h) : turnY;
+    segs.push({d:"M "+vx+" "+vsy+" L "+vx+" "+turnY, head:false});
+    segs.push({d:"M "+vx+" "+turnY+" L "+tx+" "+turnY, head:false});
+    segs.push({d:"M "+tx+" "+turnY+" L "+tx+" "+ey, head:true});
+  }
+  return {state:"open", segs:segs, wrap:false, steps:1, vertical:vert,
+          back:(edge === "W" || edge === "S"), edgeAt:null};
+}
+
 /* One attempt follows the already drawn lane when that lane names its actual
    receiver. Otherwise it gets geometry derived from the confirmed endpoint.
    That second case is the bug fix: an ACK for slot 12 can never again walk an
-   arrow whose endpoint is slot 9 merely because both offers left through 5N. */
+   arrow whose endpoint is slot 9 merely because both offers left through 5N.
+   An endpoint off the exit axis entirely is §34 B50's cross-axis reroute and
+   takes hopCrossGeom's dashed route instead of being dropped. */
 function hopAttempt(d, hp, to, refused){
   var lane = hopLane(d, hp.fromSlot, hp.exitEdge);
   var existing = animFor(hp.fromSlot + hp.exitEdge);
@@ -5104,7 +5146,10 @@ function hopAttempt(d, hp, to, refused){
     return {a:existing, geom:null, to:to, refused:refused};
   }
   var steps = hopSteps(d, hp.fromSlot, to, hp.exitEdge);
-  if (!steps) return null;
+  if (!steps){
+    var cross = hopCrossGeom(d, hp.fromSlot, to, hp.exitEdge);
+    return cross ? {a:null, geom:cross, to:to, refused:refused} : null;
+  }
   var byslot = {}, list = d.slots || [];
   for (var i=0;i<list.length;i++) byslot[list[i].slot] = list[i];
   var skipped = [];

@@ -161,11 +161,12 @@ type Config struct {
 	// sidecar records it LOST (§9.3, §25 B37). Nothing is re-sent at the deadline
 	// and nothing comes home: it closes a record the sender can no longer resolve.
 	ForwardTimeout time.Duration
-	// MaxReroutes bounds the re-routes one entry may take (§9.2). A NEGATIVE
-	// value turns re-routing off altogether, so an organism refused at its first
-	// destination bounces home instead of trying a second one. That is the one
-	// knob that makes migration a single hop, and it is here rather than in a
-	// code path so the owner can take it without a release.
+	// MaxReroutes bounds the re-routes one entry may take (§9.2, §34 B50 — the
+	// walk may leave its axis, so the default is sized to cover the map). A
+	// NEGATIVE value turns re-routing off altogether, so an organism refused at
+	// its first destination bounces home instead of trying a second one. That
+	// is the one knob that makes migration a single hop, and it is here rather
+	// than in a code path so the owner can take it without a release.
 	MaxReroutes             int
 	StatsInterval           time.Duration
 	GenomeRequestsPerMinute int

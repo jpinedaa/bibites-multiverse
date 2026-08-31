@@ -348,9 +348,10 @@ the organism home. An unanswered committed attempt becomes **lost** after `forwa
 Silence is never proof, and the map spends an organism rather than risk a duplicate.
 
 **An exact refusal still gets another world.** The sender records the refused destination and one
-absolute deadline. It then walks through compatible, untried worlds on the same axis. A delayed
-NACK from an older destination cannot delay that alternate. Exhaustion, `maxReroutes`, or the
-first deadline bounces the organism once. A negative `--max-reroutes`
+absolute deadline. It then walks through compatible, untried worlds on the same axis, and past
+the axis once it is exhausted (`contract-b-m4.md` §34, B50). A delayed
+NACK from an older destination cannot delay that alternate. Exhaustion of the map, `maxReroutes`,
+or the first deadline bounces the organism once. A negative `--max-reroutes`
 (`MULTIVERSE_MAX_REROUTES`) disables re-routing and bounces a proven-safe refusal instead.
 Nothing here requires participant action.
 

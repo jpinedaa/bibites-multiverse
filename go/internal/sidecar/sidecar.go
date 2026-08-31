@@ -747,8 +747,9 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 		}
 		// A live receiver's NACK proves that custody did not move, but it also
 		// proves that sending straight back to that same live receiver is not a
-		// route. Continue the axis walk after it and exclude every world that has
-		// already refused this migration.
+		// route. Continue the axis walk after it — and past the axis once it is
+		// exhausted (§34 B50) — excluding every world that has already refused
+		// this migration.
 		if s.rerouteLocked(st, proof, now) {
 			sc.bounceAt = time.Time{}
 			sc.nextForward = time.Time{}
@@ -761,8 +762,7 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 			sc.bounceAt = now.Add(s.cfg.BounceTimeout)
 		}
 		if now.After(sc.bounceAt) {
-			s.bounceLocked(st, "every deliverable slot on the "+st.Entry.Edge+
-				" axis refused or was unavailable within bounceTimeoutMs")
+			s.bounceLocked(st, "every deliverable slot on the map refused or was unavailable within bounceTimeoutMs")
 			return
 		}
 		if s.destLiveLocked(st.Entry.DestSlot) && !now.Before(sc.nextForward) {
@@ -890,50 +890,56 @@ func (s *Sidecar) rerouteLocked(st *journal.State, proof string, now time.Time) 
 	}
 	if st.RerouteCount >= s.cfg.MaxReroutes {
 		s.bounceLocked(st, fmt.Sprintf(
-			"maxReroutes (%d) reached; an organism circling a broken axis is a symptom, not a delivery strategy",
+			"maxReroutes (%d) reached; an organism circling a refusing map is a symptom, not a delivery strategy",
 			s.cfg.MaxReroutes))
 		return true
 	}
 	var dest int
-	walkKnown := false
 	if proof == contractb.ProofPeerRefused || boundedTransportRefusal {
 		me, ok := mapwalk.Find(s.status, s.slot)
-		excluded := make(map[int]bool, len(st.RefusedSlots))
+		excluded := make(map[int]bool, len(st.RefusedSlots)+1)
 		for _, slot := range st.RefusedSlots {
 			excluded[slot] = true
 		}
+		// Belt and braces: the mark that started this chain already appended
+		// the current destination to the durable tried set, and the full-map
+		// walk below must never offer it back regardless.
+		excluded[st.Entry.DestSlot] = true
 		if ok {
-			after, found := mapwalk.Find(s.status, st.Entry.DestSlot)
-			if found {
-				if contracta.Vertical(st.Entry.Edge) {
-					walkKnown = after.Position.Col == me.Position.Col
-				} else {
-					walkKnown = after.Position.Row == me.Position.Row
-				}
-			}
 			if next, found := mapwalk.WalkAfter(s.status, me, st.Entry.Edge,
 				st.Entry.DestSlot, excluded); found {
 				dest = next.Slot
 			}
-		}
-		// If the refused slot disappeared between the NACK and this status
-		// frame, its position is unknowable. The relay's current effective
-		// neighbour remains safe so long as it is neither the current nor an
-		// already-refused destination.
-		if dest == 0 && (!boundedTransportRefusal || !walkKnown) {
-			if n := s.neighbours[st.Entry.Edge]; n != nil &&
-				n.Slot != st.Entry.DestSlot && !excluded[n.Slot] {
-				dest = n.Slot
+			if dest == 0 {
+				// §34 B50: the same-axis continuation found nothing, so the
+				// chain leaves its axis and walks the rest of the map in the
+				// stated axis-major order. The order is anchored at me and
+				// re-covers the exit axis, so not-found here IS full-map
+				// exhaustion — provable without locating the refused slot,
+				// which can vanish from the frame the way §9.2's old
+				// walk-known anchor could.
+				if next, found := mapwalk.WalkAnywhere(s.status, me,
+					st.Entry.Edge, excluded); found {
+					dest = next.Slot
+				}
 			}
+		}
+		if dest == 0 {
+			if boundedTransportRefusal && ok {
+				s.bounceLocked(st, "every compatible destination on the map was tried after an exact relay NOT_FORWARDED proof")
+				return true
+			}
+			// Without a frame that contains this world there is nothing to
+			// walk, and a peer-refusal chain re-offers its current destination
+			// until the one absolute deadline instead of bouncing early — a
+			// population gate can reopen inside that window. Either way the
+			// clock in tickOutbound still bounds the entry.
+			return false
 		}
 	} else if n := s.neighbours[st.Entry.Edge]; n != nil && n.Slot != st.Entry.DestSlot {
 		dest = n.Slot
 	}
 	if dest == 0 {
-		if boundedTransportRefusal && walkKnown {
-			s.bounceLocked(st, "every compatible same-axis destination was tried after an exact relay NOT_FORWARDED proof")
-			return true
-		}
 		return false
 	}
 	from := st.RerouteFrom

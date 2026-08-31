@@ -302,10 +302,16 @@ const (
 	// over forwards a day-long deadline would not release.
 	ForwardTimeout = 5 * time.Minute
 	// MaxReroutes bounds the re-routes one entry may take before it bounces home
-	// instead. An organism circling a broken axis is a symptom, not a delivery
+	// instead. An organism circling a refusing map is a symptom, not a delivery
 	// strategy. A NEGATIVE value turns re-routing off entirely, which is the one
 	// switch that makes migration a single hop with no second destination.
-	MaxReroutes = 4
+	//
+	// §34 B50 raised the default from 4 to 24: the chain's structural bound is
+	// the durable tried set (at most slots−1 distinct destinations) under the
+	// one absolute BounceTimeout deadline, so this count only has to be large
+	// enough not to defeat a full-map walk on the current 21-slot map (worst
+	// chain 20). An operator whose map outgrows it raises the knob.
+	MaxReroutes = 24
 	// ForwardRecordRetention is how long the relay remembers a forwarded
 	// migrationId, in memory, for the neverForwarded proof — 48 hours. It bounds
 	// nothing on the sending side any more (§25, B37 removed the hold it used to

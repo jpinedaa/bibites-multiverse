@@ -895,6 +895,28 @@ func TestPageReplaysARefusalBeforeTheConfirmedReroute(t *testing.T) {
 	}
 }
 
+// TestPageAnimatesACrossAxisReroute pins §34 B50's display half: a confirmed
+// endpoint off the exit axis takes hopCrossGeom's dashed route instead of
+// being dropped by the zero-step guard, and the cross geometry stays inside
+// the hop-attempt machinery — a temporary owned path, never a drawn lane.
+func TestPageAnimatesACrossAxisReroute(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		"function hopCrossGeom",
+		"hopCrossGeom(d, hp.fromSlot, to, hp.exitEdge)",
+		"var steps = hopSteps(d, hp.fromSlot, to, hp.exitEdge);",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the cross-axis reroute playback is missing %q", want)
+		}
+	}
+	// The fallback runs only when the on-axis step count is zero, so ordinary
+	// same-axis hops keep their lane-derived geometry.
+	if !strings.Contains(page, "if (!steps){\n    var cross = hopCrossGeom(") {
+		t.Fatal("hopAttempt does not scope the cross geometry to the off-axis case")
+	}
+}
+
 // TestPageDoesNotInferARefusalFromLaterStatus protects the event-time boundary.
 // onHops plans an ACK-confirmed delivery against the newest status snapshot. An
 // intervening slot can connect or close after that ACK. That later state can

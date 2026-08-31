@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -767,6 +768,63 @@ func TestLivePopulationRefusalSpillsToNextUntriedWorld(t *testing.T) {
 	}
 	if got := c.world.spawnCount(migrationID); got != 1 {
 		t.Fatalf("slot 3 spawned migration %d times, want exactly 1", got)
+	}
+}
+
+// TestRefusedMigrationCrossesAxesToTheSinkWorld is §34 B50's regression end to
+// end: on a 3x2 map where every world but one refuses on population — the exit
+// row included — the chain leaves its axis and the one open world receives the
+// migration exactly once. The path is the stated axis-major order (2, 3, then
+// 4, 5, 6), so the delivery also exercises a reroute count the old default of
+// four would have bounced.
+func TestRefusedMigrationCrossesAxesToTheSinkWorld(t *testing.T) {
+	const sink = 5 // node index of slot 6, the only open world
+	g := newGrid(t, 6, gridOptions{
+		layout:    layout3x2(),
+		heartbeat: 100 * time.Millisecond,
+		tune: func(i int, c *Config) {
+			if i != 0 && i != sink {
+				c.InboundAdmissionMode = AdmissionFixed
+				c.InboundPopulationLimit = 1
+			}
+		},
+	})
+	source := g.node(0)
+	for i := 1; i < 6; i++ {
+		if i == sink {
+			continue
+		}
+		nd := g.node(i)
+		nd.world.put(int32(-88100 - i))
+		waitFor(t, 5*time.Second, "a closed world to report its fixed-limit population", func() bool {
+			st := nd.side.Stats()
+			return st.Population != nil && *st.Population == 1
+		})
+	}
+
+	migrationID := source.mod.migrateOut(-88200, contracta.EdgeE, 0.5)
+	waitFor(t, 30*time.Second, "the sink world to receive the cross-axis migration", func() bool {
+		return g.node(sink).world.spawnCount(migrationID) == 1
+	})
+	for i := 1; i < 6; i++ {
+		if i == sink {
+			continue
+		}
+		if got := g.node(i).world.spawnCount(migrationID); got != 0 {
+			t.Fatalf("closed slot %d spawned the refused migration %d times", i+1, got)
+		}
+	}
+	st := journalEntry(t, source.side, migrationID)
+	if st.Entry.DestSlot != 6 || st.RerouteCount != 4 ||
+		st.RerouteProof != contractb.ProofPeerRefused {
+		t.Fatalf("sink journal = dest %d, count %d, proof %q; want 6, 4, peer_refused",
+			st.Entry.DestSlot, st.RerouteCount, st.RerouteProof)
+	}
+	if !reflect.DeepEqual(st.RefusedSlots, []int{2, 3, 4, 5}) {
+		t.Fatalf("durable refused slots = %v, want [2 3 4 5] in walk order", st.RefusedSlots)
+	}
+	if st.Entry.Edge != contracta.EdgeE {
+		t.Fatal("the cross-axis walk rewrote the migration's exit edge")
 	}
 }
 
