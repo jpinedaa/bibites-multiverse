@@ -5,29 +5,24 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-<!-- WRITE THIS SECTION FOR THE RELEASE BEING CUT, from nothing rather than by
-     adding to it. It describes ONE release, because the reader has already
-     installed the one before it; a paragraph left here by a previous release is a
-     change that gets announced as new twice. That is not hypothetical: a release
-     has already shipped with the whole of its predecessor's feature list under
-     this heading, because the section was added to rather than written. The text
-     each release used is on its own published release page and in this file's
-     history, so nothing is lost by clearing it. release/README.md, "Cutting a
-     release", step 1. -->
+- **Your world's population limit now protects it, instead of just predicting.** The limit that
+  v0.3.9 taught your world to learn is now enforced by default: while your population sits at or
+  above it, new arrivals are politely refused and travel on to another world — nothing is lost,
+  and your own creatures are never touched. A brand-new world still accepts everything for its
+  first ten minutes while it takes its first measurements. If you would rather watch the decision
+  without acting on it, `MULTIVERSE_INBOUND_ADMISSION=adaptive-shadow` restores the old
+  forecast-only behavior.
+- **Your world's learned limit now survives being away.** Turning your world off for hours or
+  days no longer erases what it learned about your machine: on the next start it comes back with
+  its limit ready instead of accepting unlimited arrivals for ten minutes while it relearns —
+  which, on a busy map, could flood a returning world far past what its machine could hold.
 
 ## Upgrading from an earlier release
 
-<!-- The two bullets below hold for every release and stay. Add this release's own
-     upgrade notes beside them — what to do before running setup, what does not
-     change, what a script has to be told, and the one thing a world installed by
-     an earlier release cannot do — and take those back out once it has shipped.
-     A COMMENT STILL HERE AT BUILD TIME IS PUBLISHED. It is invisible on the
-     rendered page and visible in the body GitHub serves, which is how the first
-     release with nothing to add in this section shipped this block and had it
-     removed from the release by hand afterwards. Until the build strips
-     comments, delete this one before the tag if the section stays as it stands,
-     and put it back with the next release's note. -->
-
+- **After this update, your world enforces its limit.** If its population is above the learned
+  limit when it comes back up, the map's `CLOSED` badge on your world is that protection working:
+  arrivals are refused and rerouted until your population settles back under the limit. Nothing
+  else about your world changes.
 - **Stop every world before you run the setup.** Use *Stop every world* in the launcher's window,
   or `multiverse-launcher.exe stop --all`. Setup refuses while anything of this installation is
   running, and it refuses before it has changed anything.

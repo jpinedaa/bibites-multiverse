@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-31 UTC.
 
-Bibites Multiverse `0.3.9` is public. The first announced service period runs from
+Bibites Multiverse `0.3.10` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -280,7 +280,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.9`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.9) |
+| Release | [`v0.3.10`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.10) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
