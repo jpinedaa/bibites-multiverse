@@ -837,8 +837,7 @@ func TestPageShowsPopulationAdmissionOnEachLiveMapCell(t *testing.T) {
 		`id="cadm-`, `id="cadmlbl-`, `id="cadmtitle-`,
 		"function admissionView", "function paintAdmission", "paintAdmission(v);",
 		`label:"CLOSED · LIMIT "+limit`, `label:"OPEN · LIMIT "+limit`,
-		`label:"OPEN · TARGET UNKNOWN"`, `label:"OPEN · WAITING ×"+target`,
-		`label:"OPEN · LEARNING"`, `v.targetTimeScale + 0.01 < v.admissionTargetTimeScale`,
+		`label:"OPEN · LEARNING"`,
 		"admissionPopulationLimit", "admissionEstimatedLimit", "admissionCommitted",
 		"admissionEnforcing", "admissionClosed", ".cell.admission-closed .cellbg",
 		`data-t="admissiongate"`,
@@ -849,6 +848,13 @@ func TestPageShowsPopulationAdmissionOnEachLiveMapCell(t *testing.T) {
 	}
 	if strings.Contains(page, "admissionPopulationLimit||") {
 		t.Fatal("a zero or absent population limit is defaulted with || instead of rendered honestly")
+	}
+	// Learning is no longer gated on the requested speed, so the page must not
+	// resurrect the retired waiting states that explained that gate.
+	for _, gone := range []string{"OPEN · WAITING", "OPEN · TARGET UNKNOWN"} {
+		if strings.Contains(page, gone) {
+			t.Fatalf("the retired requested-speed gate state %q is still on the page", gone)
+		}
 	}
 }
 

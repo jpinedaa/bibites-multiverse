@@ -2083,24 +2083,14 @@ function admissionView(v){
   var limit = v.admissionPopulationLimit;
   var committed = v.admissionCommitted == null ? "unknown" : v.admissionCommitted;
   var target = v.admissionTargetTimeScale == null ? "?" : fmtScale(v.admissionTargetTimeScale);
+  /* Learning is never gated on the requested speed: a capacity sample is
+     population × achieved speed, valid at whatever speed the world runs, and
+     the target only prices the learned budget. The retired WAITING and
+     TARGET-UNKNOWN states described sampling gates that no longer exist. */
   if (limit == null){
-    if (v.targetTimeScale == null){
-      return {cls:"learning", label:"OPEN · TARGET UNKNOWN", short:
-        "requested speed unknown ("+samples+" samples)", detail:
-        "population gate is fail-open because the world does not report its requested speed ("+
-        samples+" valid samples, admission target ×"+target+")"};
-    }
-    if (v.admissionTargetTimeScale != null &&
-        v.targetTimeScale + 0.01 < v.admissionTargetTimeScale){
-      var requested = fmtScale(v.targetTimeScale);
-      return {cls:"learning", label:"OPEN · WAITING ×"+target, short:
-        "waiting for requested ×"+target+" (current ×"+requested+", "+samples+" samples)", detail:
-        "population gate is fail-open because sampling waits for requested speed ×"+target+
-        " (current target ×"+requested+", "+samples+" valid samples)"};
-    }
     return {cls:"learning", label:"OPEN · LEARNING", detail:
       "population gate is fail-open while the adaptive limit learns ("+samples+
-      " valid samples, target ×"+target+")", short:"learning ("+samples+" samples)"};
+      " valid samples, sized for ×"+target+")", short:"learning ("+samples+" samples)"};
   }
   var estimate = v.admissionEstimatedLimit == null ? "unknown" : v.admissionEstimatedLimit;
   var common = "effective population limit "+limit+", committed "+committed+

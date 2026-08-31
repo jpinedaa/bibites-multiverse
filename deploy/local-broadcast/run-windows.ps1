@@ -212,8 +212,10 @@ $env:MULTIVERSE_BROADCAST_ZOOM = '250'
 $env:MULTIVERSE_BROADCAST_RESELECT_DELAY = '2'
 $env:MULTIVERSE_BROADCAST_STATUS_FILE = Join-Path $state 'director.json'
 $env:MULTIVERSE_BROADCAST_HIDE_UI = 'false'
+# The game runs at x6.5, but the admission target stays at the shared x10
+# default: it is a pricing divisor for the learned machine budget, not a speed
+# this world must reach, and every world's limit sits on one scale.
 $broadcastTimeScale = '6.5'
-$env:MULTIVERSE_INBOUND_TARGET_TIME_SCALE = $broadcastTimeScale
 $env:MULTIVERSE_BROADCAST_TIME_SCALE = $broadcastTimeScale
 $env:MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'
 $env:MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'
