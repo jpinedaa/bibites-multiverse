@@ -171,8 +171,8 @@ bibites_require_safe_host_change_set() {
           .ResourceType == "AWS::EC2::SecurityGroup")))
     elif $expected_type == "UPDATE" and $legacy_mode then
       ((.Changes // []) | length) == 1 and
-      .Changes[0].ResourceChange.LogicalResourceId == "HostLaunchTemplate" and
-      .Changes[0].ResourceChange.ResourceType == "AWS::EC2::LaunchTemplate" and
+      .Changes[0].ResourceChange.LogicalResourceId == "DataAttachment" and
+      .Changes[0].ResourceChange.ResourceType == "AWS::EC2::VolumeAttachment" and
       .Changes[0].ResourceChange.Action == "Modify" and
       (.Changes[0].ResourceChange.Replacement // "False") == "False" and
       (.Changes[0].ResourceChange.Scope | sort) == ["Metadata"] and
@@ -180,9 +180,9 @@ bibites_require_safe_host_change_set() {
       all(.Changes[0].ResourceChange.Details[];
         .Target.Attribute == "Metadata" and
         .Target.RequiresRecreation == "Never" and
-        .Evaluation == "Static" and
-        (.ChangeSource == "DirectModification" or
-         (.ChangeSource == "ParameterReference" and
+        ((.ChangeSource == "DirectModification" and
+          (.Evaluation == "Static" or .Evaluation == "Dynamic")) or
+         (.ChangeSource == "ParameterReference" and .Evaluation == "Static" and
           (.CausingEntity == "OperationalRelayPrivateIp" or
            .CausingEntity == "OperationalRelayDomain" or
            .CausingEntity == "OperationalCredentialParameterPrefix"))))
@@ -196,7 +196,7 @@ bibites_require_safe_host_change_set() {
     end
   ' <<<"$description" >/dev/null || {
     bibites_validation_error \
-      'host deployment allows only an initial stack create, one legacy launch-template Metadata-only update, or one dormant launch-template update; Host, DataAttachment, DataVolume, live IAM or network, and unrelated resource changes are blocked'
+      'host deployment allows only an initial stack create, one legacy DataAttachment Metadata-only update, or one dormant launch-template update; Host, DataAttachment properties, DataVolume, live IAM or network, and unrelated resource changes are blocked'
     return 1
   }
 }

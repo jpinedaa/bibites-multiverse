@@ -320,12 +320,12 @@ The change set binds the content-addressed manifest name and SHA-256 value.
 The wrapper permits only three change-set shapes:
 
 - A new stack can add the six expected host resources.
-- A legacy stack can modify only `HostLaunchTemplate` metadata without replacement.
+- A legacy stack can modify only `DataAttachment` metadata without replacement.
 - A current stack can modify only the dormant `HostLaunchTemplate` without replacement.
 
 The wrapper rejects every Host change.
-It also rejects a DataAttachment change, a DataVolume change, a live IAM or network resource
-change, and an unrelated resource change.
+It also rejects a DataAttachment property change, a DataVolume change, a live IAM or network
+resource change, and an unrelated resource change.
 It reads the default `DescribeChangeSet` response for every safety decision.
 It does not use the property-value response because that response can omit resource changes and
 replacement flags.
@@ -350,12 +350,16 @@ That template keeps the deployed resource properties, policies, and attachment u
 The wrapper passes every historical bootstrap parameter with `UsePreviousValue=true`.
 It also requires the supplied topology, storage, and artifact inputs to match the stack.
 It requires the historical credential prefix that the role already permits.
+The template pins the legacy Host to its existing resolved Ubuntu AMI.
+This prevents the historical `latest` SSM path from changing launch-template properties during
+metadata reconciliation.
 The template stores the current relay IP, relay domain, and credential prefix as operational
-parameters in `HostLaunchTemplate` metadata.
+parameters in `DataAttachment` metadata.
 [CloudFormation does not interpret resource metadata](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-metadata.html)
-as launch-template properties.
-The change-set validator requires exactly one static `Metadata` scope whose recreation value is
-`Never`.
+as volume-attachment properties.
+The change-set validator requires exactly one `DataAttachment` change with only `Metadata` scope
+and a recreation value of `Never`.
+It accepts only direct metadata details and references to the three operational parameters.
 It rejects a property, policy, tag, or lifecycle-attribute change.
 A new stack uses self-attach mode instead, so its Host can complete bootstrap without a
 CloudFormation attachment deadlock.
