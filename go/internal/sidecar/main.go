@@ -42,6 +42,20 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	position := fs.String("position", env("MULTIVERSE_POSITION", ""),
 		"preferred map position <col>,<row>; advisory. It may name a hole or one column/row "+
 			"beyond the current rectangle. Overrides <data-dir>/position")
+	// The two participant-chosen public strings of contract-b-m4.md §33, B49.
+	// EMPTY IS THE DEFAULT AND NOTHING DERIVES ONE: no OS username, no save file,
+	// no fallback to the peer id. What is not set here is not published, and the
+	// join prompts are where a person is offered a value and answers.
+	keeper := fs.String("keeper", env("MULTIVERSE_KEEPER", ""),
+		"the handle this world is published under, shown beside it on the map "+
+			"(contract-b-m4.md §33, B49). It is PUBLIC: every world on the map and every "+
+			"authorised subscriber sees it. Up to 64 UTF-8 bytes, trimmed and clipped here. "+
+			"Unset publishes nothing, and nothing invents one for you")
+	worldName := fs.String("world-name", env("MULTIVERSE_WORLD_NAME", ""),
+		"the display name for this world, shown on the map beside its slot "+
+			"(contract-b-m4.md §33, B49). PUBLIC and bounded on the same terms as --keeper. "+
+			"It is a label and never an address: routing uses the slot and identity uses "+
+			"the peer id")
 	insertAfter := fs.Int("insert-after-slot", 0,
 		"advisory splice: place me immediately after this slot on --insert-axis")
 	insertAxis := fs.String("insert-axis", "",
@@ -183,6 +197,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if stray := strayArgs(fs, *releaseInflight != ""); len(stray) > 0 {
+		fmt.Fprintf(stderr, "sidecar: %s\n", strayArgsMessage(stray))
+		return 2
+	}
 	inboundTargetExplicit := inboundTargetWasExplicit(fs)
 
 	// THE TWO READ-ONLY COMMANDS RUN BEFORE THE LOGGER IS OPENED, and that
@@ -250,6 +268,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.PreferredSlot = *slot
 	cfg.InsertAfterSlot = *insertAfter
 	cfg.InsertAxis = *insertAxis
+	cfg.Keeper = *keeper
+	cfg.WorldName = *worldName
 	cfg.Secret = secret
 	cfg.ContractATokenFile = *contractATokenFile
 	cfg.InsecureNoContractAToken = *insecureContractA
@@ -586,6 +606,52 @@ func parsePosition(v string) (*contractb.Position, error) {
 		return nil, fmt.Errorf("row %q is not a non-negative integer", rowStr)
 	}
 	return &contractb.Position{Col: col, Row: row}, nil
+}
+
+// strayArgs is every positional argument this invocation cannot explain.
+//
+// WHY A SIDECAR THAT IS HANDED ONE REFUSES TO START. Go's flag package stops at
+// the first non-flag word and hands the rest back, and nothing here used to
+// collect them — so `--world-name Alice's world` written into a start script
+// without quotes started a world called "Alice's" and dropped "world" on the
+// floor, silently, with a healthy log and a wrong name published to every peer
+// on the map for as long as it ran. The truncation is the loud half; the quiet
+// half is worse, because a stray word can equally be a flag somebody misspelt or
+// half of a path with a space in it, and the process it starts is then configured
+// as nobody asked. A refusal costs a restart; a silent start costs whatever it
+// published in the meantime, and there is nothing in a log to look for.
+//
+// releasing is --release-inflight, the ONE command here that takes a positional
+// argument of its own: bounce|drop. Its own handler refuses a missing or unknown
+// action with its own message, so exactly one word is left to it and anything
+// past that is stray on the same terms as everywhere else.
+func strayArgs(fs *flag.FlagSet, releasing bool) []string {
+	rest := fs.Args()
+	if releasing && len(rest) > 0 {
+		rest = rest[1:]
+	}
+	return rest
+}
+
+// strayArgsMessage NAMES WHAT IT DID NOT UNDERSTAND, because the whole failure
+// this guards is one nobody can see: a person reading it is looking at a start
+// script, and the word this quotes back is the second half of the value that
+// lost its quotes.
+func strayArgsMessage(stray []string) string {
+	quoted := make([]string, 0, len(stray))
+	for _, arg := range stray {
+		quoted = append(quoted, strconv.Quote(arg))
+	}
+	what := "an argument that is not a flag: " + quoted[0]
+	if len(quoted) > 1 {
+		what = "arguments that are not flags: " + strings.Join(quoted, ", ")
+	}
+	return "refusing to start with " + what + ".\n" +
+		"Every setting this program takes is a --flag, so a bare word is either a flag that " +
+		"was misspelt or\npart of a value that lost its quotes — a value with a space in it " +
+		"(a world name, an apostrophe'd handle,\na path) must be quoted as one argument: " +
+		`--world-name "The Tidepool".` + "\n" +
+		"Nothing was started, so nothing has been published under a half of a name."
 }
 
 func inboundTargetWasExplicit(fs *flag.FlagSet) bool {

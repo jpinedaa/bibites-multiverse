@@ -1,6 +1,6 @@
 # Contract B — Sidecar ↔ Relay ↔ Sidecar ↔ Archive Wire Specification
 
-**Version:** `contract-b/4.2` (amended — §32, B47–B48; §31, B46; `contract-b/4.1` before it, §25 B37)
+**Version:** `contract-b/4.2` (amended — §33, B49; §32, B47–B48; §31, B46; `contract-b/4.1` before it, §25 B37)
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3 — **superseded — §25, B37**), **B6** the
@@ -208,6 +208,21 @@ neither adds or changes a wire field — §4's test answers **neither major nor 
 identifier **stays at `contract-b/4.2`**, on §23's and §26's precedent. Contract A takes no set.
 Affected body text carries an `(amended — §32, B47)` or `(added — §32, B48)` marker, and **§32
 wins over the body and over §14 to §31 wherever they disagree.**
+**Amended:** 2026-08-31, amendment set **B49** (**§33**), from the participant-recognition work.
+The **peer stats block** (§6.3.1) gains two OPTIONAL participant-chosen public strings — `keeper`,
+the handle whoever runs that world chose to be known by, and `worldName`, the name they gave the
+world — so that a map of six worlds stops being a map of six numbers. Both come from the sidecar's
+own configuration and **from nowhere else**: no OS username, no save-file name, no fall-back to the
+`peerId`, and unset publishes nothing. Both are bounded to 1–64 UTF-8 bytes **by the sidecar that
+authors them** — trimmed, control-stripped, clipped at a rune boundary, dropped when the bytes are
+invalid — because no party downstream repairs either, and both are untrusted display text a
+renderer escapes. They are published whether or not a mod is connected, on `inboundRatePerSimMinute`'s
+precedent (§18, B16). Two additive OPTIONAL fields make §4's test answer **minor**, but the
+identifier **stays at `contract-b/4.2`** and moves once with the set that ratifies the surface these
+fields feed; the version floor does not move and **`minContractVersion` MUST NOT be raised for this
+set**. Contract A takes no set and no version change. Affected body text carries an
+`(added — §33, B49)` marker, and **§33 wins over the body and over §14 to §32 wherever they
+disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -1328,6 +1343,8 @@ memory (Risk 4).
 | `saveKeep` | number (int) | no | Rotated saves that world keeps beside the live one (added — §19, B18), same source and same rules. |
 | `saveOnQuit` | bool | no | Whether that world saves when its game quits (added — §19, B18), same source and same rules. With the two above it is the whole answer to "what happens to this world if its machine stops". |
 | `worldWrapping` | bool | no | **D10's containment fact for that world** (added — §19, B18), from `CONFIG_UPDATE.worldWrapping` (`contract-a.md` §19, A42) — reported by the mod, never written by it. `false` is a reading and a loud one: it names a world that is not containing its own organisms. Absent means unknown. |
+| `keeper` | string | no | **The handle the participant running this world chose to be known by** (added — §33, B49), from that sidecar's own `--keeper` / `MULTIVERSE_KEEPER` and **from nowhere else**. 1 to 64 UTF-8 bytes, no control characters, trimmed and clipped **by the authoring sidecar** so that no reader downstream has to bound it. Absent means **unknown** — the participant set none — and a reader **MUST NOT** substitute one: there is no OS username, no peer id and no save file in this chain that would yield a name a person agreed to publish. It is **deliberately public** (below), and it is **untrusted display text** on exactly the footing `species[]` is: a renderer escapes it, and no party keys, routes, matches or deduplicates on it. |
+| `worldName` | string | no | **The display name that participant chose for this world** (added — §33, B49), same source, same bounds, same rules. It is a **label and never an address**: the routing address is `slot` and the identity is `peerId`, two worlds may honestly carry the same name, and a party that treats one as either is reading a caption as a key. |
 | `truncated` | bool | no | **Qualifies `species` and nothing else** (added — §16, B11). `true` means the array is **not the whole census** — the mod hit the cap, or a sidecar stripped an entry or trimmed an over-long array (`contract-a.md` §5.2). Monotonic: set on the way, never cleared. Ignored when `species` is absent. |
 
 **Every field is optional, and absence is a value.** A stat the sidecar does not know is
@@ -1354,6 +1371,16 @@ subscriber, and B27 states the boundary from the subscriber's side: a public map
 `PEER_STATUS` carries each world's census, mod version, save policy and exclusion list, which
 together are a fairly complete profile of a stranger's machine. **A sidecar that must not
 publish a value MUST NOT put it on this block**, because no rule downstream will keep it back.
+
+**`keeper` and `worldName` are the first two fields here that are public BY CHOICE rather than
+by consequence** (added — §33, B49), and the rule above is why they can be. Every other field
+is a machine reporting on itself; these two are a **person naming themselves**, and the
+boundary that makes that safe is the one B27 already drew: nothing on this block is
+confidential, so a value a participant did not choose to publish must never reach it. That is
+the whole of §33's consent rule stated from this block's side — **a sidecar MUST NOT derive
+either string from an OS username, a save file, a machine name or a peer id**, because a name
+nobody chose is a name nobody agreed to broadcast, and this block broadcasts everything.
+Absence is the honest state, and `unknown` is what a reader renders for it.
 
 **The relay's own limits are NOT on this block, and the reason is this block's discipline**
 (added — §22, B24). D20's rule — *every knob a peer's behaviour depends on must be published* —
@@ -2267,6 +2294,12 @@ name the species a world held when it last resized. The block is the one the sid
 received on `HEARTBEAT`, copied verbatim — the sidecar re-sorts nothing, merges nothing,
 renames nothing and drops nothing that passed its Contract A shape check
 (`contract-a.md` §5.2).
+
+**It is also the frame a world with no game running still says something on** (added — §33,
+B49). `keeper`, `worldName` and the two pacing settings are the sidecar's own configuration
+rather than a reading of a mod, so this `PING` carries them while every mod-sourced field on the
+same block is absent — which is what lets an operator name a dark slot instead of pointing at a
+number.
 
 ### 6.12 `FORWARD_RECEIPT` — relay → sender (added — §22, B26)
 
@@ -6268,3 +6301,77 @@ copy.
 left.** All three of the durable files the disk budget once could only watch grow are now a window
 plus a durable fold on the host and a receipt-gated cold copy off it, and the operator sizes for a
 steady state rather than a date — the record kept forever in every one of them.
+
+---
+
+## 33. The participant's own name on the map (2026-08-31)
+
+Every field this block has ever carried is a **machine reporting on itself**: what the world is
+doing (§6.3.1 since M4), what it was told to do (§19, B18), what its own configuration says
+(§18, B16). **Nothing on it says whose world it is.** A map of six worlds is a map of six
+numbers, and the person who runs one cannot point at it and say *that one is mine*.
+
+This set adds the two strings that fix that, and it adds them under one rule that is worth
+stating before the fields: **the sidecar publishes what its participant chose, and never
+anything else.** There is no OS-username lookup here, no world name derived from a save file, no
+fall-back to the peer id or the machine name. A name nobody chose is a name nobody agreed to
+broadcast, and §6.3.1 broadcasts everything.
+
+**One amendment, B49**, continuing the `B` series for the reason §14 gives.
+
+**This set changes the wire, additively**: two OPTIONAL string fields on one existing object. No
+message type, no field removal, no type change, no enum value added or removed, no new NACK
+code, and no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control. `contract-a.md` takes **no set and no version change** — neither string exists on that
+wire, the mod is not asked for one and is never told one.
+
+### B49 — The stats block carries the keeper's handle and the world's name (§6.3.1, §6.5, §6.11, §10.1, §22 B27)
+
+**Gap.** The map identifies a world three ways and a person none: `slot` is a routing address,
+`position` is a coordinate, `peerId` is a credential subject. All three are correct and none is
+readable. The consequences are small individually and they compound:
+
+| The page already shows | It cannot currently say |
+|---|---|
+| Six cells, six numbers | **which one is yours.** A participant joining a shared map cannot find their own world on the page without being told a slot number, and the slot they are told can change when the map grows (§7.3). |
+| A dark slot with a `darkSinceMs` | **whose machine to ask.** Risk 5's "a healed map hides a dead world" ends in an operator naming a peer id at a stranger, which is the least legible identifier the system holds. |
+| A census, a save policy, a speed | **a world anybody can refer to.** Every other field describes a world nobody can name, and a shared map is a social object before it is a technical one. |
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The two fields | `keeper` — the handle whoever runs this world chose to be known by — and `worldName` — the name they gave the world. Both OPTIONAL, both on the peer stats block, both carried on `SECTOR_CLAIM` (§6.3) and the stats-bearing `PING` (§6.11) and republished in `PEER_STATUS` (§6.5) exactly as every other field on it. |
+| **Chosen, never derived** | Both come from the sidecar's own configuration — `--keeper` / `MULTIVERSE_KEEPER` and `--world-name` / `MULTIVERSE_WORLD_NAME` — **and from nowhere else**. A sidecar **MUST NOT** derive either from an OS username, a machine or account name, a save-file name, a data directory, or the `peerId`. Unset publishes nothing. This is the whole of the set: a default is something a person is offered and answers, and the join flow is where that happens, on a wire where §22 B27 has already made everything public. |
+| Absence | **Unknown**, and unknown is not anonymous. A world that published no keeper has not said who runs it; a reader renders that as unknown and **MUST NOT** substitute a slot number, a peer id or a placeholder identity (§10.1). |
+| The bound, and where it is enforced | 1 to 64 UTF-8 bytes each — the same number `contract-a.md` §17 A36 gives a census name half, and deliberately not the same rule. A census name that breaks the bound is **refused**, because a mod authored it; these two are **repaired at the source**: the authoring sidecar trims surrounding whitespace, strips control runes, clips to 64 UTF-8 bytes **at a rune boundary**, and drops the value whole when the bytes are not valid UTF-8. A value that sanitizes to nothing is absent. |
+| Author-side enforcement is the rule, not an optimization | **No party downstream trims, strips, clips or validates either string**, exactly as no party repairs a census name. The relay carries bytes, the archive stores them, the page renders them. What leaves the authoring sidecar is what the map shows, which is why the bound lives where the value is authored and why a malformed one is fixed there rather than refused anywhere. |
+| A typo never costs a join | Sanitizing is not a start-up failure. An over-long or unusable display name is clipped or dropped with one log line naming what changed, and the world joins. A bound that keeps somebody off the map because they pasted a newline into a config file is a worse outcome than a clipped name. |
+| **Untrusted display text** | Both are chosen by a stranger and reach every peer and every subscriber on an unauthenticated block, exactly as a census name and an exclusion entry do (§13 item 7, §19 B18). **A renderer MUST escape both**, and the bound above is what keeps the escaping cheap rather than what makes it unnecessary. |
+| A label, never a key | `worldName` is a caption for a world and `keeper` is a caption for a person. Neither is an identifier: two worlds may honestly carry the same name, a name may change between two broadcasts, and **no party may route, address, match, deduplicate, authorize or reconcile on either string**. The routing address is `slot`, the identity is `peerId`, and the credential subject is neither of these. |
+| Not a routing input | Two more values copied into a broadcast the relay was already sending. Nothing routes, schedules, refuses or filters on either. |
+| The relay | **Unchanged, and for the fourth time that is the point.** §16's B11 asked a relay to store the stats block as the bytes it arrived as, "for the next field after this one". §18's three were that field, §19's seven were the next, and these two are the next again. A relay carries both without knowing they exist. |
+| Published without a mod | Both are the sidecar's **own configuration** rather than a reading of a mod, so they are published whether or not a game is connected — the precedent `inboundRatePerSimMinute` set (§18, B16). That is deliberate and it is where the value is highest: a slot whose game is shut down is otherwise a number with a `darkSinceMs` beside it, and this is what lets an operator say whose world went dark. |
+| Size | Two short strings, at most 128 bytes together, on a block whose bound is the census (§6.3.1). They change only when a participant edits their configuration and restarts. |
+
+**Version.** Two additive OPTIONAL string fields on one existing object, so §4's test answers
+**minor**. **The identifier does not move on this set**, and that is a sequencing decision rather
+than an exception: publishing these two fields is the first step of the participant-recognition
+surface, the steps after it add no wire field at all, and a wire that took a minor per step would
+spend several of them describing one feature. It moves once, with the set that ratifies the
+surface. Nothing depends on the distinction — §4 makes a minor a non-rejection reason, and §3.1
+forbids a reader to gate a rendering on a version *string* at all: what a peer can say is stated
+field by field, by presence. `/contract-b/v4` does not move.
+
+**`minContractVersion` MUST NOT be raised for this set** (§6.1, §22 B25). A peer that publishes
+neither field is exactly as valid as one that publishes both, an unnamed world is a complete and
+honest reading rather than a degraded one, and there is nothing here to evict a fleet for. Every
+mixed-version path renders as **unknown**, and no path produces a wrong name, because there is no
+default anywhere in the chain to produce one from.
+
+**Enforced by:** the **sidecar**, for publishing only what its participant configured, for
+deriving neither string from anything, and for trimming, stripping, clipping and dropping at the
+one place the value is authored; the **relay**, for carrying what it does not understand; the
+**archive and any client**, for rendering an absent name as unknown rather than as anonymous, for
+escaping both as the untrusted text they are, and for never keying, routing or reconciling on
+either.
