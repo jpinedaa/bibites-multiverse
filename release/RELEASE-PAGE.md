@@ -5,41 +5,34 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-- **Name your world, and sign it.** The installer asks two new optional questions: the handle you
-  want to be known by (suggested from your account name) and your world's name (suggested
-  "your handle's world"). Both are **public** — every world on the map sees them exactly as you
-  type them — and nothing is published that you did not see and confirm: press Enter to take the
-  suggestion, type your own, or answer `-` to publish neither. The same handle on a second
-  installation groups your worlds under one keeper, and you can change or withdraw either name
-  later from the launcher.
-- **The map now recognizes its keepers.** The home page greets the newest worlds — name, keeper,
-  position, and when they joined — and ranks keepers by the simulated time their worlds have
-  contributed, all their worlds combined, including ones that have since gone dark. Your
-  contribution outlives your world.
-- **The population limit is sized for a shared ×10 reference, and learning runs at whatever speed
-  you play.** You no longer need to run at ×10 — or at any particular target — for the limit to
-  learn or to apply. Retained budget samples are repriced for the reference rather than discarded.
-- **A stalled OPEN – LEARNING badge un-sticks itself.** A world that sat learning forever because
-  it ran slower than its target starts sampling immediately after this update. Explicit
-  `--inbound-target-time-scale` / `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` choices still stand.
-- **The plugin does not change, and old participants stay welcome.** This release keeps mod
-  `0.6.8`, Contract A 2.4, and Contract B 4.2; the two name fields are optional additions and no
-  minimum wire version moves.
+<!-- WRITE THIS SECTION FOR THE RELEASE BEING CUT, from nothing rather than by
+     adding to it. It describes ONE release, because the reader has already
+     installed the one before it; a paragraph left here by a previous release is a
+     change that gets announced as new twice. That is not hypothetical: a release
+     has already shipped with the whole of its predecessor's feature list under
+     this heading, because the section was added to rather than written. The text
+     each release used is on its own published release page and in this file's
+     history, so nothing is lost by clearing it. release/README.md, "Cutting a
+     release", step 1. -->
 
 ## Upgrading from an earlier release
+
+<!-- The two bullets below hold for every release and stay. Add this release's own
+     upgrade notes beside them — what to do before running setup, what does not
+     change, what a script has to be told, and the one thing a world installed by
+     an earlier release cannot do — and take those back out once it has shipped.
+     A COMMENT STILL HERE AT BUILD TIME IS PUBLISHED. It is invisible on the
+     rendered page and visible in the body GitHub serves, which is how the first
+     release with nothing to add in this section shipped this block and had it
+     removed from the release by hand afterwards. Until the build strips
+     comments, delete this one before the tag if the section stays as it stands,
+     and put it back with the next release's note. -->
 
 - **Stop every world before you run the setup.** Use *Stop every world* in the launcher's window,
   or `multiverse-launcher.exe stop --all`. Setup refuses while anything of this installation is
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **You are asked the two name questions once.** An attended upgrade asks them if this
-  installation never has been; an unattended or redirected run asks nothing and publishes nothing.
-  An answer you already gave — a decline included — is kept, never replaced with a suggestion.
-- **Do not clear the journal or admission state.** Existing queue entries, identities, saves,
-  budget samples, and learned limits remain in place; the samples are repriced for the ×10
-  reference on first start.
-- **No admission setting is required.** The default remains non-enforcing shadow mode.
 
 ## What you need
 
