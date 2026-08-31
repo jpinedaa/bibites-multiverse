@@ -249,7 +249,9 @@ Slot 9 holds `adaptive-shadow` from its launcher profile — durable across rest
 delivered exactly once to hosted slot 1, whose sidecar predates B50, proving a mixed fleet needs
 no coordination; a W-axis chain refused by its whole row delivered once to slot 14. Ordered
 `refusedSlots`, unchanged exit edges, zero losses, zero bounces. The tested-build record is
-`25547bf` and the drift gate is green. The release awaits the 0.3.11 tag and the runner. The
+`25547bf` and the drift gate is green. Release `0.3.11` was tagged and published by the release
+runner on 2026-08-31: eight assets, every package digest matching the published `SHA256SUMS`,
+and both stable-named downloads resolving to the new tag. The
 hosted archive picks up the dashed cross-axis rendering on its next ordinary deploy; until then
 the live page simply does not animate those hops.
 
@@ -258,8 +260,17 @@ frames per second — per-destination migration fan-in 6/s → 25/s, and every s
 send budget with it, with no participant change (peers size their buckets from the value the
 relay publishes). The arithmetic is recorded in `deploy/SIZING.md`; the change is
 `MULTIVERSE_MAX_FRAMES_PER_SECOND=200` in `/etc/multiverse/relay.env` and one announced
-relay-only restart. **The relay change is prepared but not yet deployed.** The in-game
-fertility/biomass scarcity settings for slot 9 remain an operator step not yet taken.
+relay-only restart. **Both halves landed on 2026-08-31.** The announced, gate-managed
+relay-only restart at `21:51Z` held the participant outage to seven seconds with a complete
+record, and the relay now publishes `maxFramesPerSecond: 200`, so every sidecar resizes its
+buckets with no participant change. The ceiling is not yet a provisioning knob:
+`provision.sh` regenerates `relay.env` without the key, so it must gain one before the next
+envfiles run or the setting reverts to 50 at the restart after that run. The in-game
+scarcity settings for slot 9 were applied the same day: with the world stopped through its
+launcher, its save's Global Fertility moved to `1E-06` and Biomass Density to `0.00075`,
+and both values were read back unchanged from the next save the running game itself wrote.
+The sink took effect at once — slot 9's population fell from 153 to 35 within the first
+save cycle while its paced arrival queue sat at 63 of its 64 positions.
 
 The update also found a `0.3.10` release defect on the graphical path. The installer window
 passes an emptied name box as `-`, the project's "publish nothing" answer, but Windows
@@ -270,7 +281,10 @@ box in the window hits this; prefilled or typed names pass. The update was compl
 package's own script installer instead — the documented advanced path — run unattended without
 the name flags, which leaves the never-answered name questions unanswered rather than recording
 a decline nobody made. The setup wrapper's registry version entry was reconciled by hand
-afterwards. The fix belongs in the graphical installer's argument handling and needs a release.
+afterwards. Release `0.3.11` ships the fix — the window passes a public name to the installer
+as one colon token, so an emptied box reaches the installer instead of stopping PowerShell —
+and running that release's setup over the second machine by the graphical path is the fix's
+outstanding end-to-end verification.
 
 ### Species genealogy repair
 
