@@ -42,7 +42,7 @@ import (
 
 // Release is the release this launcher was built for. It is pinned to
 // docs/support-matrix.md by a test.
-const Release = "0.3.10"
+const Release = "0.3.11"
 
 // Exit codes, matching the sidecar: 0 success, 1 a refusal or a runtime
 // failure, 2 a usage error (flag.ContinueOnError's own answer).
