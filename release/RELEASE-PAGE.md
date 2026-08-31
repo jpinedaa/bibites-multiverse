@@ -5,15 +5,26 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-- **Population learning follows your selected game speed.** If you move the speed slider from ×10
-  to ×5, the default admission learner now targets ×5. You do not have to return to ×10.
-- **A speed change keeps useful evidence.** The sidecar retains its last hour of machine-budget
-  samples and immediately recalculates the population limit for the new requested speed.
-- **Explicit operator targets stay fixed.** `--inbound-target-time-scale` and
-  `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` still override the slider when a map operator needs one
-  fixed target.
-- **The plugin and protocols do not change.** This release keeps mod `0.6.8`, Contract A 2.4,
-  Contract B 4.2, and the same at-most-once migration rule.
+- **Name your world, and sign it.** The installer asks two new optional questions: the handle you
+  want to be known by (suggested from your account name) and your world's name (suggested
+  "your handle's world"). Both are **public** — every world on the map sees them exactly as you
+  type them — and nothing is published that you did not see and confirm: press Enter to take the
+  suggestion, type your own, or answer `-` to publish neither. The same handle on a second
+  installation groups your worlds under one keeper, and you can change or withdraw either name
+  later from the launcher.
+- **The map now recognizes its keepers.** The home page greets the newest worlds — name, keeper,
+  position, and when they joined — and ranks keepers by the simulated time their worlds have
+  contributed, all their worlds combined, including ones that have since gone dark. Your
+  contribution outlives your world.
+- **The population limit is sized for a shared ×10 reference, and learning runs at whatever speed
+  you play.** You no longer need to run at ×10 — or at any particular target — for the limit to
+  learn or to apply. Retained budget samples are repriced for the reference rather than discarded.
+- **A stalled OPEN – LEARNING badge un-sticks itself.** A world that sat learning forever because
+  it ran slower than its target starts sampling immediately after this update. Explicit
+  `--inbound-target-time-scale` / `MULTIVERSE_INBOUND_TARGET_TIME_SCALE` choices still stand.
+- **The plugin does not change, and old participants stay welcome.** This release keeps mod
+  `0.6.8`, Contract A 2.4, and Contract B 4.2; the two name fields are optional additions and no
+  minimum wire version moves.
 
 ## Upgrading from an earlier release
 
@@ -22,12 +33,13 @@ Your game and saves stay on your computer.
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
+- **You are asked the two name questions once.** An attended upgrade asks them if this
+  installation never has been; an unattended or redirected run asks nothing and publishes nothing.
+  An answer you already gave — a decline included — is kept, never replaced with a suggestion.
 - **Do not clear the journal or admission state.** Existing queue entries, identities, saves,
-  budget samples, and learned limits remain in place.
-- **No admission setting is required.** The default remains non-enforcing shadow mode. After the
-  next heartbeat, its target follows the speed selected in the game.
-- **Keep a fixed target only when you chose one.** An explicit command-line or environment target
-  remains fixed after the upgrade.
+  budget samples, and learned limits remain in place; the samples are repriced for the ×10
+  reference on first start.
+- **No admission setting is required.** The default remains non-enforcing shadow mode.
 
 ## What you need
 
