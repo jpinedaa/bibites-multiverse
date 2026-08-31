@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit `ab9cdeb` passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested ×5. The admission target changed to ×5. The unchanged plugin passed the M1 auto-test with zero Unity errors. |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit `ab9cdeb` passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested ×5. No requested-speed binary has run with the Linux game. |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.8` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit `4b1a89d` passed the full Go suite and both cross-builds on 2026-08-31. Its Windows binary ran the live broadcast world at requested ×6.5, restored 52 admission budget samples, and repriced them to a ×10-reference limit of 40. The unchanged plugin passed the M1 auto-test with zero Unity errors. |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.8` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.2`, `contract-a/2.4` | The unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit `4b1a89d` passed the full Go suite and both cross-builds on 2026-08-31. No reference-target binary has run with the Linux game yet; the hosted rollout is recorded operationally. |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.8` |
 | `BibitesMultiverse.dll` SHA-256 | `c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc` |
 | `bibites-mod/` tree | `27baa92d9c66c043465d4dac3e736c25dcb2e8a0` |
-| `cmd/sidecar` source commit | `ab9cdeb3a85c6ef237b02f659ac485374a678f9c` |
-| `cmd/sidecar` input digest | `183420732fab5e7ab3f4444d4ba0c9fec6cf67ac626c25340bcfe767e2039a4a` |
-| Tested on | 2026-08-30 |
+| `cmd/sidecar` source commit | `4b1a89d478ebc7afc9e82d34e7f880b92ad115e3` |
+| `cmd/sidecar` input digest | `fbf08236e15e57bc2690fb165e9d2a8cf38c7153757eaf991d85bf0cebb4b1cc` |
+| Tested on | 2026-08-31 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -275,10 +275,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.8",
     "pluginSha256": "c726b20e345494fffb896e610065151fed289c1b46389cbacfdd5e97b67fbcbc",
     "bibitesModTree": "27baa92d9c66c043465d4dac3e736c25dcb2e8a0",
-    "sidecarSourceCommit": "ab9cdeb3a85c6ef237b02f659ac485374a678f9c",
-    "sidecarInputsSha256": "183420732fab5e7ab3f4444d4ba0c9fec6cf67ac626c25340bcfe767e2039a4a",
-    "testedOn": "2026-08-30",
-    "evidence": "Exact commit ab9cdeb passed the full Go suite and both cross-builds. Its Linux sidecar ran with the supported Windows game and mod 0.6.8 on 2026-08-30. A live x5 heartbeat set the adaptive-shadow target to x5. The unchanged plugin passed the M1 auto-test with zero Unity errors."
+    "sidecarSourceCommit": "4b1a89d478ebc7afc9e82d34e7f880b92ad115e3",
+    "sidecarInputsSha256": "fbf08236e15e57bc2690fb165e9d2a8cf38c7153757eaf991d85bf0cebb4b1cc",
+    "testedOn": "2026-08-31",
+    "evidence": "Exact commit 4b1a89d passed the full Go suite and both cross-builds. Its Windows sidecar ran the live broadcast world with the supported Windows game and mod 0.6.8 on 2026-08-31, restored 52 admission budget samples recorded for x6.5, and repriced them to a x10-reference limit of 40 without restarting learning. The unchanged plugin passed the M1 auto-test with zero Unity errors."
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -295,7 +295,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit ab9cdeb passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested x5. The admission target changed to x5. The unchanged plugin passed the M1 auto-test with zero Unity errors"
+      "tested": "the unchanged plugin ran in five worlds on 2026-08-23. Exact sidecar commit 4b1a89d passed the full Go suite and both cross-builds on 2026-08-31. Its Windows binary ran the live broadcast world at requested x6.5, restored 52 admission budget samples, and repriced them to a x10-reference limit of 40. The unchanged plugin passed the M1 auto-test with zero Unity errors"
     },
     {
       "gameVersion": "0.6.3.1",
@@ -309,7 +309,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.2",
-      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit ab9cdeb passed the full Go suite and both cross-builds on 2026-08-30. Its Linux binary connected to the supported Windows game at requested x5. No requested-speed binary has run with the Linux game"
+      "tested": "the unchanged plugin ran in six hosted worlds on 2026-08-23. Exact sidecar commit 4b1a89d passed the full Go suite and both cross-builds on 2026-08-31. No reference-target binary has run with the Linux game yet; the hosted rollout is recorded operationally"
     }
   ]
 }
