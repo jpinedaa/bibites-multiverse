@@ -354,6 +354,21 @@ func (a *admissionController) restore(d admissionDiskState, now time.Time) bool 
 		}
 	}
 	sort.Slice(a.samples, func(i, j int) bool { return a.samples[i].at.Before(a.samples[j].at) })
+	// DOWNTIME DOES NOT AGE THE MACHINE. The sample window is meant to hold the
+	// last hour of RUNNING evidence; while the sidecar was off, the machine the
+	// budgets describe did not change, and expiring them by wall clock made a
+	// world returning from a long outage fail open for ten minutes — long
+	// enough, on 2026-08-31, for the map to flood five returning worlds to
+	// twice and three times their learned limits before their gates could
+	// close. Re-anchor the retained window so the newest sample reads as "just
+	// measured" and the others keep their spacing behind it.
+	if n := len(a.samples); n > 0 {
+		if gap := now.Sub(a.samples[n-1].at); gap > 0 {
+			for i := range a.samples {
+				a.samples[i].at = a.samples[i].at.Add(gap)
+			}
+		}
+	}
 	a.estimated, a.effective, a.ready = 0, 0, false
 	a.rejected = maxInt(0, d.RejectedTotal)
 	a.trim(now)

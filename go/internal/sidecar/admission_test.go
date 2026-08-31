@@ -135,6 +135,32 @@ func TestAdmissionRestoreRescalesBudgetsAcrossTargetChange(t *testing.T) {
 	}
 }
 
+func TestAdmissionRestoreSurvivesDowntime(t *testing.T) {
+	// Five worlds returning from an outage on 2026-08-31 lost their whole
+	// sample windows to wall-clock expiry and failed open long enough to be
+	// flooded far past their learned limits. Downtime must not age samples:
+	// the machine they describe was off, not changing.
+	cfg := DefaultConfig()
+	cfg.AdmissionMinSamples = 3
+	a := newAdmissionController(cfg)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		if !a.observe(now.Add(time.Duration(i)*time.Minute), 50, 10, false) {
+			t.Fatalf("sample %d was not recorded", i)
+		}
+	}
+	disk := a.diskState(now.Add(3 * time.Minute))
+
+	restarted := newAdmissionController(cfg)
+	if !restarted.restore(disk, now.Add(7*time.Hour)) {
+		t.Fatal("state recorded before a seven-hour outage was rejected")
+	}
+	got := restarted.snapshot()
+	if !got.Ready || !got.Enforcing || got.SampleCount != 3 || got.EffectiveLimit != 45 {
+		t.Fatalf("restored controller after downtime = %+v, want all three samples ready at limit 45", got)
+	}
+}
+
 func TestAdaptiveAdmissionStateSurvivesShadowToEnforcingRestart(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.InboundAdmissionMode = AdmissionAdaptiveShadow
