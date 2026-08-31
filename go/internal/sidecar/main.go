@@ -117,8 +117,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"hard living-population limit used by --inbound-admission=fixed; must be positive")
 	inboundTargetScale := fs.Float64("inbound-target-time-scale",
 		envFloat("MULTIVERSE_INBOUND_TARGET_TIME_SCALE", defaultAdmissionTarget),
-		"fixed achieved simulation speed the adaptive population estimator is sized to hold. "+
-			"When omitted, the estimator follows the game's requested speed (starting at x10)")
+		"reference simulation speed the adaptive population limit is sized for: the learned "+
+			"machine budget (population x achieved speed) is divided by this value. The world "+
+			"never has to request or reach it — the default x10 prices every world's limit on "+
+			"one shared scale whatever speed its game runs at")
 	inboundPopulationMin := fs.Int("inbound-population-min",
 		envInt("MULTIVERSE_INBOUND_POPULATION_MIN", defaultAdmissionMin),
 		"lowest population limit the adaptive estimator may learn")
@@ -201,8 +203,6 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sidecar: %s\n", strayArgsMessage(stray))
 		return 2
 	}
-	inboundTargetExplicit := inboundTargetWasExplicit(fs)
-
 	// THE TWO READ-ONLY COMMANDS RUN BEFORE THE LOGGER IS OPENED, and that
 	// ordering is a rule rather than a tidy-up. --log-file has an environment
 	// default (MULTIVERSE_LOG_FILE), so a participant who runs --diagnose with
@@ -276,21 +276,17 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.InboundAdmissionMode = strings.ToLower(strings.TrimSpace(*inboundAdmission))
 	cfg.InboundPopulationLimit = *inboundPopulationLimit
 	cfg.InboundTargetTimeScale = *inboundTargetScale
-	cfg.InboundTargetAuto = !inboundTargetExplicit
 	cfg.InboundPopulationMin = *inboundPopulationMin
 	cfg.InboundPopulationMax = *inboundPopulationMax
 	cfg.InboundPopulationHysteresis = *inboundPopulationHysteresis
 	cfg.Logger = logger
-	targetPolicy := "fixed"
-	if cfg.InboundTargetAuto {
-		targetPolicy = "requested"
-	}
 	logger.Info("sidecar: inbound population admission configured",
 		"mode", cfg.InboundAdmissionMode, "fixedLimit", cfg.InboundPopulationLimit,
-		"targetTimeScale", cfg.InboundTargetTimeScale, "targetPolicy", targetPolicy,
+		"targetTimeScale", cfg.InboundTargetTimeScale,
 		"adaptiveMin", cfg.InboundPopulationMin, "adaptiveMax", cfg.InboundPopulationMax,
 		"hysteresis", cfg.InboundPopulationHysteresis,
-		"note", "adaptive-shadow learns and reports but never refuses")
+		"note", "the target is a reference divisor, not a speed the world must reach; "+
+			"adaptive-shadow learns and reports but never refuses")
 	if *insecureContractA {
 		logger.Warn("sidecar: --insecure-no-contract-a-token is set; ANY local process can drive " +
 			"this world's migrations and impersonate this sidecar to the mod. It exists for a " +
@@ -652,20 +648,6 @@ func strayArgsMessage(stray []string) string {
 		"(a world name, an apostrophe'd handle,\na path) must be quoted as one argument: " +
 		`--world-name "The Tidepool".` + "\n" +
 		"Nothing was started, so nothing has been published under a half of a name."
-}
-
-func inboundTargetWasExplicit(fs *flag.FlagSet) bool {
-	explicit := false
-	if raw := os.Getenv("MULTIVERSE_INBOUND_TARGET_TIME_SCALE"); raw != "" {
-		value, err := strconv.ParseFloat(raw, 64)
-		explicit = err == nil && value > 0
-	}
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "inbound-target-time-scale" {
-			explicit = true
-		}
-	})
-	return explicit
 }
 
 func env(name, fallback string) string {

@@ -572,9 +572,13 @@ These inputs identify the approved rollback preimage. They are not credentials.
 
 The checked-in hosted sidecar unit explicitly sets
 `MULTIVERSE_INBOUND_ADMISSION=adaptive` for these six operator-controlled worlds. This is a
-production override, not a change to the participant-package `adaptive-shadow` default. The
-admission estimator lives on each persistent world volume, so activation and rollback retain its
-sample history. To roll back enforcement, change that unit override to `adaptive-shadow`, build a
+production override, not a change to the participant-package `adaptive-shadow` default. The unit
+deliberately leaves the admission target on the shared ×10 reference even though these worlds run
+at ×100: the target is the divisor that prices the learned machine budget, not a speed the world
+must reach, and dividing by ×100 once clamped all six limits to the minimum and closed every
+gate. The admission estimator lives on each persistent world volume, so activation and rollback
+retain its sample history — including across a target change, which reprices the retained budget
+samples instead of discarding them. To roll back enforcement, change that unit override to `adaptive-shadow`, build a
 new runtime-only artifact, and use the same guarded transaction; do not delete admission or
 migration-journal state.
 

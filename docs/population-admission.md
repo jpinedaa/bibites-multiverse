@@ -96,39 +96,42 @@ records:
 
 ```text
 machine budget = living population × achieved time scale
-raw limit       = floor(median(last hour of budgets) × 0.90 / target time scale)
+raw limit       = floor(median(last hour of budgets) × 0.90 / reference target)
 ```
 
 Ten valid samples are required. Save stalls are outliers and the median makes them unable to
-control the result. The ordinary policy starts at ×10 and then follows the game's current requested
-speed. An operator can instead set an explicit fixed target. The learned result is clamped to
-10–200. A decrease moves by at most 10% per sample and an increase by 5%, so one changing interval
-does not open or close the gate by dozens of organisms.
+control the result. The reference target is a pricing divisor, not a speed the world must request
+or reach: the budget is measured at whatever speed the world actually runs, so an intentional ×5
+world and a ×100 world train the same estimator. Every world defaults to ×10, which prices every
+limit on one shared scale; an operator can set a different reference with
+`--inbound-target-time-scale`. The learned result is clamped to 10–200. A decrease moves by at
+most 10% per sample and an increase by 5%, so one changing interval does not open or close the
+gate by dozens of organisms.
+
+The requested speed must not enter this calculation. Dividing by a large requested speed prices
+every limit at that speed's cost — six hosted ×100 worlds once clamped to the minimum limit and
+closed every gate this way — and gating samples on reaching a target speed leaves a slower world
+in `OPEN · LEARNING` forever. Both failure modes are retired together by making the divisor pure
+configuration.
 
 The last hour of valid samples and the learned limits are atomically persisted in
 `<data-dir>/admission-state.json`. A restart therefore does not create a ten-minute fail-open
 window, and a reviewed promotion from `adaptive-shadow` to `adaptive` uses the shadow evidence it
-already collected. Changing an explicit fixed target, the bounds, or the safety margin deliberately
-starts learning fresh. In the ordinary requested-speed policy, a slider change keeps the last
-hour's machine-budget samples and immediately recalculates their limits for the new target.
+already collected. Samples are machine budgets, not target-specific limits, so a target change
+keeps them and immediately reprices the limit at the new reference — across a restart too.
+Changing the bounds or the safety margin deliberately starts learning fresh.
 
-The mod reports `targetTimeScale` separately from applied `timeScale`. The ordinary controller
-adopts each positive, finite requested target, even while the world is paused or before an achieved
-speed window is ready. Those heartbeats can change the target but cannot add a capacity sample.
-With an explicit fixed target, a world requested below that target contributes no sample; without
-this distinction, an intentional ×5 world could look like a machine failing to hold ×10.
-
-The local broadcast runner explicitly fixes both the game and admission targets at ×6.5.
-The participant package starts the game at ×10 but does not set a fixed admission target. If a
-participant selects ×5, the controller learns and publishes a ×5 population limit; returning to
-×10 is not required.
+The local broadcast runner fixes the game speed at ×6.5 and leaves the admission reference on the
+shared ×10 default. The participant package starts the game at ×10 and also leaves the reference
+alone. If a participant selects ×5, the controller keeps learning at the measured ×5 budgets and
+keeps publishing the ×10-priced limit; returning to ×10 is not required.
 
 ## Configuration
 
 ```text
 --inbound-admission                    MULTIVERSE_INBOUND_ADMISSION
 --inbound-population-limit             MULTIVERSE_INBOUND_POPULATION_LIMIT
---inbound-target-time-scale            MULTIVERSE_INBOUND_TARGET_TIME_SCALE (optional fixed target)
+--inbound-target-time-scale            MULTIVERSE_INBOUND_TARGET_TIME_SCALE (reference target, default ×10)
 --inbound-population-min               MULTIVERSE_INBOUND_POPULATION_MIN
 --inbound-population-max               MULTIVERSE_INBOUND_POPULATION_MAX
 --inbound-population-hysteresis        MULTIVERSE_INBOUND_POPULATION_HYSTERESIS
@@ -152,11 +155,10 @@ The peer stats block, `/api/status`, archived `metrics.jsonl`, the settings card
 `multiverse-sidecar --my-slot` view publish the mode, target, estimate, effective limit, committed
 load, sample count, closed/enforcing state, and rejection total.
 
-The map shows `OPEN · WAITING ×n` when an explicitly fixed admission target is above the
-requested speed. Under the ordinary policy, the displayed admission target follows the requested
-speed, so selecting ×5 does not produce a ×10 waiting state. It shows
-`OPEN · TARGET UNKNOWN` when the world does not report its requested speed. These states identify
-why the sample count does not increase.
+The map's `OPEN · WAITING ×n` and `OPEN · TARGET UNKNOWN` states are retired: they existed to
+explain sampling gates on the requested speed, and no such gate remains. A cell that has not
+learned yet shows `OPEN · LEARNING` with its sample count, and the count now increases whenever
+the world is unpaused and measurably running, whatever speed its keeper selected.
 
 The live map deliberately distinguishes an **offer** from a **delivery**. A lane's numeric rate and
 recorded migration count come from copied `MIGRATION_PAYLOAD` offers, so they can continue rising
@@ -240,14 +242,17 @@ rollback.
 
 ## Verification record
 
-- Unit tests cover robust estimation, shadow non-enforcement, fixed hysteresis, target mismatch,
+- Unit tests cover robust estimation, shadow non-enforcement, fixed hysteresis,
   directional next-world walking, source skipping, and refusal-set skipping.
-- On 2026-08-30, requested-target regressions proved that an ordinary ×5 participant heartbeat
-  learns and publishes a ×5 limit, a paused slider change immediately reapplies retained budget
-  samples without adding one, valid flag and environment overrides remain fixed, an invalid
-  environment value remains omitted, and persisted ×5 state restores only under the following
-  policy. The full Go vet/test suite, Windows and Linux sidecar cross-builds, tracked Markdown link
-  check, release-link test, runtime-rule test, and release-version consistency check passed.
+- On 2026-08-31, reference-target regressions proved that a world achieving ×5 trains the ×10
+  controller and publishes a ×10-priced limit, a paused heartbeat adds no sample, budget samples
+  recorded while sized for ×100 restore under the ×10 default and reprice from the clamped
+  minimum to their true limit, and state recorded under a different safety margin still starts
+  fresh. The page regression now also refuses the retired `OPEN · WAITING` and
+  `OPEN · TARGET UNKNOWN` states.
+- The 2026-08-30 requested-speed-following policy those retired states served was deployed for
+  under a day: at ×100 it clamped all six hosted limits to the minimum and closed every gate,
+  which is the incident that motivated the fixed reference divisor.
 - The integration test `TestLivePopulationRefusalSpillsToNextUntriedWorld` creates three live
   worlds: the first sends east, the second refuses at its fixed population limit, and the third
   spawns the same migration exactly once. The source journal records slot 2 in `refusedSlots` and

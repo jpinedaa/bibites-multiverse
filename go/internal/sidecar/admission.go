@@ -60,11 +60,15 @@ type admissionDiskState struct {
 }
 
 type admissionController struct {
-	mode            string
-	fixedLimit      int
-	target          float64
-	followRequested bool
-	minLimit        int
+	mode       string
+	fixedLimit int
+	// target is the REFERENCE speed the population limit is sized for, not a
+	// speed the world must request or reach. Samples are machine budgets
+	// (population × achieved speed); dividing the median budget by this value
+	// prices every world's limit on the same scale. It is configuration only:
+	// it never follows the game's requested speed.
+	target   float64
+	minLimit int
 	maxLimit        int
 	hysteresis      int
 	margin          float64
@@ -136,11 +140,10 @@ func validateAdmissionConfig(cfg Config) error {
 
 func newAdmissionController(cfg Config) admissionController {
 	return admissionController{
-		mode:            strings.ToLower(strings.TrimSpace(cfg.InboundAdmissionMode)),
-		fixedLimit:      cfg.InboundPopulationLimit,
-		target:          cfg.InboundTargetTimeScale,
-		followRequested: cfg.InboundTargetAuto,
-		minLimit:        cfg.InboundPopulationMin,
+		mode:       strings.ToLower(strings.TrimSpace(cfg.InboundAdmissionMode)),
+		fixedLimit: cfg.InboundPopulationLimit,
+		target:     cfg.InboundTargetTimeScale,
+		minLimit:   cfg.InboundPopulationMin,
 		maxLimit:        cfg.InboundPopulationMax,
 		hysteresis:      cfg.InboundPopulationHysteresis,
 		margin:          cfg.AdmissionSafetyMargin,
@@ -153,44 +156,26 @@ func newAdmissionController(cfg Config) admissionController {
 
 // observe adds at most one independent capacity sample per interval. The
 // estimator uses the median of population*achievedTimeScale: the product is an
-// empirical CPU budget, and dividing it by the desired scale gives the
-// population this machine has historically supported at that speed. A median
-// rejects isolated save stalls; the safety margin keeps the result off the
-// cliff where the game already failed to hold the target.
-func (a *admissionController) observe(now time.Time, population int, achieved,
-	requestedTarget float64, paused bool) bool {
+// empirical CPU budget, and dividing it by the reference target gives the
+// population this machine could support at that speed. The world does not have
+// to request or reach the reference speed — the budget is measured at whatever
+// speed the world actually runs, so a ×5 world still trains the estimator. A
+// median rejects isolated save stalls; the safety margin keeps the result off
+// the cliff where the machine already failed to hold its speed.
+func (a *admissionController) observe(now time.Time, population int, achieved float64,
+	paused bool) bool {
 	a.trim(now)
-	changed := a.followRequestedTarget(requestedTarget)
 	if a.mode == AdmissionOff || paused || population <= 0 || achieved <= 0 ||
-		requestedTarget <= 0 || !wireFinite(requestedTarget) {
-		return changed
-	}
-	if !a.followRequested && requestedTarget+0.01 < a.target {
-		return changed
+		!wireFinite(achieved) {
+		return false
 	}
 	if !a.next.IsZero() && now.Before(a.next) {
-		return changed
+		return false
 	}
 	a.next = now.Add(a.every)
 	a.samples = append(a.samples, admissionSample{at: now, budget: float64(population) * achieved})
 	a.trim(now)
 	a.recalculate(false)
-	return true
-}
-
-// followRequestedTarget makes the ordinary participant default follow the
-// speed selected in the game. An explicit operator target leaves this disabled
-// and retains the fixed-target sampling gate above.
-func (a *admissionController) followRequestedTarget(requested float64) bool {
-	if !a.followRequested || requested <= 0 || !wireFinite(requested) ||
-		math.Abs(requested-a.target) <= 0.01 {
-		return false
-	}
-	a.target = requested
-	// Existing samples are machine budgets, not target-specific limits. Reapply
-	// them immediately at the new requested speed so an enforcing controller
-	// never carries a stale limit across a slider change.
-	a.recalculate(true)
 	return true
 }
 
@@ -349,17 +334,16 @@ func (a *admissionController) diskState(now time.Time) admissionDiskState {
 	return d
 }
 
+// restore accepts state recorded under ANY reference target: samples are
+// machine budgets, not target-specific limits, so a target change rescales the
+// limit instead of throwing away the machine's measured history. The bounds
+// and margin still gate the restore because they change what a stored sample
+// is allowed to become. The recalculation below reprices the retained budgets
+// at the configured target, so a restart across a target change never carries
+// a limit computed for the old one.
 func (a *admissionController) restore(d admissionDiskState, now time.Time) bool {
 	if d.Schema != admissionStateSchema || d.Minimum != a.minLimit ||
 		d.Maximum != a.maxLimit || d.Margin != a.margin {
-		return false
-	}
-	if a.followRequested {
-		if d.Target <= 0 || !wireFinite(d.Target) {
-			return false
-		}
-		a.target = d.Target
-	} else if d.Target != a.target {
 		return false
 	}
 	a.samples = nil
@@ -370,9 +354,10 @@ func (a *admissionController) restore(d admissionDiskState, now time.Time) bool 
 		}
 	}
 	sort.Slice(a.samples, func(i, j int) bool { return a.samples[i].at.Before(a.samples[j].at) })
-	a.estimated, a.effective = d.Estimated, d.Effective
-	a.ready, a.rejected = d.Ready, maxInt(0, d.RejectedTotal)
+	a.estimated, a.effective, a.ready = 0, 0, false
+	a.rejected = maxInt(0, d.RejectedTotal)
 	a.trim(now)
+	a.recalculate(true)
 	if len(a.samples) > 0 {
 		a.next = a.samples[len(a.samples)-1].at.Add(a.every)
 	}

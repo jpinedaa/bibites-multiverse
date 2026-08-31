@@ -133,13 +133,14 @@ type Config struct {
 	// delivery happens, never WHETHER (§7.5).
 	HeartbeatDeliveryGrace time.Duration
 	// Population admission is evaluated before inbound custody. fixed enforces
-	// InboundPopulationLimit; adaptive learns a limit for the target achieved
-	// speed; adaptive-shadow learns and reports the same value without refusing;
-	// off disables this gate. The paced journal ceiling remains independent.
+	// InboundPopulationLimit; adaptive learns a machine budget and sizes the
+	// limit for InboundTargetTimeScale, a pure reference divisor the world
+	// never has to request or reach; adaptive-shadow learns and reports the
+	// same value without refusing; off disables this gate. The paced journal
+	// ceiling remains independent.
 	InboundAdmissionMode        string
 	InboundPopulationLimit      int
 	InboundTargetTimeScale      float64
-	InboundTargetAuto           bool
 	InboundPopulationMin        int
 	InboundPopulationMax        int
 	InboundPopulationHysteresis int
@@ -223,7 +224,6 @@ func DefaultConfig() Config {
 		HeartbeatDeliveryGrace:      defaultHeartbeatDeliveryGrace,
 		InboundAdmissionMode:        AdmissionAdaptiveShadow,
 		InboundTargetTimeScale:      defaultAdmissionTarget,
-		InboundTargetAuto:           true,
 		InboundPopulationMin:        defaultAdmissionMin,
 		InboundPopulationMax:        defaultAdmissionMax,
 		InboundPopulationHysteresis: defaultAdmissionHysteresis,

@@ -573,10 +573,11 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		wallNow := time.Now()
 		s.achieved.observe(sess.sessionID, wallNow, *hb.SimulatedTime)
 		achieved, _, _ := s.achieved.rate(wallNow)
-		if sess.haveTargetTimeScale {
-			admissionChanged = s.admission.observe(wallNow, sess.population, achieved,
-				sess.targetTimeScale, sess.paused)
-		}
+		// The requested speed is deliberately not consulted: a capacity sample is
+		// population × achieved speed, which is true at whatever speed the world
+		// runs, so a world that never requests the reference target still learns.
+		admissionChanged = s.admission.observe(wallNow, sess.population, achieved,
+			sess.paused)
 		committed, known := s.committedPopulationLocked()
 		s.admission.refresh(committed, known)
 	}
