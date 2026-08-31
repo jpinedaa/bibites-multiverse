@@ -55,8 +55,8 @@ Parameters:
     MaxLength: 1011
     AllowedPattern: '^/[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9][A-Za-z0-9_.-]*)*$'
   UbuntuAmi:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Type: String
+    AllowedPattern: '^ami-[0-9a-f]{8,17}$'
 
 Resources:
   HostSecurityGroup:
@@ -108,11 +108,6 @@ Resources:
 
   HostLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
-    Metadata:
-      BibitesOperationalRelay:
-        PrivateIp: !Ref OperationalRelayPrivateIp
-        Domain: !Ref OperationalRelayDomain
-        CredentialParameterPrefix: !Ref OperationalCredentialParameterPrefix
     Properties:
       LaunchTemplateData:
         IamInstanceProfile:
@@ -190,6 +185,11 @@ Resources:
 
   DataAttachment:
     Type: AWS::EC2::VolumeAttachment
+    Metadata:
+      BibitesOperationalRelay:
+        PrivateIp: !Ref OperationalRelayPrivateIp
+        Domain: !Ref OperationalRelayDomain
+        CredentialParameterPrefix: !Ref OperationalCredentialParameterPrefix
     Properties:
       Device: /dev/sdf
       InstanceId: !Ref Host

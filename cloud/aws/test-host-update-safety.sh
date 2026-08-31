@@ -41,9 +41,12 @@ update_description="$(jq -nc --argjson change \
 bibites_require_safe_host_change_set "$update_description" UPDATE false
 
 legacy_description='{"Status":"CREATE_COMPLETE","Changes":[{"ResourceChange":{
-  "LogicalResourceId":"HostLaunchTemplate",
-  "ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify","Replacement":"False",
-  "Scope":["Metadata"],"Details":[{"Target":{"Attribute":"Metadata",
+  "LogicalResourceId":"DataAttachment",
+  "ResourceType":"AWS::EC2::VolumeAttachment","Action":"Modify","Replacement":"False",
+  "Scope":["Metadata"],"Details":[
+  {"Target":{"Attribute":"Metadata","RequiresRecreation":"Never"},
+  "Evaluation":"Dynamic","ChangeSource":"DirectModification"},
+  {"Target":{"Attribute":"Metadata",
   "RequiresRecreation":"Never"},"Evaluation":"Static",
   "ChangeSource":"ParameterReference","CausingEntity":"OperationalRelayPrivateIp"}]}}]}'
 bibites_require_safe_host_change_set "$legacy_description" UPDATE true
@@ -60,7 +63,7 @@ reject 'legacy metadata update with possible recreation' \
     <<<"$legacy_description")" UPDATE true
 reject 'legacy metadata update from an unrelated parameter' \
   bibites_require_safe_host_change_set \
-  "$(jq '.Changes[0].ResourceChange.Details[0].CausingEntity = "InstanceType"' \
+  "$(jq '.Changes[0].ResourceChange.Details[1].CausingEntity = "InstanceType"' \
     <<<"$legacy_description")" UPDATE true
 
 for unsafe in \
@@ -266,14 +269,22 @@ case "$args" in
   *' sts get-caller-identity '*) printf '123456789012\n' ;;
   *' cloudformation describe-stacks '*)
     case "$MOCK_SCENARIO" in
-      legacy_preview|legacy_unaddressed)
-        if [ "$MOCK_SCENARIO" = legacy_preview ]; then
+      legacy_preview|legacy_pinned|legacy_unaddressed|legacy_ami_mismatch)
+        if [ "$MOCK_SCENARIO" = legacy_preview ] ||
+           [ "$MOCK_SCENARIO" = legacy_pinned ] ||
+           [ "$MOCK_SCENARIO" = legacy_ami_mismatch ]; then
           legacy_runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"
         else
           legacy_runtime=legacy/runtime.tar.gz
         fi
+        if [ "$MOCK_SCENARIO" = legacy_pinned ]; then
+          ubuntu_parameter='{"ParameterKey":"UbuntuAmi","ParameterValue":"ami-0123456789abcdef0"}'
+        else
+          ubuntu_parameter='{"ParameterKey":"UbuntuAmi","ParameterValue":"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id","ResolvedValue":"ami-0123456789abcdef0"}'
+        fi
         jq -nc --arg sha "$MOCK_RUNTIME_SHA" --arg runtime "$legacy_runtime" \
           --arg game_sha "$MOCK_GAME_SHA" --arg bepinex_sha "$MOCK_BEPINEX_SHA" \
+          --argjson ubuntu_parameter "$ubuntu_parameter" \
           '{Stacks:[{
           StackStatus:"UPDATE_COMPLETE",StackId:"arn:aws:cloudformation:us-east-1:123456789012:stack/fixture/1",
           CreationTime:"old",LastUpdatedTime:"old",Parameters:[
@@ -292,7 +303,7 @@ case "$args" in
             {ParameterKey:"ManifestFile",ParameterValue:"worlds.json"},
             {ParameterKey:"DataVolumeGiB",ParameterValue:"40"},
             {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.4"},
-            {ParameterKey:"UbuntuAmi",ParameterValue:"/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"}]}]}'
+            $ubuntu_parameter]}]}'
         ;;
       create_preview)
         echo 'Stack with id fixture does not exist' >&2
@@ -345,7 +356,13 @@ case "$args" in
       {"LogicalResourceId":"DataAttachment","ResourceType":"AWS::EC2::VolumeAttachment","PhysicalResourceId":"fixture"}]}'
     ;;
   *' ec2 describe-instances '*)
-    printf '%s\n' '{"Reservations":[{"Instances":[{"InstanceId":"i-0123456789abcdef0",
+    if [ "$MOCK_SCENARIO" = legacy_ami_mismatch ]; then
+      host_image=ami-fedcba98765432100
+    else
+      host_image=ami-0123456789abcdef0
+    fi
+    jq -nc --arg image "$host_image" '{Reservations:[{Instances:[{
+      InstanceId:"i-0123456789abcdef0",ImageId:$image,
       "Tags":[
         {"Key":"aws:ec2launchtemplate:id","Value":"lt-0123456789abcdef0"},
         {"Key":"aws:ec2launchtemplate:version","Value":"7"}]}]}]}'
@@ -436,11 +453,14 @@ case "$args" in
       echo 'property-value change-set view is not canonical' >&2
       exit 65
     fi
-    if [ "$MOCK_SCENARIO" = legacy_preview ]; then
+    if [ "$MOCK_SCENARIO" = legacy_preview ] ||
+       [ "$MOCK_SCENARIO" = legacy_pinned ]; then
       changes='[{"ResourceChange":{
-        "LogicalResourceId":"HostLaunchTemplate",
-        "ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify",
-        "Replacement":"False","Scope":["Metadata"],"Details":[{
+        "LogicalResourceId":"DataAttachment",
+        "ResourceType":"AWS::EC2::VolumeAttachment","Action":"Modify",
+        "Replacement":"False","Scope":["Metadata"],"Details":[
+        {"Target":{"Attribute":"Metadata","RequiresRecreation":"Never"},
+          "Evaluation":"Dynamic","ChangeSource":"DirectModification"},{
           "Target":{"Attribute":"Metadata","RequiresRecreation":"Never"},
           "Evaluation":"Static","ChangeSource":"ParameterReference",
           "CausingEntity":"OperationalRelayPrivateIp"}]}}]'
@@ -462,7 +482,7 @@ case "$args" in
         {ParameterKey:"ManifestFile",UsePreviousValue:true},
         {ParameterKey:"DataVolumeGiB",UsePreviousValue:true},
         {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.4"},
-        {ParameterKey:"UbuntuAmi",UsePreviousValue:true},
+        {ParameterKey:"UbuntuAmi",ParameterValue:"ami-0123456789abcdef0"},
         {ParameterKey:"OperationalRelayPrivateIp",ParameterValue:"10.0.0.5"},
         {ParameterKey:"OperationalRelayDomain",ParameterValue:"relay.example.net"},
         {ParameterKey:"OperationalCredentialParameterPrefix",ParameterValue:"/bibites-multiverse/cloud"}
@@ -687,12 +707,32 @@ grep -Fq -- "--template-body file://$fixture_cloud/legacy-template.yaml" \
   "$test_root/aws.log"
 grep -Fq 'ParameterKey=InstanceType,UsePreviousValue=true' "$test_root/aws.log"
 grep -Fq 'ParameterKey=RelayPrivateIp,UsePreviousValue=true' "$test_root/aws.log"
+grep -Fq 'ParameterKey=UbuntuAmi,ParameterValue=ami-0123456789abcdef0' \
+  "$test_root/aws.log"
 grep -Fq 'ParameterKey=OperationalRelayPrivateIp,ParameterValue=10.0.0.5' \
   "$test_root/aws.log"
 grep -Fq 'ParameterKey=OperationalRelayDomain,ParameterValue=relay.example.net' \
   "$test_root/aws.log"
 grep -Fq 'ParameterKey=OperationalCredentialParameterPrefix,ParameterValue=/bibites-multiverse/cloud' \
   "$test_root/aws.log"
+
+: >"$test_root/aws.log"
+run_deploy_fixture legacy_pinned >/dev/null
+grep -Fq 'ParameterKey=UbuntuAmi,ParameterValue=ami-0123456789abcdef0' \
+  "$test_root/aws.log"
+
+: >"$test_root/aws.log"
+set +e
+ami_mismatch_output="$(run_deploy_fixture legacy_ami_mismatch 2>&1)"
+ami_mismatch_status=$?
+set -e
+[ "$ami_mismatch_status" -ne 0 ]
+grep -Fq 'resolved UbuntuAmi differs from the live Host image' \
+  <<<"$ami_mismatch_output"
+[ ! -s "$test_root/aws.log" ] || {
+  echo 'legacy AMI disagreement reached a stack mutation' >&2
+  exit 1
+}
 
 cat >"$fixture_dist/staged.env" <<EOF
 AWS_PROFILE=fixture
@@ -865,6 +905,19 @@ grep -Fq '        Domain: !Ref OperationalRelayDomain' "$legacy_template"
 grep -Fq '        CredentialParameterPrefix: !Ref OperationalCredentialParameterPrefix' \
   "$legacy_template"
 [ "$(grep -c Operational "$legacy_template")" -eq 7 ]
+sed -n '/^  DataAttachment:/,/^Outputs:/p' "$legacy_template" | \
+  grep -Fq '    Metadata:'
+if sed -n '/^  HostLaunchTemplate:/,/^  Host:/p' "$legacy_template" | \
+   grep -Fq '    Metadata:'; then
+  echo 'legacy metadata is attached to the launch template' >&2
+  exit 1
+fi
+grep -A2 '^  UbuntuAmi:' "$legacy_template" | grep -Fq '    Type: String'
+if grep -A3 '^  UbuntuAmi:' "$legacy_template" | \
+   grep -Fq 'AWS::SSM::Parameter::Value'; then
+  echo 'legacy UbuntuAmi can still refresh from an SSM latest path' >&2
+  exit 1
+fi
 if grep -Fq 'CreationPolicy:' "$legacy_template" ||
    grep -Fq '{Key: BibitesBackup, Value: daily}' "$legacy_template" ||
    grep -Fq 'xfsprogs xvfb' "$legacy_template"; then

@@ -399,6 +399,7 @@ fi
 
 use_legacy_attachment=false
 host_launch_template_version=1
+legacy_ubuntu_ami=''
 if [ "$stack_exists" -eq 1 ]; then
   stack_parameter() {
     local key="$1"
@@ -431,6 +432,23 @@ if [ "$stack_exists" -eq 1 ]; then
   use_legacy_attachment="$(bibites_legacy_attachment_mode "$stack_resources")"
   if [ "$use_legacy_attachment" = true ]; then
     template="$legacy_template"
+    legacy_ubuntu_ami="$(jq -er '
+      [.Stacks[0].Parameters[] | select(.ParameterKey == "UbuntuAmi")] |
+      if length != 1 then
+        error("missing or duplicate UbuntuAmi stack parameter")
+      else .[0] as $parameter |
+        if (($parameter.ResolvedValue? // "") |
+            test("^ami-[0-9a-f]{8,17}$")) then
+          $parameter.ResolvedValue
+        elif ($parameter.ParameterValue |
+              test("^ami-[0-9a-f]{8,17}$")) then
+          $parameter.ParameterValue
+        else error("UbuntuAmi has no pinned AMI identifier")
+        end
+      end
+    ' <<<"$stack_description")" || exit 1
+    bibites_require_resource_id "$legacy_ubuntu_ami" \
+      'legacy stack resolved UbuntuAmi' ami
   fi
   host_id="$(jq -er '[.StackResourceSummaries[] | select(
     .LogicalResourceId == "Host" and .ResourceType == "AWS::EC2::Instance") |
@@ -442,6 +460,19 @@ if [ "$stack_exists" -eq 1 ]; then
   IFS=$'\t' read -r bound_host_id launch_template_id host_launch_template_version \
     <<<"$(bibites_live_host_launch_template_binding "$stack_resources" "$live_host")"
   [ "$bound_host_id" = "$host_id" ]
+  if [ "$use_legacy_attachment" = true ]; then
+    live_host_image_id="$(jq -er --arg host "$host_id" '
+      [.Reservations[]?.Instances[]? | select(.InstanceId == $host)] |
+      if length == 1 then .[0].ImageId
+      else error("missing or duplicate live Host image")
+      end
+    ' <<<"$live_host")" || exit 1
+    bibites_require_resource_id "$live_host_image_id" 'live Host image' ami
+    [ "$live_host_image_id" = "$legacy_ubuntu_ami" ] || {
+      echo 'the legacy stack resolved UbuntuAmi differs from the live Host image' >&2
+      exit 1
+    }
+  fi
   if [ "$use_legacy_attachment" = true ] &&
      [ "$BIBITES_CREDENTIAL_PARAMETER_PREFIX" != /bibites-multiverse/cloud ]; then
     echo 'the legacy stack role has the fixed /bibites-multiverse/cloud credential boundary' >&2
@@ -493,7 +524,7 @@ printf '%s  %s\n' "$runtime_sha256" "$pointer_archive" | sha256sum -c - >/dev/nu
 legacy_previous_parameters=(
   InstanceType AvailabilityZone SubnetId VpcId ArtifactBucket ArtifactPrefix
   RuntimeFile RuntimeSha256 GameFile GameSha256 BepInExFile BepInExSha256
-  ManifestFile DataVolumeGiB RelayPrivateIp UbuntuAmi
+  ManifestFile DataVolumeGiB RelayPrivateIp
 )
 if [ "$use_legacy_attachment" = true ]; then
   parameters=()
@@ -501,6 +532,7 @@ if [ "$use_legacy_attachment" = true ]; then
     parameters+=("ParameterKey=$key,UsePreviousValue=true")
   done
   parameters+=(
+    "ParameterKey=UbuntuAmi,ParameterValue=$legacy_ubuntu_ami"
     "ParameterKey=OperationalRelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
     "ParameterKey=OperationalRelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
     "ParameterKey=OperationalCredentialParameterPrefix,ParameterValue=$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
@@ -575,6 +607,7 @@ if [ "$use_legacy_attachment" = true ]; then
     bibites_require_change_set_preserved_parameter \
       "$change_set_description" "$key" "$(stack_parameter "$key")"
   done
+  require_change_parameter UbuntuAmi "$legacy_ubuntu_ami"
   require_change_parameter OperationalRelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
   require_change_parameter OperationalRelayDomain "$BIBITES_RELAY_DOMAIN"
   require_change_parameter OperationalCredentialParameterPrefix \
