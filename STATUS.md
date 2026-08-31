@@ -95,7 +95,7 @@ Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` e
 hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
 already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the `fdb707e` downtime-restore sidecar,
 and since 2026-08-31 the five controlled Windows worlds on the operator's second machine (slots 9
-and 13–16) run the `25547bf` candidate of release `0.3.11`, so all six controlled Windows worlds speak 4.2. The six
+and 13–16) run release `0.3.11`, so all six controlled Windows worlds speak 4.2. The six
 cloud-world sidecars await the same update. This relay-first order means an old participant can
 omit the new proof, but no new participant must guess whether a refusal belongs to its current
 attempt.
@@ -283,8 +283,16 @@ the name flags, which leaves the never-answered name questions unanswered rather
 a decline nobody made. The setup wrapper's registry version entry was reconciled by hand
 afterwards. Release `0.3.11` ships the fix — the window passes a public name to the installer
 as one colon token, so an emptied box reaches the installer instead of stopping PowerShell —
-and running that release's setup over the second machine by the graphical path is the fix's
-outstanding end-to-end verification.
+and the second machine's in-place `0.3.11` upgrade verified it end to end the same day: the
+profile's stored declines prefilled both name boxes empty, exactly the `0.3.10` failure shape,
+and the setup completed, wrote its own registry entry (owning the hand-reconciled `0.3.10`
+one again), and returned all five worlds to the map. That upgrade surfaced the next defect in
+the same family: the setup rewrites each launcher profile's new per-world admission pair to
+installer defaults, so slot 9 came back `enforcing adaptive` until its
+`profile set --inbound-admission adaptive-shadow` was re-run and verified. Until a release
+carries `inboundAdmission` and `inboundPopulationLimit` through an upgrade the way it carries
+name, port, and headless, any world with a per-world admission choice needs `profile set`
+re-run after a setup upgrade.
 
 ### Species genealogy repair
 
@@ -322,7 +330,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run the `25547bf` candidate of release `0.3.11`. The six cloud-world sidecars await the same update. |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.11`. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
