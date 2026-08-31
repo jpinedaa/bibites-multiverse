@@ -164,9 +164,13 @@ func TestTheDenyListSuppressesTheViewAndNeverTheRecord(t *testing.T) {
 	stats := census(9, 1,
 		entry("Cyanea", "velox", 5, 1),
 		entry("Izus", "copedylanus", 4, 0))
+	stats.Keeper, stats.WorldName = "ada", "Tidepool"
 	loud := census(6, 0, entry("Rude", "namus", 6, 0))
 	loud.MigrationExclude = &wire.ExcludeList{Names: []string{"Basic bibite"}}
 	loud.ModVersion = "0.6.4"
+	// The two strings §33 B49 added are the peer's own, so a denied peer loses
+	// them with the rest of what it authored.
+	loud.Keeper, loud.WorldName = "Rude Keeper", "Rude World"
 
 	status := contractb.PeerStatus{
 		Epoch: 1, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
@@ -175,7 +179,7 @@ func TestTheDenyListSuppressesTheViewAndNeverTheRecord(t *testing.T) {
 			markupSlot(2, 1, 0, "peer-loud", loud),
 		},
 	}
-	a := newViewFixture(t, status, time.Second)
+	a := newRecognizedFixture(t, status, time.Second, time.Now().UnixMilli())
 	deny, err := NewDenyList(file)
 	if err != nil {
 		t.Fatalf("NewDenyList: %v", err)
@@ -210,6 +214,17 @@ func TestTheDenyListSuppressesTheViewAndNeverTheRecord(t *testing.T) {
 	}
 	if shown.Slots[1].ModVersion != Suppressed {
 		t.Fatal("a denied peer's version string still renders")
+	}
+	// ...and the two names it chose about ITSELF go BLANK rather than marked:
+	// they are the only fields a reader groups by, so a marker would be a shared
+	// identity. See suppressedName and the test below.
+	if shown.Slots[1].Keeper != "" || shown.Slots[1].WorldName != "" {
+		t.Fatalf("a denied peer keeps the two strings it chose about itself: keeper %q, "+
+			"world %q", shown.Slots[1].Keeper, shown.Slots[1].WorldName)
+	}
+	if shown.Slots[0].Keeper != "ada" || shown.Slots[0].WorldName != "Tidepool" {
+		t.Fatalf("an undenied world lost its name: keeper %q, world %q",
+			shown.Slots[0].Keeper, shown.Slots[0].WorldName)
 	}
 	if !shown.Slots[1].Live || shown.Slots[1].Slot != 2 {
 		t.Fatal("suppression hid a world's liveness; that is Risk 5, not moderation")
@@ -373,6 +388,211 @@ func TestTheDenyListSuppressesAQuotedParentName(t *testing.T) {
 		if !strings.Contains(body, "Beta") || !strings.Contains(body, "Delta two") {
 			t.Fatalf("%s suppressed a row instead of the name it quoted:\n%s", path, body)
 		}
+	}
+}
+
+// TestAKeeperOrWorldEntrySuppressesOneNameAndNotTheWorld covers the two rule
+// prefixes §33 B49's strings needed, and the reason they are not just
+// `peer:` entries: a keeper handle is one name, and a peer entry takes down the
+// world's census, its versions and its refusal text with it. An operator asked
+// to choose between ignoring a handle and hiding a working world has no usable
+// tool at all, so `keeper:` and `world:` are the narrow one.
+func TestAKeeperOrWorldEntrySuppressesOneNameAndNotTheWorld(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "deny.txt")
+	// The doubled space is deliberate: entries match on the NORMALIZED string on
+	// both sides, exactly as a species entry does.
+	write(t, file, "# names, not peers\nkeeper:Rude  Handle\nworld:Rude World\n")
+
+	loud := census(6, 0, entry("Izus", "velox", 6, 0))
+	loud.Keeper, loud.WorldName = "Rude Handle", "Rude World"
+	quiet := census(9, 0, entry("Cyanea", "borealis", 9, 0))
+	quiet.Keeper, quiet.WorldName = "ada", "Tidepool"
+	// A SECOND world under the same handle. A keeper entry is about the name and
+	// not about one slot, so both lose it.
+	second := census(4, 0, entry("Izus", "gracilis", 4, 0))
+	second.Keeper, second.WorldName = "Rude Handle", "Saltmarsh"
+
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{
+			markupSlot(1, 0, 0, "peer-quiet", quiet),
+			markupSlot(2, 1, 0, "peer-loud", loud),
+			markupSlot(3, 2, 0, "peer-second", second),
+		},
+	}
+	a := newRecognizedFixture(t, status, time.Second, time.Now().UnixMilli())
+	deny, err := NewDenyList(file)
+	if err != nil {
+		t.Fatalf("NewDenyList: %v", err)
+	}
+	a.deny = deny
+
+	// The matchers on their own, including the whitespace rule on both sides.
+	if !deny.DeniesKeeper("Rude Handle") || !deny.DeniesKeeper("Rude   Handle") {
+		t.Fatal("a keeper entry does not match the handle the page shows")
+	}
+	if !deny.DeniesWorld("Rude World") {
+		t.Fatal("a world entry does not match the name the page shows")
+	}
+	// A keeper entry is not a world entry and neither is a species entry: three
+	// namespaces, and a line in one must not reach the others.
+	if deny.DeniesWorld("Rude Handle") || deny.DeniesKeeper("Rude World") {
+		t.Fatal("a keeper entry and a world entry match each other's namespace")
+	}
+	if deny.DeniesSpecies("Rude", "Handle") || deny.DeniesKeeper("ada") {
+		t.Fatal("a keeper entry reached the species list, or an unrelated handle")
+	}
+	// THERE IS NO ONE-WORD RULE HERE. A handle is one string, and a partial match
+	// would be a filter rather than a moderation decision.
+	if deny.DeniesKeeper("Rude") || deny.DeniesWorld("Rude") {
+		t.Fatal("a keeper or world entry matched on a prefix; that suppresses names nobody " +
+			"looked at")
+	}
+
+	shown := deny.ApplyStatus(a.StatusView())
+	if shown.Slots[1].Keeper != "" || shown.Slots[1].WorldName != "" {
+		t.Fatalf("the denied handle and world name still render: %q / %q",
+			shown.Slots[1].Keeper, shown.Slots[1].WorldName)
+	}
+	// AND THE WORLD IS WHOLE. Its id, its liveness, its population and its
+	// census are the archive's and the relay's own numbers, and a name taken
+	// down is not a world hidden (Risk 5).
+	if shown.Slots[1].PeerID != "peer-loud" || !shown.Slots[1].Live {
+		t.Fatalf("suppressing a name hid the world: %+v", shown.Slots[1])
+	}
+	if shown.Slots[1].Species[0].GenericName != "Izus" {
+		t.Fatalf("suppressing a handle took the census with it: %q",
+			shown.Slots[1].Species[0].GenericName)
+	}
+	// The second world under the same handle loses the handle and KEEPS its own
+	// name, which nobody denied.
+	if shown.Slots[2].Keeper != "" {
+		t.Fatalf("the same handle on another world still renders: %q", shown.Slots[2].Keeper)
+	}
+	if shown.Slots[2].WorldName != "Saltmarsh" {
+		t.Fatalf("a world nobody denied lost its name: %q", shown.Slots[2].WorldName)
+	}
+	// And the world nobody named in the file is untouched on both fields.
+	if shown.Slots[0].Keeper != "ada" || shown.Slots[0].WorldName != "Tidepool" {
+		t.Fatalf("an unrelated world was suppressed: %+v", shown.Slots[0])
+	}
+
+	// One join in one place: the served JSON says the same thing the view does.
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+	body := get(t, ts.URL+"/api/status")
+	if strings.Contains(body, "Rude Handle") || strings.Contains(body, "Rude World") {
+		t.Fatalf("/api/status still renders a denied name:\n%s", body)
+	}
+	if !strings.Contains(body, "Saltmarsh") || !strings.Contains(body, "Tidepool") {
+		t.Fatalf("/api/status suppressed a name nobody denied:\n%s", body)
+	}
+}
+
+// TestASuppressedKeeperIsBlankedAndNeverASharedName is the rule the marker got
+// wrong for these two fields alone.
+//
+// Every other denied string on this surface renders as "[suppressed]", and it
+// should: a page that dropped a census row would be lying about how many species
+// a world holds. But keeper and worldName are the only fields anything GROUPS
+// BY — the landing page's leaders module gathers worlds on the exact handle —
+// so a marker is not a marker there, it is a NAME, shared by every moderated
+// participant on the map: one row summing strangers' simulated time together,
+// capable of ranking above the people who chose their own handles, with every
+// world under it reading "kept by [suppressed]".
+//
+// Blank is the state the whole system already agrees about: absence is UNKNOWN
+// (§33, §10.1), the page falls back to the world's slot, and the leaders module
+// skips a world with no keeper. So a suppressed name is NO NAME.
+func TestASuppressedKeeperIsBlankedAndNeverASharedName(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "deny.txt")
+	// TWO different denied handles, on three worlds, plus a denied PEER. Every
+	// one of them has to end up unnamed on its own, and none of them may end up
+	// sharing a name with any other.
+	write(t, file, "keeper:Rude Handle\nkeeper:Worse Handle\nworld:Rude World\npeer:peer-loud\n")
+
+	first := census(6, 0, entry("Izus", "velox", 6, 0))
+	first.Keeper, first.WorldName = "Rude Handle", "Rude World"
+	second := census(4, 0, entry("Izus", "gracilis", 4, 0))
+	second.Keeper, second.WorldName = "Worse Handle", "Saltmarsh"
+	loud := census(3, 0, entry("Izus", "minor", 3, 0))
+	loud.Keeper, loud.WorldName = "Third Handle", "Third World"
+	quiet := census(9, 0, entry("Cyanea", "borealis", 9, 0))
+	quiet.Keeper, quiet.WorldName = "ada", "Tidepool"
+
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 4, Height: 1}, SlotCount: 4,
+		Slots: []contractb.SlotInfo{
+			markupSlot(1, 0, 0, "peer-quiet", quiet),
+			markupSlot(2, 1, 0, "peer-first", first),
+			markupSlot(3, 2, 0, "peer-second", second),
+			markupSlot(4, 3, 0, "peer-loud", loud),
+		},
+	}
+	a := newRecognizedFixture(t, status, time.Second, time.Now().UnixMilli())
+	deny, err := NewDenyList(file)
+	if err != nil {
+		t.Fatalf("NewDenyList: %v", err)
+	}
+	a.deny = deny
+
+	shown := deny.ApplyStatus(a.StatusView())
+	for _, i := range []int{1, 2, 3} {
+		v := shown.Slots[i]
+		if v.Keeper == Suppressed || v.WorldName == Suppressed {
+			t.Fatalf("slot %d renders the marker as a name: keeper %q, world %q. Two "+
+				"moderated participants would then share one identity", v.Slot, v.Keeper, v.WorldName)
+		}
+		if v.Keeper != "" {
+			t.Fatalf("slot %d still publishes a denied keeper: %q", v.Slot, v.Keeper)
+		}
+	}
+	// Suppression took the NAMES and nothing else: three whole worlds, still
+	// live, still counted, still reporting a census (Risk 5).
+	for _, i := range []int{1, 2, 3} {
+		if v := shown.Slots[i]; !v.Live || len(v.Species) == 0 {
+			t.Fatalf("suppressing a handle hid the world in slot %d: %+v", v.Slot, v)
+		}
+	}
+	// The world nobody denied keeps both of its names.
+	if shown.Slots[0].Keeper != "ada" || shown.Slots[0].WorldName != "Tidepool" {
+		t.Fatalf("an unrelated world was suppressed: %+v", shown.Slots[0])
+	}
+
+	// THE GROUPING ITSELF, at the seam the page reads. The leaders module keys on
+	// the served `keeper` string, so what decides this is whether the JSON
+	// carries one: a blanked field is omitted (omitempty), an omitted field is
+	// falsy in the browser, and the module's first act is to skip a world that
+	// has none.
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+	body := get(t, ts.URL+"/api/status")
+	// The marker is still right for the peer id beside them — that field is an
+	// address nothing groups people by, and dropping it would hide a world.
+	for _, forbidden := range []string{
+		`"keeper":"` + Suppressed + `"`, `"worldName":"` + Suppressed + `"`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("/api/status serves %s, a name every moderated world would share:\n%s",
+				forbidden, body)
+		}
+	}
+	var view Status
+	if err := json.Unmarshal([]byte(body), &view); err != nil {
+		t.Fatalf("decode /api/status: %v", err)
+	}
+	named := map[string]int{}
+	for _, v := range view.Slots {
+		if v.Keeper != "" {
+			named[v.Keeper]++
+		}
+	}
+	if len(named) != 1 || named["ada"] != 1 {
+		t.Fatalf("the served keepers are %v, want only the one nobody denied", named)
+	}
+	if !strings.Contains(recognitionRegion(t), "if (!k) continue;") {
+		t.Fatal("the leaders module no longer skips a world with no keeper, so a blanked " +
+			"handle would be gathered into a group of its own")
 	}
 }
 

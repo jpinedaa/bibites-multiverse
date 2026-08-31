@@ -244,6 +244,46 @@ type SlotView struct {
 	// it changes nothing about how the world is treated on the map.
 	Broadcast bool `json:"broadcast,omitempty"`
 
+	// WHO KEEPS THIS WORLD (contract-b-m4.md §33, B49), AND IT IS DELIBERATELY
+	// OUTSIDE THE STALENESS GATE BELOW.
+	//
+	// Keeper and WorldName arrive on the stats block, but they are not stats:
+	// they are the participant's own configuration, published whether or not a
+	// game is connected, and they do not become untrue when the block carrying
+	// them ages. Rule 3 exists so that a population from a world that went dark
+	// an hour ago is not rendered as current — and B49 exists precisely so an
+	// operator can NAME the world that went dark. Ageing the name out with the
+	// number would delete the answer at the only moment the question is asked.
+	// So all four below are served from the archive's durable memory of the peer
+	// (recognition.go), keyed on PeerID, on the same footing as PeerID and
+	// GameVersion above.
+	//
+	// Both strings are UNTRUSTED DISPLAY TEXT chosen by a stranger, on exactly
+	// the footing a census name is (§13 item 7, §33 B49): a renderer escapes
+	// them, and nothing here keys, routes, matches or deduplicates on either.
+	// Absent is UNKNOWN and never anonymous — a world that named no keeper has
+	// not said who runs it, and no reader may substitute a slot number or a peer
+	// id for the name (§10.1).
+	Keeper    string `json:"keeper,omitempty"`
+	WorldName string `json:"worldName,omitempty"`
+	// FirstSeenMs is when THIS ARCHIVE first saw this peer in a PEER_STATUS. It
+	// is not when the world was created and this page never calls it that:
+	// nothing on either wire says when a simulation began. 0 is UNKNOWN — an
+	// archive whose recognition sidecar was lost, or a peer seen for the first
+	// time before the store existed — and a reader says so rather than guessing.
+	FirstSeenMs int64 `json:"firstSeenMs,omitempty"`
+	// SimulatedTimeMax is the HIGH-WATER MARK of this peer's simulatedTime in
+	// simulated seconds, which is a different question from SimulatedTime below.
+	// A restore can rewind the live clock; what the world already simulated does
+	// not un-happen, so the remembered value never falls. nil is UNKNOWN: no
+	// stats block this archive ever saw carried a simulatedTime for this peer.
+	SimulatedTimeMax *float64 `json:"simulatedTimeMax,omitempty"`
+	// Operator is true for a peer the DEPLOYMENT declares as its own, the same
+	// trust model Broadcast has (see Config.OperatorPeerIDs). It is never a
+	// world's own claim: nothing on the wire carries it, because a claim anybody
+	// could make on an unauthenticated block would be worth nothing.
+	Operator bool `json:"operator,omitempty"`
+
 	// StatsKnown is false when no stats block has arrived or the one that did is
 	// older than statsStaleMs. Every stat below is then UNKNOWN, and the page
 	// says so rather than showing a stale number as state.
@@ -550,9 +590,23 @@ func (a *Archive) StatusView() Status {
 			ExportEdges:    si.ExportEdges,
 			LastRefusal:    si.LastRefusal,
 			Broadcast:      a.cfg.BroadcastPeerID != "" && si.PeerID == a.cfg.BroadcastPeerID,
+			Operator:       a.operatorPeers[si.PeerID],
 		}
 		if v.ExportEdges == nil {
 			v.ExportEdges = []string{}
+		}
+		// WHO KEEPS THIS WORLD, ABOVE THE STALENESS GATE ON PURPOSE (§33, B49).
+		// The identity is served from the archive's durable memory of the peer
+		// rather than from this frame's stats block, so a dark world keeps its
+		// name — which is the case B49 was written for. See SlotView's own
+		// comment for the whole argument.
+		if rec, ok := a.recognition.lookup(si.PeerID); ok {
+			v.Keeper, v.WorldName = rec.Keeper, rec.WorldName
+			v.FirstSeenMs = rec.FirstSeenMs
+			if rec.HaveSimulatedTime {
+				simMax := rec.MaxSimulatedTime
+				v.SimulatedTimeMax = &simMax
+			}
 		}
 		if si.Live {
 			out.Totals.LiveSlots++

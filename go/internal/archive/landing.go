@@ -106,6 +106,25 @@ letter-spacing:.1em;text-transform:uppercase}.snapv{margin-top:6px;font-size:28p
 .statusdot.ok{background:var(--green);box-shadow:0 0 0 5px rgba(102,224,172,.12);animation:statuspulse 2.4s ease-out infinite}
 .statusdot.down{background:var(--dark);box-shadow:0 0 0 5px rgba(232,108,118,.1)}
 .snapnote{margin-top:3px;color:var(--muted);font-size:12px}
+/* the two participant-recognition cards. They reuse the principle card's frame
+   and the walkthrough's numbered rhythm rather than introducing a third: one is
+   a short list of worlds, the other a short ranking of people, and both are read
+   at the same glance as the snapshot strip above them. */
+.recog{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.recogcard{padding:28px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,var(--surface2),var(--surface))}
+.recogcard h3{font-size:22px;margin:0 0 6px}
+.recogcard>p{margin:0 0 20px;color:var(--muted);font-size:14px}
+.recoglist{margin:0;padding:0;list-style:none}
+.recoglist li{display:flex;align-items:baseline;gap:13px;padding:14px 0;border-top:1px solid var(--line)}
+.recoglist li:first-child{border-top:0;padding-top:0}.recoglist li:last-child{padding-bottom:0}
+.recogrank{flex:0 0 auto;min-width:24px;color:var(--green);font:700 13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.recogmain{flex:1 1 auto;min-width:0}
+.recogname{display:block;font-weight:700;overflow-wrap:anywhere}
+.recogmeta{display:block;margin-top:4px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.recogfig{flex:0 0 auto;color:var(--text);font:700 13px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.recogtag{margin-left:8px;padding:1px 8px;border:1px solid var(--line);border-radius:999px;color:var(--blue);
+font:700 10px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.09em;text-transform:uppercase;font-style:normal}
+.recogempty{color:var(--muted);font-size:14px}
 .section{padding-block:64px 0}.section:last-child{padding-bottom:64px}.sectionhd{max-width:720px;margin-bottom:32px}.kicker{color:var(--green);
 font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
 h2{font-size:clamp(36px,5vw,60px);line-height:1.03;letter-spacing:-.045em;margin:12px 0 18px}
@@ -159,7 +178,7 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tinybib{animation:none;offset-distance:65%;opacity:1}.statusdot.ok{animation:none}}
 @media(max-width:900px){.hero{grid-template-columns:1fr;gap:48px;padding-top:72px}.topology{min-height:410px}.snapshot{grid-template-columns:1fr 1fr}
 .metric:nth-child(3){border-left:0;border-top:1px solid var(--line)}.metric:nth-child(4){border-top:1px solid var(--line)}.principles{grid-template-columns:1fr}
-.principle{min-height:0}.flow{grid-template-columns:1fr 1fr}.flowitem:nth-child(3){border-left:0;border-top:1px solid var(--line)}
+.principle{min-height:0}.recog{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}.flowitem:nth-child(3){border-left:0;border-top:1px solid var(--line)}
 .flowitem:nth-child(4){border-top:1px solid var(--line)}.joinbox{grid-template-columns:1fr}
 /* the card is one column here, so the explicit placement above has to go with
    it: a grid-column:2 against a single-column card would open an implicit
@@ -173,7 +192,7 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
 .snapshot{margin-top:-20px;grid-template-columns:1fr 1fr}.snapstate,.metric{min-height:96px;padding:17px}.snapv{font-size:23px}.snapstate .snapv{font-size:15px}
 .snapstate{grid-column:1/-1}.snapshot .metric{border-top:1px solid var(--line)}.snapshot .metric:nth-child(2),.snapshot .metric:nth-child(4){border-left:0}.snapshot .metric:nth-child(3){border-left:1px solid var(--line)}.snapshot .metric:nth-child(4){grid-column:1/-1}
 .section{padding-block:44px 0}.section:last-child{padding-bottom:44px}.sectionhd{margin-bottom:26px}.flow{grid-template-columns:1fr}.flowitem+.flowitem{border-left:0;border-top:1px solid var(--line)}
-.flowitem:not(:last-child):after{content:"↓";right:24px;top:auto;bottom:-13px}.joincopy,.trust,#join .walk{padding:30px 24px}.faq{grid-template-columns:1fr}.footin{align-items:flex-start;flex-direction:column}}
+.flowitem:not(:last-child):after{content:"↓";right:24px;top:auto;bottom:-13px}.joincopy,.trust,#join .walk{padding:30px 24px}.recogcard{padding:26px 22px}.faq{grid-template-columns:1fr}.footin{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
@@ -219,6 +238,22 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
     <div class="metric"><span class="snapk">Connected worlds</span><strong class="snapv" id="worlds">—</strong><span class="snapnote">independent simulations</span></div>
     <div class="metric"><span class="snapk">Known population</span><strong class="snapv" id="population">—</strong><span class="snapnote">living Bibites</span></div>
     <div class="metric"><span class="snapk">Migrations</span><strong class="snapv" id="migrations">—</strong><span class="snapnote" id="rate">recorded crossings</span></div>
+  </section>
+
+  <section class="shell section" id="participants" aria-labelledby="participantstitle">
+    <div class="sectionhd"><span class="kicker">Who is on the map</span><h2 id="participantstitle">Worlds have keepers.</h2><p>Every name here was chosen by the participant who runs that world. A world that has named nobody is listed by its slot, and this page never invents a name for it.</p></div>
+    <div class="recog">
+      <article class="recogcard">
+        <h3>New on the map</h3>
+        <p>The most recently reserved places on the grid.</p>
+        <ul class="recoglist" id="newworlds"><li class="recogempty">Waiting for the first relay status…</li></ul>
+      </article>
+      <article class="recogcard">
+        <h3>Simulation leaders</h3>
+        <p>Keepers ranked by how much simulated time their worlds have produced.</p>
+        <ol class="recoglist" id="leaders"><li class="recogempty">Waiting for the first relay status…</li></ol>
+      </article>
+    </div>
   </section>
 
   <section class="shell section" id="game">
@@ -284,6 +319,171 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
 (function(){
   function n(v){ return v == null ? "unknown" : Number(v).toLocaleString(); }
   function age(ms){ var s=Math.max(0,Math.round(ms/1000)); return s<60?s+" seconds ago":Math.floor(s/60)+" minutes ago"; }
+
+/* ====================== PARTICIPANT RECOGNITION — BEGIN =====================
+   Every string this region draws was chosen by a participant and reached this
+   page on an unauthenticated block (contract-b-m4.md §33, B49; §13 item 7). The
+   escaping obligation is the renderer's own and the contract says so, so this
+   region is FENCED and the property that makes the defect impossible is asserted
+   over the fence rather than over the behaviour: NOTHING IN HERE ASSIGNS MARKUP.
+   Names reach the DOM through createElement and textContent, which cannot parse
+   markup at all, so a world called "<img src=x onerror=alert(1)>" is a world
+   with a silly name and nothing else.
+
+   The two modules answer the two questions the map could not answer before: who
+   just arrived, and whose worlds have run the longest. Both read the SAME
+   /api/status the snapshot strip above them does — one source, no second poll. */
+  function node(tag, cls, text){
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+  // Emptying by hand rather than by assigning an empty markup string: the rule
+  // above is a property of the WHOLE region, and a region that names no
+  // markup-parsing API anywhere is a region a test can check.
+  function fill(el, rows){
+    if (!el) return;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    for (var i = 0; i < rows.length; i++) el.appendChild(rows[i]);
+  }
+  function note(text){ return node("li", "recogempty", text); }
+  function row(rank, title, meta, figure, operator){
+    var li = document.createElement("li");
+    if (rank != null) li.appendChild(node("span", "recogrank", rank));
+    var main = node("div", "recogmain");
+    var name = node("span", "recogname", title);
+    // A DEPLOYMENT claim about the peer and never the world's own (see
+    // Config.OperatorPeerIDs), which is why it is drawn by this page and not
+    // carried as text from the block.
+    if (operator) name.appendChild(node("i", "recogtag", "operator"));
+    main.appendChild(name);
+    main.appendChild(node("span", "recogmeta", meta));
+    li.appendChild(main);
+    if (figure != null) li.appendChild(node("div", "recogfig", figure));
+    return li;
+  }
+  // simulatedTime is simulated SECONDS (§6.3.1: timeScale is simulated seconds
+  // per real second), so days are seconds and nothing else. One decimal, because
+  // this is a public headline and not an instrument.
+  function simDays(seconds){ return (seconds/86400).toFixed(1)+" sim-days"; }
+  // firstSeenMs is when THIS ARCHIVE first saw the peer, which is why the label
+  // says joined and not created. 0 is unknown — a sidecar that was lost, or a
+  // peer already on the map before the archive remembered anybody — and an
+  // honest dash beats a confident date.
+  //
+  // NOW IS THE PAYLOAD'S OWN generatedAtMs AND NEVER THE VIEWER'S CLOCK. Both
+  // halves of this subtraction have to be read off the SAME clock: firstSeenMs
+  // is the archive's, and a viewer whose machine is a day fast or an hour behind
+  // would otherwise read "joined 24 hours ago" for a world that arrived a minute
+  // ago, or have a negative age clamped to "just now" for one that has been here
+  // all week. The payload carries the archive's clock on every poll, so the page
+  // has no reason to guess with the reader's — and a test asserts that this
+  // region reads no browser clock at all.
+  function joined(ms, nowMs){
+    if (!ms || !nowMs) return "joined —";
+    var s = Math.max(0, Math.round((nowMs - ms)/1000));
+    if (s < 120) return "joined just now";
+    if (s < 5400) return "joined "+Math.round(s/60)+" minutes ago";
+    if (s < 172800) return "joined "+Math.round(s/3600)+" hours ago";
+    return "joined "+Math.round(s/86400)+" days ago";
+  }
+  // A world that named itself is called by its name; one that did not is called
+  // by its seat, which is a fact rather than a substitute identity (§33's
+  // "unknown is not anonymous").
+  function worldLabel(v){
+    var name = (v.worldName || "").trim();
+    return name !== "" ? name : "slot "+v.slot;
+  }
+  function place(v){
+    return v.position ? "position ("+v.position.col+","+v.position.row+")" : "position —";
+  }
+  var recogSeen = false;
+  // nowMs is the ARCHIVE's clock, off the same payload the rows come from. See
+  // joined() for why the reader's own is not usable here.
+  function renderRecognition(slots, nowMs){
+    recogSeen = true;
+    // SLOT NUMBERS ONLY EVER GROW (§7.3: a reserved slot is never reused), so
+    // the highest three are the newest three. No arrival clock is needed for
+    // the ordering, which is what makes this honest on an archive that has
+    // forgotten when somebody joined.
+    var newest = slots.slice().sort(function(a,b){ return b.slot - a.slot; }).slice(0,3);
+    var rows = [];
+    for (var i = 0; i < newest.length; i++){
+      var v = newest[i], bits = [];
+      if (v.keeper) bits.push("kept by "+v.keeper);
+      bits.push(place(v));
+      bits.push(joined(v.firstSeenMs, nowMs));
+      rows.push(row(null, worldLabel(v), bits.join(" · "), null, v.operator));
+    }
+    fill(document.getElementById("newworlds"),
+      rows.length ? rows : [note("No world has reserved a place on the map yet.")]);
+
+    // GROUPED ON THE EXACT STRING, because that is the only thing a keeper
+    // handle is: two participants who typed the same handle are one row here and
+    // the contract is explicit that this is not an identity (§33, "a label,
+    // never a key"). A null-prototype map so a handle like "constructor" is a
+    // key and not a surprise. Dark worlds count — their simulated time is
+    // remembered by the archive and did not stop having happened.
+    var byKeeper = Object.create(null), order = [];
+    for (var j = 0; j < slots.length; j++){
+      var s = slots[j], k = s.keeper;
+      // A WORLD WITH NO KEEPER IS NOT A GROUP. An absent handle is UNKNOWN
+      // (§10.1, §33) — nobody said who runs that world — and unknown is not a
+      // shared identity, so it is skipped here rather than gathered into a row.
+      // The operator's deny list blanks a suppressed handle for exactly this
+      // reason (denylist.go, suppressedName): a marker string would be a name
+      // every moderated world was published under, together, on one row.
+      if (!k) continue;
+      var g = byKeeper[k];
+      if (!g){
+        g = byKeeper[k] = {keeper: k, worlds: 0, sim: 0, haveSim: false, operator: false};
+        order.push(g);
+      }
+      g.worlds++;
+      // ABSENT IS NOT ZERO, and the sum only counts what is actually known. A
+      // world whose simulatedTimeMax never reached this archive contributes
+      // nothing to the total AND does not make the total a measurement of
+      // itself; a keeper NONE of whose worlds published one has no total at all
+      // (haveSim stays false) and is drawn below as a dash.
+      if (typeof s.simulatedTimeMax === "number"){
+        g.sim += s.simulatedTimeMax;
+        g.haveSim = true;
+      }
+      if (s.operator) g.operator = true;
+    }
+    order.sort(function(a,b){
+      // A KEEPER WITH NO KNOWN TIME SORTS BELOW EVERY KEEPER WITH ONE, rather
+      // than beside a real 0.0: this list is ranked by simulated time, and a
+      // number nobody published is not a low score.
+      if (a.haveSim !== b.haveSim) return a.haveSim ? -1 : 1;
+      return (b.sim - a.sim) || (b.worlds - a.worlds) || (a.keeper < b.keeper ? -1 : 1);
+    });
+    var ranked = [], position = 0;
+    for (var r = 0; r < order.length; r++){
+      var e = order[r];
+      // LISTED, AND NOT RANKED. The card says these are keepers ranked by
+      // simulated time, so a keeper this archive holds no simulated time for
+      // gets no position in that ranking — an empty rank cell that keeps the
+      // rows aligned, and a dash where the figure would be. They are still on
+      // the page: they are on the map, and leaving them off would hide a
+      // participant over a number the archive is missing.
+      var rank = "", figure = "—";
+      if (e.haveSim){ position++; rank = String(position); figure = simDays(e.sim); }
+      ranked.push(row(rank, e.keeper,
+        e.worlds === 1 ? "1 world" : e.worlds+" worlds", figure, e.operator));
+    }
+    fill(document.getElementById("leaders"), ranked.length ? ranked
+      : [note("Nobody has put a name to a world yet. Set a keeper handle in your world's configuration and it appears here.")]);
+  }
+  function recognitionUnavailable(){
+    if (recogSeen) return; // keep the last good answer rather than blanking it
+    var rows = [note("Unavailable while this page recovers.")];
+    fill(document.getElementById("newworlds"), rows);
+    fill(document.getElementById("leaders"), [note("Unavailable while this page recovers.")]);
+  }
+/* ======================= PARTICIPANT RECOGNITION — END ==================== */
+
   async function refresh(){
     try{
       var r=await fetch("/api/status",{cache:"no-store"});
@@ -297,10 +497,12 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
       document.getElementById("rate").textContent=t.perMinute==null?"recorded crossings":Number(t.perMinute).toFixed(1)+" per minute";
       document.getElementById("age").textContent=d.haveStatus?"Updated "+age(d.statusAgeMs):"Waiting for the first relay status";
       document.getElementById("status").textContent=!d.relayConnected?"Archive disconnected":!d.haveStatus?"Waiting for the map":t.liveSlots===0?"Online · no worlds connected":"Online · migrations flowing";
+      renderRecognition(d.slots||[], d.generatedAtMs);
     }catch(e){
       document.getElementById("statusdot").className="statusdot down";
       document.getElementById("status").textContent="Live snapshot unavailable";
       document.getElementById("age").textContent="The map can continue while this page recovers";
+      recognitionUnavailable();
     }
   }
   refresh(); setInterval(refresh,15000);

@@ -622,3 +622,192 @@ func TestBroadcastPeerIsNamedByTheDeploymentAndNeverGuessed(t *testing.T) {
 		}
 	}
 }
+
+// newRecognizedFixture is newViewFixture plus the fold the frame handler does on
+// the way in: the identity store is fed from the SAME frame, because the view
+// reads the STORE and never the block (§33, B49; recognition.go).
+func newRecognizedFixture(t *testing.T, status contractb.PeerStatus,
+	statsAge time.Duration, seenAtMs int64) *Archive {
+
+	t.Helper()
+	a := newViewFixture(t, status, statsAge)
+	a.recognition.observe(a.status, seenAtMs)
+	return a
+}
+
+// TestAWorldsKeeperAndNameOutliveTheBlockThatCarriedThem is the whole of stage
+// A2's serving rule and it is DELIBERATELY a violation-shaped test: every other
+// field on the stats block ages out under §10.1 rule 3, and these four must not.
+//
+// B49 exists so an operator can say WHOSE world went dark. A name that went
+// unknown at the same moment the population did would delete the answer at the
+// only moment the question gets asked, so the identity is served from the
+// archive's durable memory of the peer and sits beside peerId and gameVersion
+// rather than inside the staleness gate.
+func TestAWorldsKeeperAndNameOutliveTheBlockThatCarriedThem(t *testing.T) {
+	fresh := &contractb.PeerStats{
+		Population: contractb.IntPtr(231), Keeper: "ada", WorldName: "Tidepool",
+		SimulatedTime: f64(864_000),
+	}
+	status := contractb.PeerStatus{
+		Epoch: 3, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{
+			markupSlot(1, 0, 0, "peer-ada", fresh),
+			markupSlot(2, 1, 0, "peer-anon", &contractb.PeerStats{Population: contractb.IntPtr(4)}),
+		},
+	}
+
+	live := newRecognizedFixture(t, status, time.Second, 1_700_000_000_000).StatusView()
+	v := live.Slots[0]
+	if !v.StatsKnown || v.Keeper != "ada" || v.WorldName != "Tidepool" {
+		t.Fatalf("a live world does not carry its own name: %+v", v)
+	}
+	if v.FirstSeenMs != 1_700_000_000_000 {
+		t.Fatalf("firstSeenMs = %d, want the archive's first sighting", v.FirstSeenMs)
+	}
+	if v.SimulatedTimeMax == nil || *v.SimulatedTimeMax != 864_000 {
+		t.Fatalf("simulatedTimeMax = %v, want 864000", v.SimulatedTimeMax)
+	}
+	// A world that named nobody is UNKNOWN and never anonymous: no keeper, no
+	// world name, and no substitute made up out of its slot or its peer id.
+	if u := live.Slots[1]; u.Keeper != "" || u.WorldName != "" {
+		t.Fatalf("an unnamed world was given an identity: %+v", u)
+	} else if u.FirstSeenMs == 0 {
+		t.Fatal("an unnamed world was not recorded as SEEN; the absence of a name is not the " +
+			"absence of a record")
+	}
+
+	// THE CASE THE FIELD EXISTS FOR. Five minutes on, the block is history: the
+	// population, the census and the settings all read unknown, and the identity
+	// does not move.
+	stale := newRecognizedFixture(t, status, 5*time.Minute, 1_700_000_000_000).StatusView()
+	s := stale.Slots[0]
+	if s.StatsKnown || s.Population != nil {
+		t.Fatalf("a five-minute-old block still reads as state: %+v", s)
+	}
+	if s.Keeper != "ada" || s.WorldName != "Tidepool" {
+		t.Fatalf("the world lost its name when its stats went stale (%+v); naming a dark slot "+
+			"is the case B49 was written for", s)
+	}
+	if s.FirstSeenMs != 1_700_000_000_000 || s.SimulatedTimeMax == nil {
+		t.Fatalf("the durable half of the identity aged out with the block: %+v", s)
+	}
+
+	// A WORLD THAT WENT DARK ENTIRELY — its seat reserved, nothing publishing on
+	// it, no stats block at all — keeps everything the archive remembers.
+	gone := markupSlot(1, 0, 0, "peer-ada", nil)
+	gone.Live, gone.ModConnected = false, false
+	gone.DarkSinceMs = time.Now().Add(-time.Hour).UnixMilli()
+	a := newRecognizedFixture(t, status, time.Second, 1_700_000_000_000)
+	a.mu.Lock()
+	a.status.Slots = []contractb.SlotInfo{gone}
+	a.mu.Unlock()
+	a.recognition.observe(contractb.PeerStatus{Slots: []contractb.SlotInfo{gone}},
+		time.Now().UnixMilli())
+	d := a.StatusView().Slots[0]
+	if d.Live || d.StatsKnown {
+		t.Fatalf("the fixture's dark world is not dark: %+v", d)
+	}
+	if d.Keeper != "ada" || d.WorldName != "Tidepool" || d.SimulatedTimeMax == nil {
+		t.Fatalf("a dark world lost its identity: %+v", d)
+	}
+	if d.FirstSeenMs != 1_700_000_000_000 {
+		t.Fatalf("a dark world's arrival time moved to %d", d.FirstSeenMs)
+	}
+
+	// The JSON reader's side: the exact keys, and an unnamed world carrying none
+	// of them rather than a run of empty strings.
+	body, err := json.Marshal(live)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{`"keeper"`, `"worldName"`, `"firstSeenMs"`, `"simulatedTimeMax"`} {
+		if !strings.Contains(string(body), key) {
+			t.Fatalf("/api/status does not publish %s:\n%s", key, body)
+		}
+	}
+	anon, err := json.Marshal(live.Slots[1])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{`"keeper"`, `"worldName"`} {
+		if strings.Contains(string(anon), key) {
+			t.Fatalf("an unnamed world publishes %s; absent means unknown:\n%s", key, anon)
+		}
+	}
+}
+
+// TestOperatorWorldsAreDeclaredByTheDeploymentAndNeverClaimed. Same trust model
+// as the broadcast peer, and for the same reason: nothing on either wire says
+// whose world a world is, so a claim on an unauthenticated block would be worth
+// nothing. The deployment says it or nobody does.
+func TestOperatorWorldsAreDeclaredByTheDeploymentAndNeverClaimed(t *testing.T) {
+	build := func(ids ...string) Status {
+		t.Helper()
+		a, err := New(Config{
+			DataDir: t.TempDir(), PeerID: "archive-test", RelayURL: "ws://test",
+			OperatorPeerIDs: ids,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		t.Cleanup(func() { _ = a.Close() })
+		slots := []contractb.SlotInfo{
+			markupSlot(1, 0, 0, "peer-house", &contractb.PeerStats{Keeper: "the map"}),
+			markupSlot(2, 1, 0, "peer-guest", &contractb.PeerStats{Keeper: "ada"}),
+		}
+		a.mu.Lock()
+		a.status = contractb.PeerStatus{
+			Epoch: 5, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2, Slots: slots,
+		}
+		a.statusAt = time.Now()
+		a.ready = true
+		a.mu.Unlock()
+		a.recognition.observe(a.status, time.Now().UnixMilli())
+		return a.StatusView()
+	}
+
+	// The default is empty and marks nothing at all.
+	for _, v := range build().Slots {
+		if v.Operator {
+			t.Fatalf("slot %d is marked as an operator world with none declared", v.Slot)
+		}
+	}
+
+	// A declared list marks exactly the peers on it — and the blanks a trailing
+	// comma leaves are not peers.
+	marked := build(" peer-house ", "", "peer-absent")
+	flagged := 0
+	for _, v := range marked.Slots {
+		if !v.Operator {
+			continue
+		}
+		flagged++
+		if v.PeerID != "peer-house" {
+			t.Fatalf("the operator mark landed on %q", v.PeerID)
+		}
+	}
+	if flagged != 1 {
+		t.Fatalf("%d slots are marked as operator worlds, want exactly 1", flagged)
+	}
+	// A participant's world publishes no key at all rather than a false.
+	body, err := json.Marshal(marked.Slots[1])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), `"operator"`) {
+		t.Fatalf("a participant's world publishes an operator key:\n%s", body)
+	}
+	if !strings.Contains(mustMarshal(t, marked.Slots[0]), `"operator":true`) {
+		t.Fatal("the declared world does not publish operator:true")
+	}
+}
+
+func mustMarshal(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
