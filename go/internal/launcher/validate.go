@@ -583,6 +583,32 @@ func validateProfileStructure(p Profile) error {
 	if p.SidecarPort < minPort || p.SidecarPort > maxPort {
 		return fmt.Errorf("its 'sidecarPort' (%d) is outside %d-%d", p.SidecarPort, minPort, maxPort)
 	}
+	if err := validateInboundAdmission(p.InboundAdmission, p.InboundPopulationLimit); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateInboundAdmission mirrors the sidecar's own startup validation
+// (go/internal/sidecar/admission.go): the four mode words, and a fixed gate
+// only ever paired with a positive limit. It runs at profile load time so a
+// bad pair is refused when it is written or read, not as a sidecar that will
+// not start.
+func validateInboundAdmission(mode string, limit int) error {
+	switch mode {
+	case "", "adaptive", "adaptive-shadow", "fixed", "off":
+	default:
+		return fmt.Errorf("its 'inboundAdmission' ('%s') is not a mode the sidecar takes: "+
+			"adaptive, adaptive-shadow, fixed or off, or empty for the sidecar's default", mode)
+	}
+	if mode == "fixed" && limit <= 0 {
+		return fmt.Errorf("'fixed' admission needs a positive 'inboundPopulationLimit'; " +
+			"a fixed gate with no limit is a sidecar startup refusal")
+	}
+	if mode != "fixed" && limit != 0 {
+		return fmt.Errorf("its 'inboundPopulationLimit' (%d) means nothing outside 'fixed' "+
+			"admission; set inboundAdmission to fixed, or the limit to 0", limit)
+	}
 	return nil
 }
 

@@ -15,5 +15,7 @@
     "relayUrl":  "wss://bibitesmultiverse.com/contract-b/v4",
     "createdUtc":  "2026-08-16T09:41:07Z",
     "keeper":  "",
-    "worldName":  ""
+    "worldName":  "",
+    "inboundAdmission":  "",
+    "inboundPopulationLimit":  0
 }

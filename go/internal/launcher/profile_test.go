@@ -23,6 +23,7 @@ var profileKeyOrder = []string{
 	"format", "name", "gameDir", "dataRoot", "sidecarPort", "world", "headless",
 	"exportEdges", "excludeSpecies", "saveMinutes", "saveKeep", "saveOnQuit",
 	"peerId", "relayUrl", "createdUtc", "keeper", "worldName",
+	"inboundAdmission", "inboundPopulationLimit",
 }
 
 func TestProfileRoundTrip(t *testing.T) {
@@ -158,6 +159,7 @@ func TestInstallerWrittenProfileParses(t *testing.T) {
 				"saveKeep": "number", "saveOnQuit": "bool", "peerId": "string",
 				"relayUrl": "string", "createdUtc": "string",
 				"keeper": "string", "worldName": "string",
+				"inboundAdmission": "string", "inboundPopulationLimit": "number",
 			}
 			for key, want := range wantTypes {
 				value, found := generic[key]
@@ -614,6 +616,65 @@ func TestPublicNamesAreOfferedAndNeverInvented(t *testing.T) {
 		if !strings.Contains(args, "--keeper Alice") ||
 			!strings.Contains(args, "--world-name Alice's world") {
 			t.Fatalf("the sidecar's command line is missing a chosen name: %s", args)
+		}
+	})
+}
+
+// TestPerWorldInboundAdmission covers the per-world admission pair end to end
+// inside the launcher: unset stays off the sidecar's command line so the
+// machine-wide environment still decides, a set mode rides the profile as an
+// explicit flag that beats that environment, and the invalid pairs are refused
+// at write time rather than as a sidecar that will not start.
+func TestPerWorldInboundAdmission(t *testing.T) {
+	t.Run("unset means no flag, set means the exact flag", func(t *testing.T) {
+		h := newHarness(t)
+		p := h.profile("default", "Multiverse", 8787)
+		for _, arg := range sidecarArgs(p) {
+			if arg == "--inbound-admission" || arg == "--inbound-population-limit" {
+				t.Fatalf("a world with no admission choice was started with %s", arg)
+			}
+		}
+		p.InboundAdmission = "adaptive-shadow"
+		args := strings.Join(sidecarArgs(p), " ")
+		if !strings.Contains(args, "--inbound-admission adaptive-shadow") {
+			t.Fatalf("the sidecar's command line is missing the chosen mode: %s", args)
+		}
+		p.InboundAdmission = "fixed"
+		p.InboundPopulationLimit = 40
+		args = strings.Join(sidecarArgs(p), " ")
+		if !strings.Contains(args, "--inbound-admission fixed") ||
+			!strings.Contains(args, "--inbound-population-limit 40") {
+			t.Fatalf("the sidecar's command line is missing the fixed pair: %s", args)
+		}
+	})
+
+	t.Run("profile set writes a valid pair and refuses the invalid ones", func(t *testing.T) {
+		h := newHarness(t)
+		h.profile("default", "Multiverse", 8787)
+		if code := h.run("profile", "set", "default", "--inbound-admission", "adaptive-shadow"); code != 0 {
+			t.Fatalf("profile set --inbound-admission = exit %d\n%s", code, h.err())
+		}
+		p, err := h.install().LoadProfile("default")
+		if err != nil {
+			t.Fatalf("LoadProfile: %v", err)
+		}
+		if p.InboundAdmission != "adaptive-shadow" || p.InboundPopulationLimit != 0 {
+			t.Fatalf("written admission = %q/%d, want adaptive-shadow/0",
+				p.InboundAdmission, p.InboundPopulationLimit)
+		}
+		if code := h.run("profile", "set", "default", "--inbound-admission", "sometimes"); code == 0 {
+			t.Fatal("an unknown admission mode was written")
+		}
+		if code := h.run("profile", "set", "default", "--inbound-admission", "fixed"); code == 0 {
+			t.Fatal("fixed admission with no limit was written")
+		}
+		if code := h.run("profile", "set", "default",
+			"--inbound-admission", "adaptive", "--inbound-population-limit", "40"); code == 0 {
+			t.Fatal("a population limit outside fixed admission was written")
+		}
+		if code := h.run("profile", "set", "default",
+			"--inbound-admission", "fixed", "--inbound-population-limit", "40"); code != 0 {
+			t.Fatalf("the valid fixed pair was refused: exit %d\n%s", code, h.err())
 		}
 	})
 }

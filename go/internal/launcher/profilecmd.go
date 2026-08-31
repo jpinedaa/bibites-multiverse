@@ -29,6 +29,8 @@ type profileFlagSet struct {
 	saveOnQuit           *string
 	keeper               *string
 	worldName            *string
+	inboundAdmission     *string
+	inboundPopLimit      *int
 	joinStringFile       *string
 	relayURL             *string
 
@@ -60,6 +62,11 @@ func registerProfileFlags(fs *flag.FlagSet, creation bool) *profileFlagSet {
 			declineToken+" publishes none"),
 		worldName: fs.String("world-name", "", "PUBLIC: the name this world is shown under on the map. "+
 			declineToken+" publishes none"),
+		inboundAdmission: fs.String("inbound-admission",
+			"", "how this world admits inbound migrations: adaptive, adaptive-shadow, fixed or off. "+
+				"Empty keeps the sidecar's default"),
+		inboundPopLimit: fs.Int("inbound-population-limit", 0,
+			"fixed admission's population limit; only meaningful with --inbound-admission fixed"),
 	}
 	if creation {
 		f.dataRoot = fs.String("data-root", "", "the folder this world's journal, credential and logs live in")
@@ -709,6 +716,15 @@ func (a *app) applyProfileFlags(p *Profile, flags *profileFlagSet) error {
 			return fmt.Errorf("--world-name: %w", err)
 		}
 		p.WorldName = value
+	}
+	if flags.was("inbound-admission") {
+		p.InboundAdmission = strings.ToLower(strings.TrimSpace(*flags.inboundAdmission))
+	}
+	if flags.was("inbound-population-limit") {
+		p.InboundPopulationLimit = *flags.inboundPopLimit
+	}
+	if err := validateInboundAdmission(p.InboundAdmission, p.InboundPopulationLimit); err != nil {
+		return err
 	}
 	// The edge list is normalised even when it came from a default, so what is
 	// written down is what the mod will be told.
