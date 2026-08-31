@@ -15,23 +15,6 @@ Your game and saves stay on your computer.
      history, so nothing is lost by clearing it. release/README.md, "Cutting a
      release", step 1. -->
 
-- **A refused organism now tries the whole map before it comes home.** When every world on
-  its own row or column turns a migration away, the sender continues over the rest of the
-  map in a stated order and delivers to the first world that accepts. Before this release
-  the organism bounced home as soon as its own axis was exhausted, even with an open world
-  one row over. The walk keeps every safety it had: each world is tried at most once, one
-  bounded deadline covers the whole attempt, and a migration is still never duplicated.
-  The live map draws such a delivery as its own dashed route.
-- **Each world on a computer can choose its own admission policy.**
-  `multiverse-launcher.exe profile set NAME --inbound-admission adaptive-shadow` (or
-  `adaptive`, `off`, or `fixed` with `--inbound-population-limit`) stores the choice in
-  that world's profile and it survives restarts. Before this release the choice was one
-  environment variable for every world the launcher starts.
-- **The Windows setup no longer fails when a name box is emptied.** In the release before
-  this one, clearing the keeper or world-name box made the installation stop with an empty error log; the
-  emptied box travelled as a bare `-`, which Windows PowerShell refuses on a command line.
-  Emptying a box now publishes nothing, as the window always said it would.
-
 ## Upgrading from an earlier release
 
 <!-- The two bullets below hold for every release and stay. Add this release's own
