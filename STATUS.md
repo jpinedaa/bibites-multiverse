@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-31 UTC.
 
-Bibites Multiverse `0.3.10` is public. The first announced service period runs from
+Bibites Multiverse `0.3.11` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -95,7 +95,7 @@ Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` e
 hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
 already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the `fdb707e` downtime-restore sidecar,
 and since 2026-08-31 the five controlled Windows worlds on the operator's second machine (slots 9
-and 13–16) run release `0.3.10`, so all six controlled Windows worlds speak 4.2. The six
+and 13–16) run the `25547bf` candidate of release `0.3.11`, so all six controlled Windows worlds speak 4.2. The six
 cloud-world sidecars await the same update. This relay-first order means an old participant can
 omit the new proof, but no new participant must guess whether a refusal belongs to its current
 attempt.
@@ -241,9 +241,25 @@ migration refused everywhere on its axis can still reach an open world one row o
 with its contract amendment, sidecar implementation, live-map dashed cross-axis rendering, and
 regression suite (including a six-world sink regression where only one world accepts). The
 `maxReroutes` default rises from 4 to 24 so the count cannot defeat a full-map walk; the wire is
-unchanged and the identifier stays `contract-b/4.2`. **None of this is in a published release
-yet** — it awaits the 0.3.11 tag, and the in-game fertility/biomass scarcity settings for slot 9
-are an operator step not yet taken.
+unchanged and the identifier stays `contract-b/4.2`.
+
+The `25547bf` candidate then ran the live test on the five second-machine worlds the same day.
+Slot 9 holds `adaptive-shadow` from its launcher profile — durable across restarts — and slot
+13's refusal chains crossed axes in the stated order: an N-axis chain refused by slots 14 and 16
+delivered exactly once to hosted slot 1, whose sidecar predates B50, proving a mixed fleet needs
+no coordination; a W-axis chain refused by its whole row delivered once to slot 14. Ordered
+`refusedSlots`, unchanged exit edges, zero losses, zero bounces. The tested-build record is
+`25547bf` and the drift gate is green. The release awaits the 0.3.11 tag and the runner. The
+hosted archive picks up the dashed cross-axis rendering on its next ordinary deploy; until then
+the live page simply does not animate those hops.
+
+To carry the sink traffic pattern, the hosted relay's frame ceiling rises from 50 to **200**
+frames per second — per-destination migration fan-in 6/s → 25/s, and every sender's published
+send budget with it, with no participant change (peers size their buckets from the value the
+relay publishes). The arithmetic is recorded in `deploy/SIZING.md`; the change is
+`MULTIVERSE_MAX_FRAMES_PER_SECOND=200` in `/etc/multiverse/relay.env` and one announced
+relay-only restart. **The relay change is prepared but not yet deployed.** The in-game
+fertility/biomass scarcity settings for slot 9 remain an operator step not yet taken.
 
 The update also found a `0.3.10` release defect on the graphical path. The installer window
 passes an emptied name box as `-`, the project's "publish nothing" answer, but Windows
@@ -292,7 +308,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.10`. The six cloud-world sidecars await the same update. |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run the `25547bf` candidate of release `0.3.11`. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
@@ -320,7 +336,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.10`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.10) |
+| Release | [`v0.3.11`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.11) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -413,6 +429,20 @@ replaces `0.3.8`'s requested-speed admission pricing with a fixed `x10` referenc
 sample capacity at whatever speed they run, retained budget samples are repriced rather than
 discarded, and the closed-gate and never-learning failure modes of the requested-speed policy are
 retired. Mod `0.6.8` and both protocol minimums are unchanged.
+Release `0.3.10` makes enforcing adaptive admission the default — a world that has not
+learned yet fails open rather than waiting on a promotion — and keeps the admission budget
+samples across downtime, so a world returning from more than an hour away restores its learned
+limit instead of relearning from nothing while arrivals flood it.
+Release `0.3.11` lets a migration refused by every world on its own axis continue over the rest
+of the map in a stated order and deliver to the first world that accepts, rather than bouncing
+home past an open world one row over (Contract B §34, B50 — the wire and the protocol identifier
+are unchanged). The live map draws such a delivery as its own dashed route. Each world on a
+computer can also carry its own admission policy in its launcher profile
+(`profile set --inbound-admission`, with `--inbound-population-limit` beside `fixed`), where
+before this release one environment variable decided for every world the launcher starts. The
+Windows setup no longer stops over an emptied name box: `0.3.10` passed the emptied box as a
+bare `-`, which Windows PowerShell's `-File` binding refuses before the installer prints a line,
+so the window showed "Installation stopped." over an empty log.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
 Release `0.3.0` as downloaded can leave a computer unable to install it again. Install it, install

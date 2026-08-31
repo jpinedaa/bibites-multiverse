@@ -210,6 +210,19 @@ function Get-PublishedNameArgument {
     return $trimmed
 }
 
+function Get-PublishedNameFlagArgument {
+    # ONE token, '-Keeper:<value>', never the pair '-Keeper' '<value>'. The value
+    # here can BE a bare '-' - the decline above - and Windows PowerShell's -File
+    # parameter binding refuses a bare '-' argument outright: the prior release's
+    # window with a name box emptied handed the installer "-Keeper -", and the child
+    # exited before it printed a line, so the person saw "Installation stopped."
+    # over an empty log. The colon form binds the same parameter with any value -
+    # the decline, a name with spaces, a name that begins with a dash - so it is
+    # what this window passes for both public names, always.
+    param([string]$Flag, [string]$Value)
+    return ($Flag + ':' + (Get-PublishedNameArgument $Value))
+}
+
 function ConvertTo-NativeArgument {
     # ONE ARGUMENT, QUOTED THE WAY WINDOWS TAKES IT APART AGAIN.
     #
@@ -346,7 +359,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Install Bibites Multiverse 0.3.10'
+$form.Text = 'Install Bibites Multiverse 0.3.11'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(650, 576)
 $form.FormBorderStyle = 'FixedDialog'
@@ -632,8 +645,11 @@ $install.Add_Click({
     # installation already publishes unless somebody edited it on this screen.
     # These flags beat the stored value in the installer, so filling the boxes
     # from the install above is what keeps that from being a silent rename.
-    $arguments += @('-Keeper',    (Get-PublishedNameArgument $keeperBox.Text))
-    $arguments += @('-WorldName', (Get-PublishedNameArgument $worldNameBox.Text))
+    # Each name rides its flag as one colon token (see Get-PublishedNameFlagArgument):
+    # the pair form put a bare '-' on the command line for an emptied box, and
+    # -File binding refuses that before the installer prints a word.
+    $arguments += (Get-PublishedNameFlagArgument '-Keeper'    $keeperBox.Text)
+    $arguments += (Get-PublishedNameFlagArgument '-WorldName' $worldNameBox.Text)
 
     $quoted = @($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
     $form.UseWaitCursor = $true

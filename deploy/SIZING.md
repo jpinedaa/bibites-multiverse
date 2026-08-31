@@ -948,6 +948,15 @@ The six-frame immediate reserve matches the six-frame migration response cadence
 `PONG`, stats, and claim traffic uses the remaining headroom. An immediate frame can create
 bucket debt. Deferred traffic then waits until refill clears that debt.
 
+**The hosted deployment raises `F` to `200`** (decided 2026-08-31, for the sink-world traffic
+pattern where most gates are closed and refused migrations walk the map). Every row above
+scales linearly: migration write rate `25/s`, minimum interval `40,000,000 ns`, deferred
+refill `100/s`, total burst `50` frames, protected reserve `25`. The shipped default stays
+`50`: the relay publishes the value it runs with, and every sidecar sizes its buckets from
+the published value, so no participant changes with it. The change is
+`MULTIVERSE_MAX_FRAMES_PER_SECOND=200` in `/etc/multiverse/relay.env` and one relay-only
+restart (RESTART-POLICY: announce it; 30–60 s of peer reconnects).
+
 A lower `F` is not a migration-only tuning method. This change also lowers liveness and
 control headroom. Current code rejects values less than eight because those values cannot
 preserve the one-eighth response reserve.

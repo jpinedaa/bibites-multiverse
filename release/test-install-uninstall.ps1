@@ -256,6 +256,21 @@ Check "an empty box is the decline and is passed as '-'" `
 Check "and a typed name is passed trimmed" `
     ((Get-PublishedNameArgument '  Alice  ') -eq 'Alice')
 
+# HOW A NAME RIDES ITS FLAG: one colon token, never the '-Keeper' '<value>'
+# pair. The pair form put a BARE '-' on the command line for an emptied box,
+# and Windows PowerShell's -File binding refuses a bare '-' before the
+# installer prints a word - the prior release's "Installation stopped." over an
+# empty log. The colon form binds any value: the decline, spaces, a leading dash.
+Check "a typed name rides its flag as one colon token" `
+    ((Get-PublishedNameFlagArgument '-Keeper' '  Alice  ') -eq '-Keeper:Alice')
+Check "an emptied box's decline rides the same way" `
+    ((Get-PublishedNameFlagArgument '-WorldName' ' ') -eq '-WorldName:-')
+$nGuiText = Get-Content -LiteralPath $guiInstaller -Raw
+Check "the window hands both names over as colon tokens and never as the pair" `
+    (($nGuiText -match "Get-PublishedNameFlagArgument '-Keeper'") -and
+     ($nGuiText -match "Get-PublishedNameFlagArgument '-WorldName'") -and
+     ($nGuiText -notmatch "@\('-Keeper',"))
+
 # HOW THE WINDOW HANDS ITS ANSWERS OVER. There is no argument array underneath a
 # Windows process: it is given one string and splits it itself. A value ending in
 # a backslash, wrapped in quotes the obvious way, escapes its own closing quote
