@@ -93,7 +93,9 @@ each entry once to a different destination.
 
 Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` endpoint. The
 hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
-already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the requested-speed sidecar. The six
+already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the `fdb707e` downtime-restore sidecar,
+and since 2026-08-31 the five controlled Windows worlds on the operator's second machine (slots 9
+and 13–16) run release `0.3.10`, so all six controlled Windows worlds speak 4.2. The six
 cloud-world sidecars await the same update. This relay-first order means an old participant can
 omit the new proof, but no new participant must guess whether a refusal belongs to its current
 attempt.
@@ -216,6 +218,29 @@ it. This is the evidence the page now renders as stop, refusal, and dashed rerou
 unknown, estimate 10, and enforcement false. Its visible arrivals are therefore correctly marked
 `OPEN · LEARNING`; they are not evidence that a closed enforcing gate was bypassed.
 
+### Second-machine 0.3.10 update, and a graphical-setup defect it found
+
+On 2026-08-31 the five controlled Windows worlds on the operator's second machine — slots 9 and
+13–16 — updated in place from `0.3.6` to release `0.3.10`. The stop was lossless: all five worlds
+wrote their shutdown saves before their processes ended. Every identity, journal, launcher
+profile, and world setting was kept, and all five rejoined the map with their mods connected at
+×10. They now speak `contract-b/4.2` and run the enforcing adaptive admission default. Their
+54–58 retained admission budget samples were restored across the update and repriced at the fixed
+×10 divisor: each gate sits at the floor limit 10 with committed populations of 32–42 still above
+it, so the gates are honestly closed while those populations drain, and a return from an
+offline window longer than an hour no longer starts a re-flood by relearning from nothing.
+
+The update also found a `0.3.10` release defect on the graphical path. The installer window
+passes an emptied name box as `-`, the project's "publish nothing" answer, but Windows
+PowerShell's `-File` argument binding refuses a bare `-` before the installer prints a single
+line. The graphical setup then reports only "Installation stopped." over an empty log — the one
+screen a graphical install shows, with nothing in it to act on. Anyone who empties either name
+box in the window hits this; prefilled or typed names pass. The update was completed with the
+package's own script installer instead — the documented advanced path — run unattended without
+the name flags, which leaves the never-answered name questions unanswered rather than recording
+a decline nobody made. The setup wrapper's registry version entry was reconciled by hand
+afterwards. The fix belongs in the graphical installer's argument handling and needs a release.
+
 ### Species genealogy repair
 
 The 2026-08-22 raw-record rebuild removed the species aggregate overflow. It folded
@@ -252,7 +277,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the requested-speed sidecar. The six cloud-world sidecars await the same update. |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.10`. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
