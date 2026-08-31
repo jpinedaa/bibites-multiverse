@@ -1,7 +1,10 @@
 # Population-aware inbound admission
 
-Status: implemented. Operator-controlled production worlds enforce `adaptive`; participant
-packages retain the `adaptive-shadow` default.
+Status: implemented. `adaptive` — enforcing — is the shipped default for every world: a
+controller fails open while it learns and refuses new inbound custody only once its learned limit
+is ready. `adaptive-shadow` remains available as a forecast-only diagnostic mode. The operator
+made enforcement the default on 2026-08-31, after eight days of shadow and enforcing history on
+the eleven controlled worlds and the move to the fixed ×10 reference target.
 
 ## Why this exists
 
@@ -81,8 +84,8 @@ wait-and-reconnect condition during the rollout.
 |---|---|
 | `off` | No population decision. The journal queue ceiling still applies. |
 | `fixed` | Reject a new inbound migration when committed load reaches `inboundPopulationLimit`. |
-| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. This is the participant-package default. |
-| `adaptive` | Enforce the learned limit after the estimator is ready. Before readiness it fails open. |
+| `adaptive-shadow` | Learn and publish an adaptive limit and closed/open decision, but never reject. A diagnostic mode for reviewing what enforcement would do. |
+| `adaptive` | Enforce the learned limit after the estimator is ready. Before readiness it fails open. **This is the default.** |
 
 Committed load is the last heartbeat population plus inbound journal entries plus successful
 spawns not yet reconciled by the next heartbeat. This prevents the heartbeat/ACK race from
@@ -144,10 +147,10 @@ MULTIVERSE_INBOUND_ADMISSION=fixed
 MULTIVERSE_INBOUND_POPULATION_LIMIT=40
 ```
 
-The normal promotion path is to enable `adaptive` only after shadow history shows stable learned
-limits across save cycles, restarts, and representative ecology. An operator may authorize an
-earlier controlled-world promotion to collect enforcement evidence, but the exception, initial
-health evidence, fixed fallbacks, and rollback conditions must be recorded below.
+Enforcement no longer waits on a promotion: `adaptive` ships as the default, and a world that has
+not learned yet simply fails open. The staged shadow-first policy below is retained as the record
+of how the default earned that position; `adaptive-shadow` is now the tool for reviewing a
+worrying world without letting it refuse.
 
 ## Observability and rollout gates
 
@@ -187,7 +190,7 @@ the gate closed, because discarding those journal entries would lose organisms a
 reach the game and produce genuine ACK-confirmed animations. Once it drains to zero, a closed gate
 has no accepted backlog left to deliver.
 
-The enforcement promotion gate is:
+The enforcement promotion gate that governed the original rollout was:
 
 - at least 24 hours of shadow samples per production world;
 - no sustained oscillation of the effective limit;

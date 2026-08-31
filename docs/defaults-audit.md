@@ -39,7 +39,7 @@ facts shape every verdict:
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 | `MULTIVERSE_STARTUP_TIME_SCALE` | The mod | Every world starts at x10 instead of the game's x1 | **PASS** — it is a target the game itself governs down to protect the frame rate, it costs no disk and no network, and a player moves it with the speed slider they already have |
-| `--inbound-admission` | The sidecar | `adaptive-shadow`: learns a machine budget at whatever speed the world runs and reports a population decision sized for the shared ×10 reference, but refuses nothing on population | **PASS FOR SHADOW ROLLOUT** — the speed slider changes nothing about the learner; no participant behavior changes until a later reviewed promotion to enforcing `adaptive`, and queue backpressure remains active |
+| `--inbound-admission` | The sidecar | `adaptive`: learns a machine budget at whatever speed the world runs, fails open while learning, then refuses new inbound custody above a limit sized for the shared ×10 reference | **PASS WITH A STATED REFUSAL** — a refusal is pre-custody and custody-safe (the organism reroutes, at-most-once intact), the limit came from eight days of shadow and enforcing history on eleven controlled worlds, and `adaptive-shadow` remains the no-refusal diagnostic |
 | `--forward-timeout` | The sidecar | Records an unanswered forwarded organism lost after five wall-clock minutes | **PASS WITH A STATED LOSS** — the deadline bounds a full outbound journal. It does not send or return the organism again |
 | The launcher's update check | The launcher | One anonymous background `GET` per launcher run to the project's own homepage, which can only add a line of text and a button | **PASS** — nothing waits on it, it carries no identity and no version, a failure is silent, and `MULTIVERSE_NO_UPDATE_CHECK` makes no request at all |
 | `--keeper`, `--world-name` | The sidecar, set by the installers and the launcher | Publishes **neither**: an install nobody answered names nobody | **PASS** — the only default here is *unset*, the prompt shows the value before it is taken, and no account name is read off the machine when there is nobody to show it to |
@@ -320,35 +320,31 @@ and moves only through `--inbound-target-time-scale` or
 `MULTIVERSE_INBOUND_TARGET_TIME_SCALE`. The estimate needs ten samples, is bounded to 10–200 by
 default, and persists its current evidence in the world's data directory.
 
-**A bare install.** Uses `adaptive-shadow` sized for ×10. The in-game speed slider changes what
-the world runs at, and the learner keeps measuring the machine at that real speed; selecting ×5
-neither stalls learning nor rescales the published limit, because the budget samples are speed
-products and the divisor stays put. A paused or not-yet-measurable heartbeat changes no sample. Shadow calculates and publishes the exact decision that adaptive
-mode would make, including whether the gate would be closed, but it never refuses an organism
-because of that decision. The existing 64-entry inbound-journal ceiling remains an independent
-safety control and can still return `OVERLOADED` before custody.
+**A bare install.** Uses `adaptive` sized for ×10: it refuses nothing until ten valid samples
+exist, then refuses a new inbound migration only while committed population sits at or above its
+learned limit. The in-game speed slider changes what the world runs at, and the learner keeps
+measuring the machine at that real speed; selecting ×5 neither stalls learning nor rescales the
+published limit, because the budget samples are speed products and the divisor stays put. A
+paused or not-yet-measurable heartbeat changes no sample. A refusal is emitted before any journal
+write, so the refused organism is rerouted by its sender with custody intact; nothing is lost to
+a closed gate. The existing 64-entry inbound-journal ceiling remains an independent safety
+control and can still return `OVERLOADED` before custody.
 
-**Why shadow is the participant default.** Production history shows a strong population/speed
-relationship, but the safe limit is a property of each machine and ecology rather than one
-universal number.
-Shadow mode collects that machine-local evidence across saves and restarts without turning an
-estimate into participant-visible routing policy. Promotion to enforcing adaptive mode requires
-the rollout gates in [`population-admission.md`](population-admission.md), including at least 24
-hours of stable samples and a reviewed fixed fallback for each host class.
-
-**Controlled production override.** On 2026-08-23 the operator explicitly authorized an early
-evidence-gathering promotion for the five local and six hosted worlds under direct control. Those
-eleven services set `MULTIVERSE_INBOUND_ADMISSION=adaptive`; the bare-install value above remains
-unchanged. Learned state persisted across the promotion, and the initial verification found all
-eleven enforcing with no capacity sheds or discarded journal bytes. The exception, monitoring,
-fallbacks, and rollback criteria are recorded in the rollout runbook.
+**Why enforcing is now the default.** Shadow was the launch default so the estimate could be
+watched before it gained authority; that watch happened. Between 2026-08-23 and 2026-08-31 the
+eleven operator-controlled worlds ran enforcing `adaptive` (authorized early on 2026-08-23) with
+no capacity sheds, no journal discards, and refusals behaving as custody-safe reroutes, and on
+2026-08-31 the limit's pricing moved to the fixed ×10 reference, removing the failure modes the
+shadow caution guarded against. The operator then made enforcement the default outright: a limit
+that only ever forecasts protects no machine. `adaptive-shadow` remains one flag away for
+reviewing a world without letting it refuse.
 
 **What it spends.** One small atomic JSON state write per valid wall-clock minute of measured
 running speed. It sends no additional network request: the estimate rides the heartbeat the mod
 already sends and the peer stats already broadcast.
 
-**Verdict: PASS FOR SHADOW ROLLOUT.** The release exposes the decision before it gives that
-decision authority to refuse a migrant.
+**Verdict: PASS WITH A STATED REFUSAL.** The gate refuses before custody, the sender reroutes
+the organism, and the shadow period this audit originally required has been served and recorded.
 
 ## 5b. `--forward-timeout` — unanswered forwarded organisms
 
