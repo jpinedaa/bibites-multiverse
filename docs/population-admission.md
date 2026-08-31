@@ -119,10 +119,14 @@ configuration.
 
 The last hour of valid samples and the learned limits are atomically persisted in
 `<data-dir>/admission-state.json`. A restart therefore does not create a ten-minute fail-open
-window, and a reviewed promotion from `adaptive-shadow` to `adaptive` uses the shadow evidence it
-already collected. Samples are machine budgets, not target-specific limits, so a target change
-keeps them and immediately reprices the limit at the new reference — across a restart too.
-Changing the bounds or the safety margin deliberately starts learning fresh.
+window — **and neither does an outage**. Downtime does not age the samples: on restore the
+retained window is re-anchored so its newest sample reads as just measured, because the machine
+the budgets describe did not change while the sidecar was off. Before this rule, a world
+returning from more than an hour away lost its whole window to wall-clock expiry and failed open
+while relearning; on 2026-08-31 that flooded five returning worlds to two and three times their
+learned limits in minutes. Samples are machine budgets, not target-specific limits, so a target
+change keeps them and immediately reprices the limit at the new reference — across a restart
+too. Changing the bounds or the safety margin deliberately starts learning fresh.
 
 The local broadcast runner fixes the game speed at ×6.5 and leaves the admission reference on the
 shared ×10 default. The participant package starts the game at ×10 and also leaves the reference
