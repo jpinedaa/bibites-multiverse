@@ -1,8 +1,8 @@
 # Project status
 
-Last updated: 2026-08-30 UTC.
+Last updated: 2026-08-31 UTC.
 
-Bibites Multiverse `0.3.8` is public. The first announced service period runs from
+Bibites Multiverse `0.3.9` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -280,7 +280,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.8`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.8) |
+| Release | [`v0.3.9`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.9) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.8` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -365,6 +365,14 @@ Release `0.3.8` makes the ordinary population-admission learner follow the speed
 game. A slider change keeps the last hour of machine-budget samples and immediately recalculates
 their limits for the new target. An explicit command-line or environment target remains fixed.
 Private maps still accept a private join-string file on both platforms.
+Release `0.3.9` lets a participant name their world and sign it with a keeper handle: the
+installers and launcher ask both questions once at join time, suggest the account name, and
+publish nothing that was not shown and confirmed first. The home page greets the newest worlds and
+ranks keepers by simulated time contributed across all their worlds, dark ones included. It also
+replaces `0.3.8`'s requested-speed admission pricing with a fixed `x10` reference divisor: worlds
+sample capacity at whatever speed they run, retained budget samples are repriced rather than
+discarded, and the closed-gate and never-learning failure modes of the requested-speed policy are
+retired. Mod `0.6.8` and both protocol minimums are unchanged.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
 Release `0.3.0` as downloaded can leave a computer unable to install it again. Install it, install
