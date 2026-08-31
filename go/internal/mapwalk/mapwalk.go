@@ -12,6 +12,11 @@
 // client's recomputation is for display and for the one thing a grant cannot
 // carry — the skip list of an axis that has NO deliverable target, which is what
 // §8 maps into an EDGE_STATUS reason.
+//
+// WalkAfter and WalkAnywhere are the refusal chain's two selection phases
+// (§9.2, §34 B50): the same-axis continuation after an explicit refusal, and
+// the axis-major full-map order the chain falls to once that axis is
+// exhausted.
 package mapwalk
 
 import (
@@ -146,6 +151,59 @@ func WalkAfter(status contractb.PeerStatus, me contractb.SlotInfo, edge string, 
 		}
 		if Deliverable(me, cand) == "" {
 			return cand, true
+		}
+	}
+	return contractb.SlotInfo{}, false
+}
+
+// WalkAnywhere is §34 B50's second walk phase: when every compatible same-axis
+// destination is tried or unreachable, a refusal chain continues over the REST
+// OF THE MAP in a deterministic axis-major order anchored at me. For a
+// horizontal exit edge every row of the torus is visited starting with me's
+// own (perpendicular offsets ascending, wrapped), and each row is scanned from
+// me's column in the edge's signed direction; a vertical edge swaps the roles.
+// Offset zero re-covers the exit axis on purpose, so this order is complete on
+// its own: not-found means every compatible slot on the current frame was
+// offered or excluded, which is what makes full-map exhaustion provable
+// wherever me is locatable — the anchor cannot vanish the way a refused slot
+// can.
+//
+// The skip discipline is WalkAfter's: holes, the source and the durable
+// excluded set are passed over, and the first Deliverable candidate wins. The
+// order is a pure function of (frame, edge, me), so it does not reshuffle as
+// refusals accrue; the caller's excluded set is what turns repeated calls into
+// a loop-free walk over distinct worlds.
+func WalkAnywhere(status contractb.PeerStatus, me contractb.SlotInfo, edge string,
+	excluded map[int]bool) (contractb.SlotInfo, bool) {
+	vertical := contracta.Vertical(edge)
+	along, across := status.Map.Width, status.Map.Height
+	if vertical {
+		along, across = status.Map.Height, status.Map.Width
+	}
+	delta := 1
+	if contracta.Reverse(edge) {
+		delta = -1
+	}
+	for perp := 0; perp < across; perp++ {
+		for step := 0; step < along; step++ {
+			pos := me.Position
+			if vertical {
+				pos.Col = wrapIndex(me.Position.Col+perp, across)
+				pos.Row = wrapIndex(me.Position.Row+delta*step, along)
+			} else {
+				pos.Row = wrapIndex(me.Position.Row+perp, across)
+				pos.Col = wrapIndex(me.Position.Col+delta*step, along)
+			}
+			if pos == me.Position {
+				continue
+			}
+			cand, reserved := At(status, pos)
+			if !reserved || cand.Slot == me.Slot || excluded[cand.Slot] {
+				continue
+			}
+			if Deliverable(me, cand) == "" {
+				return cand, true
+			}
 		}
 	}
 	return contractb.SlotInfo{}, false

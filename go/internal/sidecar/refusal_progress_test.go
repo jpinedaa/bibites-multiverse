@@ -466,6 +466,203 @@ func TestMaxReroutesBoundsTransportRefusalProgress(t *testing.T) {
 	}
 }
 
+// setRefusalGrid is setRefusalMap on a torus with more than one row: slot
+// 1+col+width*row at every position, all live, mod-connected and compatible.
+// The source is slot 1 at the origin, exporting east.
+func setRefusalGrid(side *Sidecar, width, height int) {
+	count := width * height
+	slots := make([]contractb.SlotInfo, 0, count)
+	for row := 0; row < height; row++ {
+		for col := 0; col < width; col++ {
+			slots = append(slots, contractb.SlotInfo{
+				Slot:           1 + col + width*row,
+				Position:       contractb.Position{Col: col, Row: row},
+				PeerID:         "peer-" + string(rune('a'+col+width*row)),
+				Live:           true,
+				ModConnected:   true,
+				GameVersion:    "0.6.3.1",
+				SimulationSize: 2000,
+			})
+		}
+	}
+	side.mu.Lock()
+	side.slot = 1
+	side.position = contractb.Position{}
+	side.mapShape = contractb.MapShape{Width: width, Height: height}
+	side.status = contractb.PeerStatus{
+		Map: side.mapShape, SlotCount: count, Slots: slots,
+	}
+	side.relayReady = true
+	side.relaySessionID = refusalTestSession
+	if width > 1 {
+		side.neighbours[contracta.EdgeE] = &contractb.Neighbour{Slot: 2}
+	}
+	side.mu.Unlock()
+}
+
+func newRefusalGridHarness(t *testing.T, width, height int) *refusalHarness {
+	t.Helper()
+	clock := newFakeClock()
+	cfg := DefaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	cfg.DataDir = t.TempDir()
+	cfg.PeerID = "peer-source"
+	cfg.ContractAToken = testContractAToken
+	cfg.Clock = clock.Now
+	cfg.Logger = testLogger(t)
+	side, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = side.Close() })
+	setRefusalGrid(side, width, height)
+	return &refusalHarness{side: side, cfg: cfg, clock: clock}
+}
+
+// TestTransportRefusalChainCrossesAxesToTheOpenWorld is §34 B50's sink
+// regression at the walk level: on a 3x2 map whose exit row refuses
+// everything, the chain leaves the row, tries the other one in the stated
+// axis-major order, and only bounces once the whole map is provably tried —
+// with the migration's axis, body and one first-refusal deadline untouched
+// throughout.
+func TestTransportRefusalChainCrossesAxesToTheOpenWorld(t *testing.T) {
+	h := newRefusalGridHarness(t, 3, 2)
+	id := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, id)
+	first := journalEntry(t, h.side, id)
+	if first.Entry.DestSlot != 3 || first.RerouteCount != 1 {
+		t.Fatalf("same-axis progress = dest %d reroutes %d, want 3 and 1",
+			first.Entry.DestSlot, first.RerouteCount)
+	}
+	deadline := first.RefusalDeadlineMs
+	if deadline == 0 {
+		t.Fatal("no durable first-refusal deadline")
+	}
+
+	wantOrder := []int{4, 5, 6}
+	for _, wantDest := range wantOrder {
+		markAlternateSent(t, h, id)
+		sendExactTransportRefusal(t, h, id)
+		st := journalEntry(t, h.side, id)
+		if st.Entry.DestSlot != wantDest {
+			t.Fatalf("cross-axis progress = dest %d, want %d", st.Entry.DestSlot, wantDest)
+		}
+		if st.Entry.Edge != contracta.EdgeE || st.Entry.Payload != `{"body":"unchanged"}` {
+			t.Fatal("the cross-axis walk changed the migration axis or body")
+		}
+		if st.RefusalDeadlineMs != deadline {
+			t.Fatalf("deadline reset from %d to %d", deadline, st.RefusalDeadlineMs)
+		}
+	}
+
+	markAlternateSent(t, h, id)
+	sendExactTransportRefusal(t, h, id)
+	st := journalEntry(t, h.side, id)
+	if st.Direction != journal.In || !st.BounceBack || st.Status != journal.StatusOpen {
+		t.Fatalf("full-map exhaustion = %s/%s bounce=%v, want in/open bounce",
+			st.Direction, st.Status, st.BounceBack)
+	}
+	if !reflect.DeepEqual(st.RefusedSlots, []int{2, 3, 4, 5, 6}) {
+		t.Fatalf("final refused slots = %v, want the whole map in walk order", st.RefusedSlots)
+	}
+	if st.RefusalDeadlineMs != deadline {
+		t.Fatalf("bounce reset the deadline from %d to %d", deadline, st.RefusalDeadlineMs)
+	}
+}
+
+// TestPeerRefusalChainCrossesAxes pins the same second phase for population
+// refusals: a live NACK chain that exhausts the exit row continues on the
+// other row, still without any transport-refusal deadline.
+func TestPeerRefusalChainCrossesAxes(t *testing.T) {
+	h := newRefusalGridHarness(t, 3, 2)
+	id := seedRefusalEntry(t, h, 2)
+	recordReceipt(t, h, id, 2)
+	sendPeerRefusal(t, h, id)
+	if st := journalEntry(t, h.side, id); st.Entry.DestSlot != 3 || st.RerouteCount != 1 {
+		t.Fatalf("same-axis progress = %+v, want destination 3 reroute 1", st)
+	}
+	markAlternateSent(t, h, id)
+	recordReceipt(t, h, id, 3)
+	sendPeerRefusal(t, h, id)
+	st := journalEntry(t, h.side, id)
+	if st.Entry.DestSlot != 4 || st.RerouteCount != 2 ||
+		!reflect.DeepEqual(st.RefusedSlots, []int{2, 3}) {
+		t.Fatalf("cross-axis progress = %+v, want destination 4 on the other row", st)
+	}
+	if st.RefusalDeadlineMs != 0 {
+		t.Fatal("a pure peer-refusal chain acquired a transport-refusal deadline")
+	}
+}
+
+// TestPeerRefusalFullMapExhaustionDoesNotBounceEarly pins §34 B50's kept
+// asymmetry on a two-world map: exact transport exhaustion bounces at once,
+// while a peer refusal with nowhere left to walk keeps the entry outbound —
+// tickOutbound re-offers the live destination until the one bounded clock,
+// because a population gate can reopen inside the window.
+func TestPeerRefusalFullMapExhaustionDoesNotBounceEarly(t *testing.T) {
+	h := newRefusalGridHarness(t, 2, 1)
+
+	peerID := seedRefusalEntry(t, h, 2)
+	recordReceipt(t, h, peerID, 2)
+	sendPeerRefusal(t, h, peerID)
+	st := journalEntry(t, h.side, peerID)
+	if st.Direction != journal.Out || st.BounceBack || st.Handoff != journal.HandoffRefused {
+		t.Fatalf("peer exhaustion state = %+v, want a held outbound refusal", st)
+	}
+	if !reflect.DeepEqual(st.RefusedSlots, []int{2}) || st.Entry.DestSlot != 2 {
+		t.Fatalf("peer exhaustion = dest %d refused %v, want the refusing world kept current",
+			st.Entry.DestSlot, st.RefusedSlots)
+	}
+
+	transportID := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, transportID)
+	st = journalEntry(t, h.side, transportID)
+	if st.Direction != journal.In || !st.BounceBack {
+		t.Fatalf("transport exhaustion state = %+v, want an immediate bounce", st)
+	}
+}
+
+// TestCrossAxisChainSurvivesRestart replays a chain that already left its axis
+// through compaction and a reopen, then continues it.
+func TestCrossAxisChainSurvivesRestart(t *testing.T) {
+	h := newRefusalGridHarness(t, 3, 2)
+	id := seedRefusalEntry(t, h, 2)
+	sendExactTransportRefusal(t, h, id)
+	markAlternateSent(t, h, id)
+	sendExactTransportRefusal(t, h, id)
+	crossed := journalEntry(t, h.side, id)
+	if crossed.Entry.DestSlot != 4 {
+		t.Fatalf("pre-restart progress = dest %d, want 4", crossed.Entry.DestSlot)
+	}
+	deadline := crossed.RefusalDeadlineMs
+
+	if _, _, err := h.side.jr.Compact(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.side.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(h.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	setRefusalGrid(reopened, 3, 2)
+	h.side = reopened
+
+	st := journalEntry(t, h.side, id)
+	if st.Entry.DestSlot != 4 || !reflect.DeepEqual(st.RefusedSlots, []int{2, 3}) ||
+		st.RefusalDeadlineMs != deadline {
+		t.Fatalf("replayed chain = %+v, want destination 4 with its tried set and deadline", st)
+	}
+	markAlternateSent(t, h, id)
+	sendExactTransportRefusal(t, h, id)
+	st = journalEntry(t, h.side, id)
+	if st.Entry.DestSlot != 5 || !reflect.DeepEqual(st.RefusedSlots, []int{2, 3, 4}) {
+		t.Fatalf("post-restart progress = %+v, want destination 5", st)
+	}
+}
+
 func TestRerouteClearsAttemptClockAndRestampsRotatedRelaySession(t *testing.T) {
 	h := newRefusalHarness(t, 3)
 	id := seedRefusalEntry(t, h, 2)

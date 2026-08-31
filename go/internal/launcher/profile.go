@@ -92,6 +92,17 @@ type Profile struct {
 	CreatedUTC     string  `json:"createdUtc"`
 	Keeper         string  `json:"keeper"`
 	WorldName      string  `json:"worldName"`
+	// InboundAdmission selects this world's population-admission mode —
+	// adaptive, adaptive-shadow, fixed or off (docs/population-admission.md).
+	// Empty means unset: the sidecar is never given the flag and keeps its own
+	// default, exactly the way the two public names are handled. This is the
+	// per-world form of MULTIVERSE_INBOUND_ADMISSION, which a launcher-started
+	// sidecar otherwise only inherits machine-wide from the environment.
+	// InboundPopulationLimit is fixed admission's limit and is meaningful, and
+	// allowed, only beside 'fixed' — a fixed gate with no limit is a sidecar
+	// startup refusal, so the profile refuses the pair the same way.
+	InboundAdmission       string `json:"inboundAdmission"`
+	InboundPopulationLimit int    `json:"inboundPopulationLimit"`
 }
 
 // errNoProfiles is returned when the install holds no profile at all, which is

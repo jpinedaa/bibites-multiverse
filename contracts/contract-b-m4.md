@@ -223,6 +223,23 @@ fields feed; the version floor does not move and **`minContractVersion` MUST NOT
 set**. Contract A takes no set and no version change. Affected body text carries an
 `(added — §33, B49)` marker, and **§33 wins over the body and over §14 to §32 wherever they
 disagree.**
+**Amended:** 2026-08-31, amendment set **B50** (**§34**), from the sink-world routing work: a
+map most of whose gates are closed left every same-axis walk exhausting and bouncing organisms
+home past open worlds one row over. The bounded refusal walk gains a **second phase**: when every
+compatible same-axis destination is tried or unreachable, the source continues over the remaining
+map positions in a stated deterministic axis-major order anchored at its own position, and
+"exhausted" comes to mean **every compatible slot on the map tried**, provable from the current
+frame wherever the source can locate itself. The proof rules, the durable tried set, the one
+refusal deadline, `maxReroutes` as a hard count (default raised 4 → 24 so the count cannot defeat
+a full-map walk), one terminal bounce, at-most-once, and the peer-chain re-offer-until-deadline
+behaviour all stay. `exitEdge` and the body stay the same bytes, so a cross-axis delivery still
+enters through `opposite(exitEdge)` — declared display and geometry slack, not a defect. **No
+Contract B message, wire field, enum, code, close code, schema, URL path, or routing input
+changes**; the walk order is private source-side selection state, B45's own class. §4's test
+answers neither major nor minor and the identifier **stays at `contract-b/4.2`**; the version
+floor does not move and **`minContractVersion` MUST NOT be raised for this set**. Contract A
+takes no set. Affected body text carries an `(amended — §34, B50)` marker, and **§34 wins over
+the body and over §14 to §33 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -619,7 +636,8 @@ B46). Only a queue-full `NOT_FORWARDED` carries `refusedAttempt`. The source req
 NACK's session, `destSlot`, and `rerouteCount` to match its current journal attempt. It also
 requires no contradictory receipt for that session and destination. It then records the
 destination, the `refused` transition, and the first refusal deadline in one durable update.
-It walks to the next compatible, untried destination on the same axis. A graceful-drain
+It walks to the next compatible, untried destination on the same axis, and past the axis in
+§34's stated order once the axis is exhausted (amended — §34, B50). A graceful-drain
 `NOT_FORWARDED` carries no proof fields. It does not start or advance this walk. A pace
 deferral happens before the durable `sent` transition and remains retryable. After pace
 admission, the sidecar records `sent` before it offers the prepared frame to the socket
@@ -2999,7 +3017,7 @@ throws that signal away. ~~It is the accepted duplication case of §9.3 announci
 | Journal entry state | Evidence | Action |
 |---|---|---|
 | Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` carrying matched proof | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
-| Destination transport refused before acceptance | Queue-full relay `NOT_FORWARDED` with a matching `refusedAttempt` and `relaySessionId`, plus no receipt for that session and destination (amended — §31, B46) | In one durable update, record `refused`, the destination in the tried set, and the first refusal deadline if it does not exist. Clear the old attempt's session and `sentAt`. **Continue the same-axis walk after that destination.** Try the next compatible, untried slot. Bounce once when no such slot remains, `maxReroutes` is reached, or the first deadline expires. |
+| Destination transport refused before acceptance | Queue-full relay `NOT_FORWARDED` with a matching `refusedAttempt` and `relaySessionId`, plus no receipt for that session and destination (amended — §31, B46) | In one durable update, record `refused`, the destination in the tried set, and the first refusal deadline if it does not exist. Clear the old attempt's session and `sentAt`. **Continue the same-axis walk after that destination, and continue past the axis in §34's stated order once the axis is exhausted** (amended — §34, B50). Try the next compatible, untried slot. Bounce once when no such slot remains on the map, `maxReroutes` is reached, or the first deadline expires. |
 | Relay graceful drain | Proof-free `NOT_FORWARDED` | Keep the entry `sent`. Do not add a tried slot, start a refusal deadline, re-route, or bounce. Wait for reconnect or the normal loss outcome. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED`, `SIM_SIZE_MISMATCH` or `MOD_ABSENT` | **Re-route.** The receiver stated it took no custody, and another slot accepts the same organism. |
 | Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. **`VERSION_UNSUPPORTED` is the first of B31's four kept gates** (added — §22, B31): the importing mod refuses a payload whose game version it has no dialect for, permanently, and D22's diagnostic-only rule does **not** retire it. `contract-a.md` **§21, A48** owns the mod-side statement — it keeps that document's §9.2 `VERSION_UNSUPPORTED` and its close `4002` as two of the four named exceptions, and states the diagnostic-only rule for `MIGRATE_OUT.gameVersion`, `parents[].gameVersion` and `MIGRATE_IN.gameVersion`; this row is the Contract B consequence and it is unchanged. |
@@ -3010,10 +3028,10 @@ throws that signal away. ~~It is the accepted duplication case of §9.3 announci
 | Rule | Statement |
 |---|---|
 | The key never changes | The `migrationId` is preserved. A re-routed frame that races a late delivery is deduplicated at whichever peer sees it second (§6.6 step 1) — this is what makes a re-route safe even when the proof was, against all the rules above, wrong. |
-| The axis never changes | An entry that left through `E` stays on the east row walk, and one that left through `N` stays on the north column walk. For a never-sent or dark destination it uses the current `effective(edge)`. For a peer-local refusal or an exact queue refusal, it **continues the walk after that destination**. It skips the source and every tried or refused slot. The durable set prevents restart and compaction from creating a loop (amended — §31, B46). `exitEdge`, `exitPosition`, `velocity`, and `heading` are untouched. |
+| The axis is preferred, never rewritten (amended — §34, B50) | ~~The axis never changes.~~ An entry that left through `E` starts on the east row walk, and one that left through `N` starts on the north column walk. For a never-sent or dark destination it uses the current `effective(edge)` and stays on its axis. For a peer-local refusal or an exact queue refusal, it **continues the walk after that destination**, and once every compatible same-axis destination is tried or unreachable it continues over the rest of the map in §34's deterministic axis-major order anchored at the source. It skips the source and every tried or refused slot. The durable set prevents restart and compaction from creating a loop (amended — §31, B46). `exitEdge`, `exitPosition`, `velocity`, and `heading` are untouched — a cross-axis delivery still enters through `opposite(exitEdge)`, which §34 declares display and geometry slack, not a defect. |
 | Only `destSlot` is rewritten | Plus the `reroute` block (§6.6). The relay reads only its `count` for queue-refusal correlation. The receiver does not act on it. `timestamp`, the annex, and the body are the same bytes. |
-| It needs a lane | With no effective neighbour on that axis there is nowhere to re-route to. An ordinary never-sent entry waits and bounces after `bounceTimeoutMs`. An exact queue-refusal chain bounces as soon as a complete current map proves that every compatible same-axis destination was tried. If the current map cannot prove exhaustion, it waits only for the first refusal deadline (amended — §31, B46). |
-| It is bounded | `reroute.count` increments on each rewrite and MUST NOT exceed `maxReroutes` (4). A present count MUST be positive. The tried set prevents a destination from repeating. The monotonic count makes every `(destSlot, rerouteCount)` pair unique inside the refusal chain. Beyond the bound, the entry bounces home. The chain also has one deadline: the first proven refusal time plus `bounceTimeoutMs`. The deadline and tried set MUST NOT reset on reroute, retry, reconnect, restart, or compaction (amended — §31, B46). |
+| It needs a lane | With no effective neighbour on that axis there is nowhere to re-route to. An ordinary never-sent entry waits and bounces after `bounceTimeoutMs`. An exact queue-refusal chain bounces as soon as a complete current map that contains the source proves that **every compatible slot on the map** was tried (amended — §34, B50; same-axis exhaustion alone no longer bounces). If the current map cannot prove exhaustion, it waits only for the first refusal deadline (amended — §31, B46). |
+| It is bounded | `reroute.count` increments on each rewrite and MUST NOT exceed `maxReroutes` (24; raised from 4 so the count cannot defeat a full-map walk — amended — §34, B50). A present count MUST be positive. The tried set prevents a destination from repeating. The monotonic count makes every `(destSlot, rerouteCount)` pair unique inside the refusal chain. Beyond the bound, the entry bounces home. The chain also has one deadline: the first proven refusal time plus `bounceTimeoutMs`. The deadline and tried set MUST NOT reset on reroute, retry, reconnect, restart, or compaction (amended — §31, B46). |
 | A later send ends the safe bounce path for that attempt | Before the sidecar offers an original or re-routed payload to its socket writer, it durably records `sent` with fresh session and `sentAt` values. A crash or enqueue error after that record MUST NOT retry or bounce that attempt. The historical refusal deadline can remain, but it cannot move a `sent` entry. Only a matched refusal of this attempt, an answer, or the normal loss path applies (amended — §31, B46). |
 | It is reported | Each re-route is a log line and a metric, and the frame carries its own `reroute.proof`. Part 2 of the exit test requires every in-flight entry to state which answer it took and why. |
 
@@ -3108,7 +3126,7 @@ guess and can never make a second organism (`contract-a.md` §13, A6, amended in
 | Situation | Origin sidecar's action |
 |---|---|
 | A sidecar `MIGRATION_NACK`, or a relay NACK with exact proof | **Bounce**, or re-route first where §9.2's table says so. A sidecar NACK is sent only before durable custody. A relay NACK proves no custody only under §9.2's exact current-attempt rules. |
-| An exact queue-refusal chain exhausts compatible untried same-axis destinations, reaches `maxReroutes`, or reaches its first refusal deadline (amended — §31, B46) | **Bounce once.** The tried set and first deadline are durable. A repeated or stale NACK, reconnect, restart, or compaction cannot create another bounce or restart the bound. |
+| An exact queue-refusal chain exhausts every compatible untried destination on the map (amended — §34, B50; it was same-axis exhaustion), reaches `maxReroutes`, or reaches its first refusal deadline (amended — §31, B46) | **Bounce once.** The tried set and first deadline are durable. A repeated or stale NACK, reconnect, restart, or compaction cannot create another bounce or restart the bound. |
 | The forward never reached a live peer — the relay link is down, or `destSlot` is vacant — for longer than `bounceTimeoutMs`, **and route-around has no lane to offer** | **Bounce.** The frame was never handed to anyone. |
 | The forward reached a live peer and no answer came back — destination **live** or **dark**, it makes no difference | **Nothing, then a `lost` record at `forwardTimeoutMs`** (§9.3). Not a re-forward, not a re-route, not a bounce. ~~Hold and re-forward toward a live destination, backing off to `forwardRetryMaxMs` (§14, B8); hold with §9.3's clock toward a dark one and bounce at the timeout.~~ **Superseded — §25, B37.** |
 | An operator runs `--release-inflight <id> bounce` on an entry in `sent` | **Bounce**, and it is the only bounce in this table that may duplicate an organism. The command prints the risk before it acts (§9.3). |
@@ -3445,7 +3463,7 @@ crossing" is now one of those claims.
 | `forwardTimeoutMs` | `300000` | sidecar | **New in `contract-b/4.1`** (added — §25, B37; default lowered from `86400000` — §27, B42). How long a forwarded entry waits for its answer before the sender records it **lost** — 5 minutes since 2026-08-19; it carried `holdTimeoutMs`'s 24 hours until the owner cut it (§27). It is a **wall clock measured from `sentAt`** and a bookkeeping deadline: nothing is re-sent at it and nothing comes home, so a sender that slept through it records a loss that had already happened (§9.3). |
 | ~~`holdTimeoutMs`~~ | ~~`86400000`~~ | — | **REMOVED — §25, B37**, with the bounded hold it timed. Its 24-hour value lives on in `forwardTimeoutMs`, which does something entirely different with it. |
 | ~~`holdAccrualFlushMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** There is no accrual to flush. |
-| `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home (§9.2). The bound remains hard during an exact queue-refusal walk (amended — §31, B46). A NEGATIVE value turns re-routing off entirely (added — §25, B37). |
+| `maxReroutes` | `24` | sidecar | **New in M4** (default raised from `4` — §34, B50: the walk may leave its axis, so the default must cover the map; the structural bound is the tried set at slots−1 under the one refusal deadline). Re-routes one entry may take before it bounces home (§9.2). The bound remains hard during an exact queue-refusal walk (amended — §31, B46). A NEGATIVE value turns re-routing off entirely (added — §25, B37). |
 | `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId` for the legacy migration-wide `neverForwarded` value. The attempt-scoped 4.2 queue proof comes from the rejected payload and does not weaken this record (amended — §31, B46). |
 | `archiveDedupWindowMs` | `172800000` | archive | **New in `contract-b/4.1`** (added — §25, B38). How long the archive remembers a record's §5.1 duplicate key — 48 hours. A duplicate that arrives inside the window is refused; one that arrives later is appended a second time. The retention is a **floor**: at least this, at most twice it, and the memory is at most two windows of keys. `--dedup-window`, `MULTIVERSE_ARCHIVE_DEDUP_WINDOW`. |
 | `inboundQueueMax` | `64` | sidecar | Shared with `contract-a.md` §10. Also the ceiling a paced backlog hits, which is what turns pacing into upstream backpressure (`contract-a.md` §7.5). |
@@ -6107,7 +6125,7 @@ the socket enqueue boundary.
 |---|---|
 | **The proof is exact** | ~~The NACK MUST carry migration-wide `neverForwarded: true`, a matching relay session, and no same-session receipt.~~ **Narrowed — §31, B46.** Queue refusal now requires attempt correlation. The migration-wide value alone cannot prove a mixed-history attempt. |
 | **The first refusal is atomic** | In one durable journal update, the source records `refused`, the refused destination in the tried set, and the first refusal deadline. The deadline is the first refusal time plus `bounceTimeoutMs`. |
-| **Progress follows the original axis** | The source keeps the `migrationId`, body, annex, `exitEdge`, geometry, velocity, heading, and original timestamp. It walks after the refused destination and selects the next live, mod-connected, compatible, untried slot on that axis. Only `destSlot` and the `reroute` block change. Since B46, the relay reads only `reroute.count` for refusal correlation. |
+| **Progress follows the original axis first** (amended — §34, B50) | The source keeps the `migrationId`, body, annex, `exitEdge`, geometry, velocity, heading, and original timestamp. It walks after the refused destination and selects the next live, mod-connected, compatible, untried slot on that axis; once that axis is exhausted it continues over the rest of the map in §34's stated order. Only `destSlot` and the `reroute` block change. Since B46, the relay reads only `reroute.count` for refusal correlation. |
 | **One destination, one try per chain** | The durable tried set includes relay transport refusals and peer-local refusals in the same chain. A reconnect, restart, or compaction MUST NOT remove a slot from it. |
 | **One deadline** | A reroute, retry, reconnect, restart, or compaction MUST NOT restart the first deadline. If the current map cannot prove that all alternatives are exhausted, the source waits only until this deadline. |
 | **The other bounds stay hard** | The source bounces when the compatible untried walk is exhausted, when `maxReroutes` is reached, or when the first deadline expires. A repeated NACK or custody tick MUST NOT create a second bounce. |
@@ -6133,8 +6151,9 @@ changes. The new journal fields are private sidecar state. §4 answers neither m
 The identifier stays at **`contract-b/4.1`**, and `/contract-b/v4` does not move. Contract A
 takes no set and no version change.
 
-**Enforced by the source sidecar:** proof validation, the durable update, same-axis selection,
-the one deadline, the hard reroute bound, the pre-enqueue commit, and one terminal bounce.
+**Enforced by the source sidecar:** proof validation, the durable update, axis-first selection
+(same-axis, then §34's full-map order — amended — §34, B50), the one deadline, the hard reroute
+bound, the pre-enqueue commit, and one terminal bounce.
 
 ## 31. Queue refusal proof identifies one attempt (`contract-b/4.2`, 2026-08-23)
 
@@ -6375,3 +6394,46 @@ one place the value is authored; the **relay**, for carrying what it does not un
 **archive and any client**, for rendering an absent name as unknown rather than as anonymous, for
 escaping both as the untrusted text they are, and for never keying, routing or reconciling on
 either.
+
+## 34. A refused chain leaves its axis before it gives up (2026-08-31)
+
+**Where this came from.** The map this contract runs on grew enforcing population gates
+(§31's deployment period), and a source whose whole exit row was closed watched every
+refusal chain exhaust its axis and bounce the organism home — past open, compatible worlds
+one row over. On a map operated with a deliberately always-open **sink** world, the same-axis
+rule was the only thing standing between a refused organism and a world that wanted it. B45
+chose the axis to keep the walk small and provable; B50 keeps the proof discipline and widens
+the walk.
+
+**B50** gives the bounded refusal walk a second phase.
+
+### B50 — The bounded walk gains a full-map second phase (§3.3, §9.2, §9.4, §12, §30 B45, §31 B46)
+
+| Rule | Statement |
+|---|---|
+| **What changes** | When every compatible same-axis destination is tried or unreachable, a refusal chain — peer-local and exact queue refusals alike — continues over the remaining map positions instead of stopping at its axis. "Exhausted" comes to mean **every compatible slot on the map tried**, and it is provable from the current frame wherever the source can locate itself. |
+| **The order is stated, and anchored at the source** | For a horizontal exit edge: every row of the torus in ascending perpendicular offset from the source's own row (wrapped), each row scanned from the source's column in the edge's signed direction (wrapped). A vertical exit edge swaps the roles of rows and columns. Offset zero re-covers the exit axis, so the second phase is a complete total order on its own. The order is a pure function of (frame, edge, source position): it does not reshuffle as refusals accrue, and the durable tried set is what turns repeated selections into a loop-free walk over distinct worlds. |
+| **The anchor cannot vanish** | B45's exhaustion proof was anchored at the refused destination, which can leave the frame between the NACK and the current map. The full-map order is anchored at the source, which is on every frame that contains it, so provable exhaustion no longer depends on locating a slot that may be gone. A frame that does not contain the source proves nothing, and the chain waits for its deadline exactly as before. |
+| **What stays** | The proof rules (§31, B46) — no walk starts or advances without an exact current-attempt proof or a live peer's own NACK. The durable tried set, one destination one try. The one first-refusal deadline, never reset. `maxReroutes` as a hard count. One terminal bounce, and at-most-once throughout. A peer-refusal chain that exhausts the map still re-offers its current live destination until the deadline rather than bouncing early — a population gate can reopen inside the window; only the exact queue-refusal chain bounces on provable exhaustion. |
+| **`exitEdge` is untouched** | The annex and body stay the same bytes (§9.2). The receiver keeps deriving its entry edge as `opposite(exitEdge)` even when the delivery was geometrically indirect. Under two-way lanes every edge is an entry edge, the organism lands inset and immune with its copied motion, and this contract declares the mismatch **display and geometry slack, not a defect**. Rewriting `exitEdge` to match the final hop would be a wire-visible semantic change and buys nothing. |
+| **The count default moves** | `maxReroutes` defaults to **24** (was 4). The chain's structural bound is the tried set — at most `slots − 1` distinct destinations — under the unchanged 20-second deadline, so the count only has to be large enough not to defeat a full-map walk on the deployed 21-slot map (worst chain 20). An operator whose map outgrows the default raises the knob; a configured value, small or negative, keeps its exact B45 meaning. |
+
+**Why the wire is unchanged.** No message, field, enum, code, close code, schema, URL path, or
+relay routing input changes. The relay routes on `destSlot` alone and reads `reroute.count` only
+for §31's correlation; the receiver reads `exitEdge` only to place a spawn. Which slot a source
+selects next was always private selection state — B45 constrained it by policy, and B50 amends
+the policy. §4's test answers neither major nor minor. The identifier **stays at
+`contract-b/4.2`**, `/contract-b/v4` does not move, and **`minContractVersion` MUST NOT be
+raised for this set**: a 4.1 or 4.2 receiver accepts a cross-axis delivery as an ordinary
+migration, and a mixed fleet needs no coordination beyond deploying the sidecars that walk
+further.
+
+**What this costs, named.** A chain that crosses the map spends one offer round-trip per closed
+gate inside its one 20-second deadline; a chain that cannot finish in time still bounces home,
+which is the safe direction. The live map draws a cross-axis delivery as its own dashed route
+(the lane grammar cannot carry it), and an older console that predates the drawing drops that
+one animation while the feed, the census and the record stay exact.
+
+**Enforced by the source sidecar:** the two-phase order, the durable tried set, the one
+deadline, the hard count, one terminal bounce. **Enforced by nobody else**, which is the point:
+the relay and the receiver treat a cross-axis frame exactly as they treat any other.

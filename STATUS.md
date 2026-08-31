@@ -230,6 +230,21 @@ profile, and world setting was kept, and all five rejoined the map with their mo
 it, so the gates are honestly closed while those populations drain, and a return from an
 offline window longer than an hour no longer starts a re-flood by relearning from nothing.
 
+Later on 2026-08-31 the operator began turning slot 9 into a deliberately always-open **sink
+world**: a world whose gate never refuses, whose food is made scarce enough that arrivals mostly
+starve, and which therefore absorbs the map's refused leftovers at low CPU cost. Slot 9 now runs
+`adaptive-shadow` admission (never refuses, keeps learning) via a one-shot environment override
+at start; the durable per-world form ships with the next release as a launcher profile setting
+(`profile set --inbound-admission`). The matching routing change — Contract B §34, B50: a
+refused chain walks its own axis first and then the rest of the map in a stated order, so a
+migration refused everywhere on its axis can still reach an open world one row over — is merged
+with its contract amendment, sidecar implementation, live-map dashed cross-axis rendering, and
+regression suite (including a six-world sink regression where only one world accepts). The
+`maxReroutes` default rises from 4 to 24 so the count cannot defeat a full-map walk; the wire is
+unchanged and the identifier stays `contract-b/4.2`. **None of this is in a published release
+yet** — it awaits the 0.3.11 tag, and the in-game fertility/biomass scarcity settings for slot 9
+are an operator step not yet taken.
+
 The update also found a `0.3.10` release defect on the graphical path. The installer window
 passes an emptied name box as `-`, the project's "publish nothing" answer, but Windows
 PowerShell's `-File` argument binding refuses a bare `-` before the installer prints a single

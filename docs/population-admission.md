@@ -151,6 +151,13 @@ MULTIVERSE_INBOUND_ADMISSION=fixed
 MULTIVERSE_INBOUND_POPULATION_LIMIT=40
 ```
 
+The environment variables are only the flags' defaults, so a launcher-started sidecar inherits
+them machine-wide. To give **one world of several** its own gate, set the pair on that world's
+launcher profile — `multiverse-launcher.exe profile set NAME --inbound-admission adaptive-shadow`
+(and `--inbound-population-limit` beside `fixed`) — which passes the explicit flag and beats the
+environment. An empty profile value keeps the sidecar's default. This is how an operator runs a
+deliberately always-open sink world beside enforcing neighbours.
+
 Enforcement no longer waits on a promotion: `adaptive` ships as the default, and a world that has
 not learned yet simply fails open. The staged shadow-first policy below is retained as the record
 of how the default earned that position; `adaptive-shadow` is now the tool for reviewing a
@@ -287,6 +294,16 @@ rollback.
   value with exact attempt proof. Delayed peer and relay NACK tests protect the pending alternate.
 - Restart, compaction, session rotation, deadline, `maxReroutes`, crash, and closed-writer tests
   verify durable progress. They also verify that a committed alternate cannot retry or bounce.
+- The §34 B50 cross-axis tests: `WalkAnywhere` order/skip/exhaustion pins in `mapwalk`;
+  `TestTransportRefusalChainCrossesAxesToTheOpenWorld` walks a 3×2 map's exit row, crosses to
+  the other row in the stated order, and bounces once on provable full-map exhaustion with the
+  deadline and axis untouched; `TestPeerRefusalChainCrossesAxes` does the same under live NACKs
+  with no transport deadline; `TestPeerRefusalFullMapExhaustionDoesNotBounceEarly` pins the kept
+  asymmetry; `TestCrossAxisChainSurvivesRestart` replays a crossed chain through compaction. The
+  sink regression `TestRefusedMigrationCrossesAxesToTheSinkWorld` runs six live worlds where
+  only one accepts: the migration crosses axes through four population refusals and the sink
+  spawns it exactly once. `TestPageAnimatesACrossAxisReroute` pins the live map's dashed
+  cross-axis route.
 - On 2026-08-23, five Windows worlds and six hosted Linux worlds ran the candidate in
   `adaptive-shadow`. All eleven retained their slots with mod and relay connected, published the
   requested-speed and admission fields, kept enforcement false, and reported zero capacity sheds

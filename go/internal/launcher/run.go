@@ -446,6 +446,17 @@ func sidecarArgs(p Profile) []string {
 	if p.WorldName != "" {
 		args = append(args, "--world-name", p.WorldName)
 	}
+	// Per-world admission (docs/population-admission.md). The explicit flag
+	// beats MULTIVERSE_INBOUND_ADMISSION in the sidecar by design — the env var
+	// is only the flag's default — so this is what lets one world of five run a
+	// different gate. Unset stays unset, like the names above.
+	if p.InboundAdmission != "" {
+		args = append(args, "--inbound-admission", p.InboundAdmission)
+	}
+	if p.InboundPopulationLimit > 0 {
+		args = append(args, "--inbound-population-limit",
+			fmt.Sprintf("%d", p.InboundPopulationLimit))
+	}
 	return args
 }
 

@@ -3202,13 +3202,17 @@ $defaultProfile = [ordered]@{
     peerId         = $peerId
     relayUrl       = $RelayUrl
     createdUtc     = $profileCreated
-    # THE TWO PUBLIC NAMES GO LAST, AND THEY ARE ALWAYS WRITTEN. The launcher's
-    # own writer emits the same seventeen keys in this order (Profile in
-    # go/internal/launcher/profile.go) and a test parses this file to keep the
-    # two from drifting; an unset name is an empty string in both, never a
-    # missing key.
-    keeper         = $Keeper
-    worldName      = $WorldName
+    # THE TWO PUBLIC NAMES AND THE ADMISSION PAIR GO LAST, AND THEY ARE ALWAYS
+    # WRITTEN. The launcher's own writer emits the same nineteen keys in this
+    # order (Profile in go/internal/launcher/profile.go) and a test parses this
+    # file to keep the two from drifting; an unset name is an empty string in
+    # both, never a missing key. The installer never chooses an admission mode:
+    # empty and zero mean the sidecar keeps its own default, and an operator
+    # changes them later with 'profile set --inbound-admission'.
+    keeper                 = $Keeper
+    worldName              = $WorldName
+    inboundAdmission       = ''
+    inboundPopulationLimit = 0
 }
 ConvertTo-AsciiJson ($defaultProfile | ConvertTo-Json -Depth 4) |
     Set-Content -LiteralPath $defaultProfilePath -Encoding ASCII
