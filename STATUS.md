@@ -30,10 +30,10 @@ memory bars, pipeline stages, and a coverage strip show the other live results. 
 each static and dynamic visual. Full charts show UTC x-axis values and exact values under pointer
 or keyboard inspection.
 
-Production runs exact public feature commit [`c9e4f3a`](https://github.com/jpinedaa/bibites-multiverse/commit/c9e4f3a2601fda3dd631eec018758e99c0952162).
-That exact build is live. Commit [`2564ea1`](https://github.com/jpinedaa/bibites-multiverse/commit/2564ea19f86898ffe756b4c9dfe08d910c45190e)
-makes a stopped traffic producer publish gaps instead of reusing an old request window.
-The correction is not yet deployed.
+Production runs exact public commit [`24eb13d`](https://github.com/jpinedaa/bibites-multiverse/commit/24eb13dd4bd5ea4bef95f7c011224c08a07a830a),
+deployed 2026-09-01T00:47Z by a gated archive restart with a 125-second participant outage and a
+complete record. That build carries commit [`2564ea1`](https://github.com/jpinedaa/bibites-multiverse/commit/2564ea19f86898ffe756b4c9dfe08d910c45190e),
+which makes a stopped traffic producer publish gaps instead of reusing an old request window.
 The `2026-08-24T19:40Z` closeout verified Linux pressure, VM events, public request rate, and HTTP
 status classes. It also verified nginx p50 and p95 duration, fixed route groups, and archive input
 rate. Host verification passed 34 checks with no failure. All eight public routes returned HTTP
@@ -93,7 +93,7 @@ each entry once to a different destination.
 
 Contract B 4.2 is an optional-minor extension of the existing `/contract-b/v4` endpoint. The
 hosted minimum remains unset, so 4.0 and 4.1 peers still join. The active hosted relay and archive
-already speak 4.2 at exact source `c9e4f3a`. Slot 7 runs the `fdb707e` downtime-restore sidecar,
+already speak 4.2 at exact source `24eb13d`. Slot 7 runs the `fdb707e` downtime-restore sidecar,
 and since 2026-08-31 the five controlled Windows worlds on the operator's second machine (slots 9
 and 13–16) run release `0.3.11`, so all six controlled Windows worlds speak 4.2. The six
 cloud-world sidecars await the same update. This relay-first order means an old participant can
@@ -252,8 +252,9 @@ no coordination; a W-axis chain refused by its whole row delivered once to slot 
 `25547bf` and the drift gate is green. Release `0.3.11` was tagged and published by the release
 runner on 2026-08-31: eight assets, every package digest matching the published `SHA256SUMS`,
 and both stable-named downloads resolving to the new tag. The
-hosted archive picks up the dashed cross-axis rendering on its next ordinary deploy; until then
-the live page simply does not animate those hops.
+hosted archive deployed that rendering on 2026-09-01 (00:47Z gated restart, 125-second
+participant outage, complete record); the live page now draws dashed cross-axis routes as soon
+as a B50-capable world produces one.
 
 To carry the sink traffic pattern, the hosted relay's frame ceiling rises from 50 to **200**
 frames per second — per-destination migration fan-in 6/s → 25/s, and every sender's published
@@ -330,7 +331,7 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `c9e4f3a`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.11`. The six cloud-world sidecars await the same update. |
+| Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `24eb13d`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.11`. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
