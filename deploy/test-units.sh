@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Check the systemd units in this kit without changing a host.
 #
-# THE RULE THIS FILE EXISTS FOR: the archive must not name the relay in Wants=.
-# Wants= is a start-time pull, so `systemctl restart multiverse-archive` would
-# start a relay an operator had just stopped, and that silently defeats the
-# record-preserving sequence in RESTART-POLICY.md.
+# THE RULE THIS FILE EXISTS FOR: the relay cannot run without a ready archive.
+# Unit ordering alone is insufficient for Type=simple, so the relay both binds
+# to the archive unit and probes its post-replay health endpoint before exec.
 #
 # The second rule has the same shape: a reboot must be able to hold the relay
 # down, and the two things that make that possible — one boot pull-in, and a
@@ -24,19 +23,25 @@ fail() {
   exit 1
 }
 
-wants="$(grep -E '^Wants=' "$archive" || true)"
-[ -n "$wants" ] || fail "$archive has no Wants= line"
-if printf '%s\n' "$wants" | grep -q 'multiverse-relay\.service'; then
-  fail "the archive unit names the relay in Wants=. A manual archive restart would
-    pull the relay back up and the map would run live through the whole replay
-    with nothing recording it. Keep the relay in After= only (RESTART-POLICY.md)."
+if grep -Eq '^(After|Wants|Requires|BindsTo)=.*multiverse-relay\.service' "$archive"; then
+  fail "the archive must not depend on or order itself after the relay; it has to
+    finish replay while the relay readiness gate keeps the map closed"
 fi
+grep -Eq '^After=.*multiverse-archive\.service' "$relay" ||
+  fail "the relay must order itself after the archive unit"
+grep -Fqx 'BindsTo=multiverse-archive.service' "$relay" ||
+  fail "the relay must stop when the archive leaves active state"
+grep -Fqx 'ExecStartPre=/opt/multiverse/deploy/wait-for-archive.sh' "$relay" ||
+  fail "the relay must wait for archive /healthz after unit ordering"
+grep -Fqx 'TimeoutStartSec=infinity' "$relay" ||
+  fail "systemd must not pre-empt the readiness script's bounded timeout"
+grep -Fqx 'RestartPreventExitStatus=SIGKILL' "$archive" ||
+  fail "a MemoryMax SIGKILL must leave the archive failed instead of replaying forever"
+grep -Fqx 'OOMPolicy=kill' "$archive" ||
+  fail "an archive cgroup OOM must terminate the whole unit"
 
-grep -Eq '^After=.*multiverse-relay\.service' "$archive" ||
-  fail "the archive unit must still order itself After= the relay"
-
-# After= without Wants= is safe at boot ONLY because both units start from the
-# target on their own. If either loses that, the fix above becomes a boot bug.
+# Both units remain independently enabled; BindsTo supplies the runtime safety
+# relationship and the hold condition can still suppress the relay at boot.
 for unit in "$relay" "$archive"; do
   grep -Fqx 'WantedBy=multi-user.target' "$unit" ||
     fail "$unit must be WantedBy=multi-user.target, or After= alone leaves it unstarted at boot"
@@ -73,6 +78,18 @@ grep -Fq "$hold_dropin" "$policy" ||
     about where the reboot hold-down lives."
 grep -Fq "$hold_condition" "$policy" ||
   fail "$policy no longer quotes '$hold_condition'"
+
+# A soft Go target did not contain the archive when startup allocated several
+# gigabytes. The reusable unit takes host-specific hard bounds through the
+# provisioned drop-in; all three properties must stay wired together.
+for setting in MV_ARCHIVE_MEMORY_HIGH MV_ARCHIVE_MEMORY_MAX MV_ARCHIVE_MEMORY_SWAP_MAX; do
+  grep -Fq "$setting" "$provision" ||
+    fail "$provision no longer renders $setting into the archive memory drop-in"
+done
+for property in MemoryHigh MemoryMax MemorySwapMax; do
+  grep -Eq "^${property}=.*MV_ARCHIVE_MEMORY" "$provision" ||
+    fail "$provision no longer writes $property from a deployment setting"
+done
 
 # Every timer in this kit, by glob rather than by a hand-kept list, so a new one
 # is covered the day it is added. A timer that is not WantedBy=timers.target is

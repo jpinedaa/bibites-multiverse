@@ -2,6 +2,7 @@ package archive
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -760,6 +761,47 @@ func TestADifferentBrainBucketWidthIsADifferentFile(t *testing.T) {
 	}
 	if usable {
 		t.Fatal("a sidecar written at another bucket width was accepted")
+	}
+}
+
+// Production lines can exceed bufio.Scanner's 64 KiB token limit. The
+// streaming loader must bound the whole file without imposing that unrelated
+// bound on one valid aggregate record.
+func TestRollUpStreamAcceptsLargeLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, rollupSidecarName)
+	peers := make(map[string]int, 10_000)
+	for i := 0; i < 10_000; i++ {
+		peers[fmt.Sprintf("peer-%05d", i)] = i
+	}
+	lines := []rollupLine{
+		{R: "h", V: rollupVersion, BucketMs: BrainBucketMs},
+		{R: "rp", ByPeer: peers},
+		{R: "f", CoveredRecords: 10_000},
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, line := range lines {
+		b, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	st, usable, err := loadRollupState(path)
+	if err != nil || !usable {
+		t.Fatalf("load usable=%v err=%v", usable, err)
+	}
+	if got := len(st.byPeer); got != len(peers) {
+		t.Fatalf("loaded %d peers from the large line, want %d", got, len(peers))
 	}
 }
 

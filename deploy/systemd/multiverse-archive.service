@@ -1,19 +1,12 @@
 [Unit]
 Description=Bibites Multiverse archive (Contract B subscriber, status page)
 Documentation=file:///opt/multiverse/deploy/RESTART-POLICY.md
-# ORDERING ONLY, and the relay is named HERE AND NOWHERE ELSE IN THIS UNIT.
-# After= without Wants= is the whole point: Wants= is a START-TIME PULL, so
-# `systemctl restart multiverse-archive` would start a relay the operator had
-# just stopped on purpose. That silently defeats the record-preserving sequence
-# in RESTART-POLICY.md — the map runs live for the whole replay and NOTHING
-# RECORDS IT, while the operator believes they avoided exactly that. Boot needs
-# no pull: both units carry WantedBy=multi-user.target and provision.sh enables
-# both, so the target starts the relay and After= only orders it first.
-After=network-online.target multiverse-relay.service
-# And NOT Requires= either, for the reason that came first: the archive retries
-# its subscription on its own ladder, so it should keep trying while the relay
-# is down rather than be stopped with it — and a relay restart must not cost an
-# archive replay, which is the expensive one.
+# The archive must finish its replay before the relay opens. It therefore has no
+# dependency on the relay: its own reconnect ladder waits while the relay unit's
+# readiness gate waits for /healthz. The relay binds to this unit in the other
+# direction, so an archive failure closes the map instead of leaving an
+# unrecorded interval.
+After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=600
 StartLimitBurst=6
@@ -37,6 +30,11 @@ Restart=always
 # time, and a tight loop would be a self-inflicted denial of service on a box
 # with two vCPUs.
 RestartSec=15s
+# A cgroup MemoryMax hit terminates the main process with SIGKILL. Replaying the
+# same state again under the same cap is a host-pressure loop, not recovery.
+# Fail stopped; BindsTo= on the relay takes the map down with the recorder.
+RestartPreventExitStatus=SIGKILL
+OOMPolicy=kill
 # The archive's own shutdown gives itself 5 s and then warns. This leaves room
 # for a flush without letting a wedged process hold the boot.
 TimeoutStopSec=45
@@ -50,10 +48,11 @@ NoNewPrivileges=true
 # Under pressure this is the one to lose. Losing it costs a ledger gap, but
 # losing the relay stops the map.
 OOMScoreAdjust=+200
-# THERE IS NO MemoryMax HERE, AND THAT IS DELIBERATE. A hard cap kills the
-# replay, and the replay is the one thing that must not fail. provision.sh writes
-# a MemoryHigh drop-in when deploy.env sets one: MemoryHigh throttles and
-# reclaims, it does not kill.
+# provision.sh writes optional MemoryHigh, MemoryMax, and MemorySwapMax values
+# into a deployment-specific drop-in. The unit stays reusable across host
+# sizes, while a production deployment can contain a bad replay inside this
+# service instead of allowing host-wide OOM kills. SIZING.md owns the selection
+# rule; a MemoryMax hit is a capacity failure, not a successful replay.
 #
 # The replay also saturates a core while it runs. On a two-vCPU box that is the
 # whole machine, so it yields to the relay rather than competing with it.

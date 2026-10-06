@@ -324,7 +324,11 @@ The archive dials only after the replay, so its backoff is still short.
 Each sidecar failed for the whole outage, so its backoff is near 30 seconds.
 The archive therefore normally resubscribes before the relay places the first peer.
 
-By hand, that ordering is a race and not a guarantee.
+By hand, that ordering is a race and not a guarantee. The systemd units remove
+the larger failure: the relay cannot start until archive `/healthz` answers and
+it stops if the archive stops. `/healthz` proves replay readiness rather than
+subscription, though, so archive and peers still reconnect concurrently when
+the relay socket opens.
 The [peer gate](#the-peer-gate) is what removes it, and `restart-archive.sh` raises the gate before
 it stops the relay for exactly this reason: with peers held at the front door, the archive is the
 only client that can subscribe, so the ordering is decided rather than won.
@@ -346,8 +350,10 @@ If a placement claim comes first, the record has a gap.
 The gap runs from that claim to the archive line.
 Write that gap into the deployment record.
 
-**CAUTION.** This sequence needs the current archive unit file.
-An older unit named the relay in `Wants=` as well as in `After=`.
+**CAUTION.** This sequence needs the current units. The relay binds to the
+archive, orders itself after it, and waits for `/healthz` before exec. The
+archive has no relay dependency. An older archive unit named the relay in
+`Wants=` as well as in `After=`.
 `Wants=` is a start-time pull, so `restart multiverse-archive` started the stopped relay again.
 The map then ran live for the whole replay and nothing recorded it.
 Install the current units first:
@@ -358,10 +364,11 @@ sudo /opt/multiverse/deploy/provision.sh --only systemd
 
 That phase reloads the systemd configuration and costs no outage.
 Run it before you stop the relay, because it starts stopped units.
-Then check that the archive unit does not name the relay in `Wants=`:
+Then check both directions:
 
 ```sh
-systemctl show -p Wants multiverse-archive.service
+systemctl show -p After -p BindsTo multiverse-relay.service
+systemctl show -p After -p Wants -p Requires -p BindsTo multiverse-archive.service
 ```
 
 **CAUTION.** A migration count that only rises does not prove a complete record.
@@ -391,21 +398,24 @@ Before a planned reboot:
 4. Create the approved off-host backup or snapshot.
 5. Announce the window.
 
-A reboot starts both units from `multi-user.target`.
-The relay is live while the archive replays, so the record has a gap.
-Hold the relay down across the boot when ledger continuity is required.
+A reboot starts both units from `multi-user.target`. The relay orders itself
+after the archive and its readiness probe waits for `/healthz`, so it stays
+stopped through replay. `BindsTo=` also stops it if the archive fails later.
 
-Check first that one hold-down is enough to hold this unit:
+That removes the replay-length gap. It does not decide which client connects
+first after the relay socket opens. Hold the relay down across boot and raise
+the peer gate before releasing it when ledger continuity is required.
+
+Check first that the dependency and hold-down are installed:
 
 ```sh
-systemctl show -p WantedBy -p RequiredBy multiverse-relay
-systemctl show -p Wants multiverse-archive.service
+systemctl show -p After -p BindsTo multiverse-relay.service
+systemctl cat multiverse-relay.service
 ```
 
-`WantedBy=multi-user.target` with an empty `RequiredBy=` means the target is the relay's only boot
-pull-in, and the archive must not name the relay in `Wants=`.
-Any other name in those three properties starts the relay whatever you do to the target, and
-`systemctl list-dependencies --reverse multiverse-relay.service` says which one.
+The relay must bind to and order itself after the archive, carry the
+`wait-for-archive.sh` pre-start, and retain the `RELAY-HOLD` condition. The
+archive must not depend on the relay.
 
 Then remove that pull-in and reboot:
 
@@ -563,8 +573,12 @@ It stops retrying after repeated failures.
 This limit prevents an archive replay failure from consuming the host indefinitely.
 The monitor must alert a person when a unit enters the failed state.
 
-The host protects relay availability under memory pressure.
-An archive failure loses record coverage, but a relay failure stops the map.
+The host protects record integrity under memory pressure. An archive failure
+stops the relay through `BindsTo=`, so systemd does not leave a live map with no
+recorder. A cgroup OOM ends the archive with `SIGKILL`, and
+`RestartPreventExitStatus=SIGKILL` leaves it failed instead of replaying the
+same oversized state until the host is exhausted. Other failures retain the
+bounded restart policy.
 
 A restart a package manager performs is also an unplanned restart of this class, however planned the
 deployment around it was. It is the worst-shaped one, because it restarts the relay and the archive

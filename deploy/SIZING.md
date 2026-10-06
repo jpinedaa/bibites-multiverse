@@ -381,6 +381,14 @@ appends the keys that moved, and the file is rewritten whole when it grows past
 `3` times the state it holds. So the `123 MiB` a day is write volume and not
 growth. The file on disk stays around `20 MB` for the workload above.
 
+Startup reads this file as a stream of committed save batches. Its temporary
+memory is therefore the largest batch, not the size of `rollup.jsonl`. This
+matters when the live aggregate itself is large: a compacted file can be
+gigabytes, but startup must not hold a second whole-file copy beside the maps it
+is rebuilding. Builds before this streaming reader did hold that copy. Size
+those builds for the file plus the rebuilt state, or upgrade before restarting
+them on a constrained host.
+
 **The save interval does not bound loss**, which is what makes it a free knob:
 everything behind the sidecar's cursor is still in the raw record and the next
 start folds it. It trades write volume against a few seconds of replay tail, and
@@ -444,6 +452,29 @@ That leaves `434 MiB` for the excursion, for the collector floor, and for a rest
 Once the collector floor passes the limit, the exact value of the limit stops mattering:
 `800MiB` and `1200MiB` reach the same ceiling on the same day.
 The value decides how much resident headroom and CPU the host has until then.
+
+### Hard containment
+
+`GOMEMLIMIT` is a collector target, not a safety boundary. Configure the
+archive's systemd cgroup on a shared service host so an unexpectedly large or
+defective replay cannot force host-wide OOM kills:
+
+```text
+MV_ARCHIVE_MEMORY_HIGH       = early reclaim and throttle threshold
+MV_ARCHIVE_MEMORY_MAX        = hard archive-unit boundary
+MV_ARCHIVE_MEMORY_SWAP_MAX   = additional swap allowed to this unit
+```
+
+Select `MemoryMax` below `archive_ceiling` and above the measured healthy replay
+peak. Select `MemoryHigh` below it so pressure is visible before the kill. Set
+`MemorySwapMax=0` when a replay must stop instead of consuming swap; otherwise
+give it only the recorded crash-barrier allowance. A `MemoryMax` hit means the
+replay does not fit. The service restart burst is bounded, and the monitor must
+surface the stopped unit. Move it to a larger host or reduce approved retained
+state before retrying.
+
+This boundary changes the failure domain. It does not make an oversized replay
+fit, and it does not replace the pre-restart capacity check.
 
 ### Swap
 
