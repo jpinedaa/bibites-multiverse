@@ -453,6 +453,29 @@ Once the collector floor passes the limit, the exact value of the limit stops ma
 `800MiB` and `1200MiB` reach the same ceiling on the same day.
 The value decides how much resident headroom and CPU the host has until then.
 
+### Hard containment
+
+`GOMEMLIMIT` is a collector target, not a safety boundary. Configure the
+archive's systemd cgroup on a shared service host so an unexpectedly large or
+defective replay cannot force host-wide OOM kills:
+
+```text
+MV_ARCHIVE_MEMORY_HIGH       = early reclaim and throttle threshold
+MV_ARCHIVE_MEMORY_MAX        = hard archive-unit boundary
+MV_ARCHIVE_MEMORY_SWAP_MAX   = additional swap allowed to this unit
+```
+
+Select `MemoryMax` below `archive_ceiling` and above the measured healthy replay
+peak. Select `MemoryHigh` below it so pressure is visible before the kill. Set
+`MemorySwapMax=0` when a replay must stop instead of consuming swap; otherwise
+give it only the recorded crash-barrier allowance. A `MemoryMax` hit means the
+replay does not fit. The service restart burst is bounded, and the monitor must
+surface the stopped unit. Move it to a larger host or reduce approved retained
+state before retrying.
+
+This boundary changes the failure domain. It does not make an oversized replay
+fit, and it does not replace the pre-restart capacity check.
+
 ### Swap
 
 Do not use swap as the normal capacity for a live replay heap.

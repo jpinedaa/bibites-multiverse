@@ -74,6 +74,18 @@ grep -Fq "$hold_dropin" "$policy" ||
 grep -Fq "$hold_condition" "$policy" ||
   fail "$policy no longer quotes '$hold_condition'"
 
+# A soft Go target did not contain the archive when startup allocated several
+# gigabytes. The reusable unit takes host-specific hard bounds through the
+# provisioned drop-in; all three properties must stay wired together.
+for setting in MV_ARCHIVE_MEMORY_HIGH MV_ARCHIVE_MEMORY_MAX MV_ARCHIVE_MEMORY_SWAP_MAX; do
+  grep -Fq "$setting" "$provision" ||
+    fail "$provision no longer renders $setting into the archive memory drop-in"
+done
+for property in MemoryHigh MemoryMax MemorySwapMax; do
+  grep -Eq "^${property}=.*MV_ARCHIVE_MEMORY" "$provision" ||
+    fail "$provision no longer writes $property from a deployment setting"
+done
+
 # Every timer in this kit, by glob rather than by a hand-kept list, so a new one
 # is covered the day it is added. A timer that is not WantedBy=timers.target is
 # installed, enabled and never fires; a timer whose service is missing fails at
