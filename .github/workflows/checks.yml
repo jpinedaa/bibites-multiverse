@@ -170,6 +170,9 @@ jobs:
       - name: systemd units
         run: deploy/test-units.sh
 
+      - name: archive readiness gate
+        run: deploy/test-wait-for-archive.sh
+
       # The monitor's transfer arithmetic is the only thing watching the bill,
       # and both of its failure modes are silent: a check that alerts every
       # tick gets muted, a check that never alerts is decoration. The script

@@ -4,7 +4,11 @@
 # the one whose absence is most embarrassing."
 Description=Bibites Multiverse relay (Contract B)
 Documentation=file:///opt/multiverse/deploy/RESTART-POLICY.md
-After=network-online.target
+# BindsTo+After means the relay is never active without the archive unit. The
+# ExecStartPre probe below supplies readiness: Type=simple alone becomes active
+# before the archive's startup replay finishes.
+After=network-online.target multiverse-archive.service
+BindsTo=multiverse-archive.service
 Wants=network-online.target
 # Ten restarts in five minutes before systemd gives up. A relay that crash-loops
 # faster than that is not going to be fixed by an eleventh try, and monitor.sh's
@@ -25,7 +29,11 @@ WorkingDirectory=/var/lib/multiverse
 # other" — so ExecStart carries nothing and retuning a limit is one file plus one
 # restart, never a unit edit.
 EnvironmentFile=/etc/multiverse/relay.env
+ExecStartPre=/opt/multiverse/deploy/wait-for-archive.sh
 ExecStart=/opt/multiverse/bin/multiverse-relay
+# wait-for-archive.sh owns a bounded, deployment-selected deadline. Do not let
+# systemd's shorter default start timeout pre-empt that diagnostic refusal.
+TimeoutStartSec=infinity
 
 Restart=always
 RestartSec=5s
