@@ -10,8 +10,9 @@ map, health, and broadcast endpoints are unavailable.
 ## Current public phase
 
 M5 delivered the public release, hosted service, participant packages, and support guides. The
-hosted experiment is now paused. Its final infrastructure backups and private operator receipts
-are retained outside this public repository.
+hosted experiment is now paused. A future return will provision fresh infrastructure from this
+source and import the privately retained latest world-save seeds. It will not restore a whole
+server image. Private operator receipts and save data remain outside this public repository.
 
 The exit test requires all of these results:
 
