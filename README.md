@@ -18,19 +18,23 @@
 
 </div>
 
+> [!IMPORTANT]
+> **The hosted Bibites Multiverse service is paused as of October 6, 2026.** The public map,
+> broadcast, enrollment, relay, and archive endpoints are unavailable. The source, release
+> packages, and documentation remain here as a historical record. Existing local worlds and save
+> files remain on their owners' computers.
+
 Bibites Multiverse connects independent copies of *The Bibites* as neighboring ecosystems.
 Organisms cross one simulation border and continue their lives in another world.
 
 Every participant keeps a separate game, clock, ecosystem, and save history. This is not one
 synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
 
-## Start here
+## Historical entry points
 
-- **[Watch broadcast](https://bibitesmultiverse.com/watch).** See one shared game camera.
-- **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
-  species, and lineages.
-- **[Connect your world](docs/participant/install.md).** Use the Windows setup or Linux complete
-  package. Add-on packages can use a supported game that you already have.
+- **[Read the project status](STATUS.md).** See the paused state and retained artifacts.
+- **[Review the participant guide](docs/participant/install.md).** These instructions describe the
+  former hosted service and remain for historical and local development use.
 
 > [!IMPORTANT]
 > **Bibites Multiverse `0.3.11` is public.** The Windows download is one setup executable with an
@@ -274,11 +278,11 @@ A connected world crosses a network boundary. The package limits what crosses th
 Before you connect a world, read
 [what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world).
 
-## Public experiment
+## Public experiment (historical)
 
-The hosted entry point is [bibitesmultiverse.com](https://bibitesmultiverse.com/).
-The first announced service period runs from **August 14 through November 14, 2026**.
-Read the [project status](STATUS.md) for the release and milestone state.
+The hosted entry point was `bibitesmultiverse.com`. The service began on August 14, 2026 and was
+paused on October 6, 2026. Read the [project status](STATUS.md) for the final hosted state and
+retained artifacts.
 
 The homepage explains the experiment and shows a live summary. Its download section walks a
 Windows reader through three steps: download the setup, run it, and select **Install**. Then the

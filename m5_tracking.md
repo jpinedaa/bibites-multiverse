@@ -2,7 +2,8 @@
 
 > [!NOTE]
 > This record was frozen after the `0.1.0` publication on 2026-08-15 UTC.
-> Read [`STATUS.md`](STATUS.md) for the public project state.
+> It remains a historical delivery record. Read [`STATUS.md`](STATUS.md) for the paused project
+> state after the hosted service shut down on 2026-10-06.
 
 M5 changed Bibites Multiverse from a private development grid into a public experiment.
 This document records its decisions, delivered work, and test evidence.

@@ -1,14 +1,17 @@
 # Project status
 
-Last updated: 2026-08-31 UTC.
+Last updated: 2026-10-06 UTC.
 
-Bibites Multiverse `0.3.11` is public. The first announced service period runs from
-**August 14 through November 14, 2026**, and reminders begin 30 days before the end.
+Bibites Multiverse is paused. The hosted service was shut down on October 6, 2026, before the
+previously announced November 14 end date. No separate closure notice was published. The public
+source, release packages, and documentation remain available, but enrollment, relay, archive,
+map, health, and broadcast endpoints are unavailable.
 
 ## Current public phase
 
-M5 delivered the public release, hosted service, participant packages, and support guides.
-The public experiment now collects the evidence for the M5 exit test.
+M5 delivered the public release, hosted service, participant packages, and support guides. The
+hosted experiment is now paused. Its final infrastructure backups and private operator receipts
+are retained outside this public repository.
 
 The exit test requires all of these results:
 
@@ -16,13 +19,18 @@ The exit test requires all of these results:
 - At least 72 hours of continuous operation.
 - No operator action on a participant's computer.
 
-Use the [production-health dashboard](https://bibitesmultiverse.com/health) for current test,
-service, host, and coverage results. Use the
-[live map](https://bibitesmultiverse.com/live) for current worlds and migrations.
+The experiment did not establish the complete exit test before shutdown. In particular, issue
+[#99](https://github.com/jpinedaa/bibites-multiverse/issues/99) recorded an unresolved durability
+gap in lost-forward totals. That limitation is retained as historical backlog and is not scheduled
+for implementation while the project is paused.
 
-## Current production health
+## Final hosted production record
 
-The production-health dashboard is live. It organizes production into one system map and four
+The remainder of this section records the last documented production state before shutdown.
+Present-tense wording below describes that historical snapshot; its linked hosted pages are no
+longer available.
+
+The production-health dashboard organized production into one system map and four
 visual layers: Compute, Cloud and services, Application and traffic, and Archive and data. Eight
 headline signals show checks, worlds, migration flow, records, gaps, CPU, memory, and disk. Host
 and TCP charts use the bounded two-hour service-host window. Check matrices, world grids, service
@@ -30,7 +38,7 @@ memory bars, pipeline stages, and a coverage strip show the other live results. 
 each static and dynamic visual. Full charts show UTC x-axis values and exact values under pointer
 or keyboard inspection.
 
-Production runs exact public commit [`24eb13d`](https://github.com/jpinedaa/bibites-multiverse/commit/24eb13dd4bd5ea4bef95f7c011224c08a07a830a),
+Production last ran exact public commit [`24eb13d`](https://github.com/jpinedaa/bibites-multiverse/commit/24eb13dd4bd5ea4bef95f7c011224c08a07a830a),
 deployed 2026-09-01T00:47Z by a gated archive restart with a 125-second participant outage and a
 complete record. That build carries commit [`2564ea1`](https://github.com/jpinedaa/bibites-multiverse/commit/2564ea19f86898ffe756b4c9dfe08d910c45190e),
 which makes a stopped traffic producer publish gaps instead of reusing an old request window.
@@ -323,13 +331,13 @@ identity links. Ledger and lineage overflow were zero. Cycle, walk, and node-cap
 zero. Remaining roots now distinguish seed stock, missing raw ancestry, recorded family roots,
 and genuinely ambiguous evidence. They are not derived cycle cuts.
 
-## Hosted service
+## Hosted service (historical)
 
 This section states the terms the hosted map operates under. It is not a health report.
 Every service notice — planned work, a change of terms — is published on the
 [announcements page](https://bibitesmultiverse.com/announcements/).
 
-| Item | Current state |
+| Item | Last recorded state |
 |---|---|
 | Network protocol in force | The active hosted relay and archive speak `contract-b/4.2` at exact source `24eb13d`. Older worlds that speak 4.0 or 4.1 still join because the new attempt proof is optional. Slot 7 runs the `fdb707e` downtime-restore sidecar, and the five second-machine Windows worlds (slots 9, 13–16) run release `0.3.11`. The six cloud-world sidecars await the same update. |
 | Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
@@ -493,7 +501,7 @@ credential are in the data root beside that folder rather than inside it. Both r
 | M2 — two simulations on one machine | Complete |
 | M3 — remote LAN ring and archive | Complete |
 | M4 — resilient grid and observability | Complete |
-| M5 — public release | Release delivered. Public evidence phase open. |
+| M5 — public release | Release delivered. Hosted evidence phase paused on 2026-10-06. |
 | M6 — direct peer-to-peer transport | Future work |
 | M7 — ecosystem completeness | Future work |
 
@@ -502,13 +510,7 @@ Read the [system design](system_decomposition.md) for milestone scope. Read the
 
 ## Follow the project
 
-- Read the [participant guide](docs/README.md) before you connect a world.
-- Open the [public map](https://bibitesmultiverse.com/live) to explore migrations and lineages.
-- Open the [production-health dashboard](https://bibitesmultiverse.com/health) to see current
-  production tests, service health, host performance, and coverage gaps.
-- Read the [announcements page](https://bibitesmultiverse.com/announcements/) for service notices.
-  It is the only channel the service publishes them on.
-- The optional [shared broadcast](https://bibitesmultiverse.com/watch) follows one participant
-  world on the map. It is relevant only when a publisher is available.
-- Use [GitHub issues](https://github.com/jpinedaa/bibites-multiverse/issues) for defects and
-  experiment proposals.
+- Read the [participant guide](docs/README.md) as a record of how the hosted experiment worked.
+- Browse the source and published releases in this repository.
+- Use [GitHub issues](https://github.com/jpinedaa/bibites-multiverse/issues) only for repository
+  defects or reproducible local development work while the hosted project is paused.
