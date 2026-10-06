@@ -381,6 +381,14 @@ appends the keys that moved, and the file is rewritten whole when it grows past
 `3` times the state it holds. So the `123 MiB` a day is write volume and not
 growth. The file on disk stays around `20 MB` for the workload above.
 
+Startup reads this file as a stream of committed save batches. Its temporary
+memory is therefore the largest batch, not the size of `rollup.jsonl`. This
+matters when the live aggregate itself is large: a compacted file can be
+gigabytes, but startup must not hold a second whole-file copy beside the maps it
+is rebuilding. Builds before this streaming reader did hold that copy. Size
+those builds for the file plus the rebuilt state, or upgrade before restarting
+them on a constrained host.
+
 **The save interval does not bound loss**, which is what makes it a free knob:
 everything behind the sidecar's cursor is still in the raw record and the next
 start folds it. It trades write volume against a few seconds of replay tail, and

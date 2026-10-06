@@ -94,6 +94,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -532,22 +533,30 @@ func (st *rollupState) lineAtOrBefore(atMs int64) (LedgerPos, bool) {
 // recognized format-2 predecessor returns errLineageRollupRebuild instead. Its
 // missing lineage identity requires the recorded raw-completeness operation.
 func loadRollupState(path string) (*rollupState, bool, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, true, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	if len(b) == 0 {
+	defer f.Close()
+
+	// The sidecar is append-only between compactions and can therefore be much
+	// larger than the live state it describes. Retaining the whole file beside
+	// the aggregate maps made a large but valid sidecar able to exhaust the
+	// service host before the archive listened. One save batch is the transaction
+	// boundary, so it is also the most history this replay has to retain at once.
+	r := bufio.NewReader(f)
+	headLine, readErr := r.ReadBytes('\n')
+	if readErr != nil && readErr != io.EOF {
+		return nil, false, readErr
+	}
+	if len(headLine) == 0 {
 		return nil, true, nil
 	}
-	lines := splitLines(b)
-	if len(lines) == 0 {
-		return nil, false, nil
-	}
 	var head rollupLine
-	if json.Unmarshal(lines[0], &head) != nil || head.R != "h" {
+	if json.Unmarshal(headLine, &head) != nil || head.R != "h" {
 		return nil, false, nil
 	}
 	if head.V == 2 && rollupVersion == 3 {
@@ -575,10 +584,33 @@ func loadRollupState(path string) (*rollupState, bool, error) {
 	// when its floor line arrives makes a save all-or-nothing on replay, which is
 	// the discipline the sidecar journal already applies to its own writes.
 	var batch []rollupLine
-	for i := 1; i < len(lines); i++ {
+	for {
+		line, readErr := r.ReadBytes('\n')
+		if readErr != nil && readErr != io.EOF {
+			return nil, false, readErr
+		}
+		if len(line) == 0 {
+			break
+		}
+		// splitLines ignored empty physical lines. Preserve that rule while
+		// consuming the file one physical line at a time.
+		if len(line) == 1 && line[0] == '\n' {
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
 		var rec rollupLine
-		if json.Unmarshal(lines[i], &rec) != nil {
-			if i == len(lines)-1 {
+		if json.Unmarshal(line, &rec) != nil {
+			last := readErr == io.EOF
+			if !last {
+				_, peekErr := r.Peek(1)
+				last = peekErr == io.EOF
+				if peekErr != nil && peekErr != io.EOF {
+					return nil, false, peekErr
+				}
+			}
+			if last {
 				// The torn tail of an interrupted write. Everything before it is
 				// good, which is the rule the ledger, the metrics file and the
 				// brain sidecar all apply.
@@ -595,6 +627,9 @@ func loadRollupState(path string) (*rollupState, bool, error) {
 		}
 		st.apply(rec)
 		batch = batch[:0]
+		if readErr == io.EOF {
+			break
+		}
 	}
 	// Whatever is left never got its floor line: the save that wrote it did not
 	// finish, and it is dropped WHOLE rather than half-applied.
